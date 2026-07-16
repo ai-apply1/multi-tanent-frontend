@@ -1,6 +1,6 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ImageOff, Loader2, Lock, Settings } from "lucide-react";
+import { ImageOff, Loader2, Lock, Settings, Trash2, Upload } from "lucide-react";
 import toast from "react-hot-toast";
 import {
   Card,
@@ -15,7 +15,11 @@ import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useOrganization } from "@/features/organization/useOrganization";
-import { updateOrganization } from "@/features/organization/organizationApi";
+import {
+  presignLogo,
+  updateOrganization,
+  uploadLogoToPresignedUrl,
+} from "@/features/organization/organizationApi";
 import type {
   OrganizationSettings,
   OrgProfile,
@@ -54,7 +58,19 @@ function loadTimezones(): string[] {
 const TIMEZONES = loadTimezones();
 const TIMEZONE_OPTIONS = TIMEZONES.map((value) => ({ value }));
 
-const isHttpUrl = (value: string) => /^https?:\/\/\S+$/i.test(value);
+/**
+ * Mirrors the backend's `ALLOWED_LOGO_CONTENT_TYPES` / `MAX_LOGO_BYTES`. The
+ * presign is what S3 signs the PUT for, so a type this list allows but the
+ * backend doesn't surfaces as a 422 from our own API, not an S3 error.
+ */
+const ALLOWED_LOGO_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/svg+xml",
+  "image/webp",
+] as const;
+const MAX_LOGO_BYTES = 2 * 1024 * 1024;
+const LOGO_ACCEPT = ALLOWED_LOGO_TYPES.join(",");
 
 const toInt = (value: string) => {
   const n = Number(value);
@@ -69,7 +85,6 @@ export function OrgSettingsPage() {
   const canWrite = user?.role === "org_admin";
 
   const [name, setName] = useState("");
-  const [logoUrl, setLogoUrl] = useState("");
   const [maxAttempts, setMaxAttempts] = useState("");
   const [expiryDays, setExpiryDays] = useState("");
   const [timezone, setTimezone] = useState("");
@@ -78,21 +93,47 @@ export function OrgSettingsPage() {
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [logoBroken, setLogoBroken] = useState(false);
 
+  /**
+   * The logo is an upload, not a text field, so it doesn't follow the
+   * "edit → compare to profile" shape of the others:
+   *
+   * - `logoKey === null` means untouched; the PATCH omits it entirely.
+   * - a string means pending — either a fresh key (uploaded, not yet saved)
+   *   or `""` (remove on save).
+   *
+   * `localPreview` is an object URL for the file just picked, so the preview
+   * updates before the save round-trips. Falls back to the server's
+   * `org.logoUrl` whenever there's no pending change.
+   */
+  const [logoKey, setLogoKey] = useState<string | null>(null);
+  const [localPreview, setLocalPreview] = useState<string | null>(null);
+  const [uploadPct, setUploadPct] = useState<number | null>(null);
+  const [logoError, setLogoError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Seed once the profile lands, and re-seed after a save so the form's
   // baseline is whatever the server last confirmed.
   useEffect(() => {
     if (!org) return;
     setName(org.name);
-    setLogoUrl(org.logoUrl);
     setMaxAttempts(String(org.settings.maxInterviewAttempts));
     setExpiryDays(String(org.settings.interviewExpiryDays));
     setTimezone(org.settings.timezone);
     setTouched({});
+    setLogoKey(null);
+    setLogoError(null);
   }, [org]);
 
   useEffect(() => {
     setLogoBroken(false);
-  }, [logoUrl]);
+  }, [org?.logoUrl, localPreview]);
+
+  // Object URLs leak until revoked, and this one outlives its <img> on every
+  // re-pick and on unmount.
+  useEffect(() => {
+    if (!localPreview) return;
+    return () => URL.revokeObjectURL(localPreview);
+  }, [localPreview]);
 
   const saveMutation = useMutation({
     mutationFn: (payload: UpdateOrganizationPayload) =>
@@ -107,11 +148,58 @@ export function OrgSettingsPage() {
       toast.error(apiError(err, "Could not update organization.")),
   });
 
+  /**
+   * Pick → validate → presign → PUT straight to S3. The key is only held in
+   * state; the org doesn't point at it until Save. An abandoned upload just
+   * orphans an object under this org's own logo prefix.
+   */
+  const handleLogoFile = async (file: File) => {
+    setLogoError(null);
+
+    if (!(ALLOWED_LOGO_TYPES as readonly string[]).includes(file.type)) {
+      setLogoError("Use a PNG, JPEG, SVG or WebP image.");
+      return;
+    }
+    if (file.size > MAX_LOGO_BYTES) {
+      setLogoError("That image is over 2 MB — use a smaller one.");
+      return;
+    }
+
+    setUploadPct(0);
+    try {
+      const presigned = await presignLogo({
+        contentType: file.type,
+        sizeBytes: file.size,
+        fileName: file.name,
+      });
+      await uploadLogoToPresignedUrl(
+        presigned.uploadUrl,
+        file,
+        presigned.contentType,
+        setUploadPct,
+      );
+      setLogoKey(presigned.key);
+      setLocalPreview(URL.createObjectURL(file));
+    } catch (err) {
+      setLogoError(apiError(err, "Could not upload that image."));
+    } finally {
+      setUploadPct(null);
+      // Let the same file be re-picked after a failure — without this the
+      // input's value is unchanged and onChange never fires again.
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const removeLogo = () => {
+    setLogoKey("");
+    setLocalPreview(null);
+    setLogoError(null);
+  };
+
+  const previewUrl = localPreview ?? (logoKey === "" ? "" : (org?.logoUrl ?? ""));
+  const isUploading = uploadPct !== null;
+
   const nameError = name.trim().length === 0 ? "A name is required." : null;
-  const logoError =
-    logoUrl.trim() && !isHttpUrl(logoUrl.trim())
-      ? "Enter a full URL starting with http:// or https://."
-      : null;
   const attemptsValue = toInt(maxAttempts);
   const attemptsError =
     Number.isNaN(attemptsValue) ||
@@ -134,7 +222,7 @@ export function OrgSettingsPage() {
       : null;
 
   const hasErrors = Boolean(
-    nameError || logoError || attemptsError || expiryError || timezoneError,
+    nameError || attemptsError || expiryError || timezoneError,
   );
 
   // Only changed fields are sent. The PATCH is partial and settings are written
@@ -142,7 +230,10 @@ export function OrgSettingsPage() {
   const buildPatch = (profile: OrgProfile): UpdateOrganizationPayload => {
     const patch: UpdateOrganizationPayload = {};
     if (name.trim() !== profile.name) patch.name = name.trim();
-    if (logoUrl.trim() !== profile.logoUrl) patch.logoUrl = logoUrl.trim();
+    // null = untouched. Any string (including "" for removal) is a change —
+    // there's no `logoKey` on the profile to diff against, since responses
+    // carry the resolved URL instead.
+    if (logoKey !== null) patch.logoKey = logoKey;
     const settings: Partial<OrganizationSettings> = {};
     if (attemptsValue !== profile.settings.maxInterviewAttempts) {
       settings.maxInterviewAttempts = attemptsValue;
@@ -159,23 +250,25 @@ export function OrgSettingsPage() {
 
   const patch = org ? buildPatch(org) : {};
   const isDirty = Object.keys(patch).length > 0;
-  const canSave = canWrite && isDirty && !hasErrors && !saveMutation.isPending;
+  const canSave =
+    canWrite && isDirty && !hasErrors && !isUploading && !saveMutation.isPending;
 
   const reset = () => {
     if (!org) return;
     setName(org.name);
-    setLogoUrl(org.logoUrl);
     setMaxAttempts(String(org.settings.maxInterviewAttempts));
     setExpiryDays(String(org.settings.interviewExpiryDays));
     setTimezone(org.settings.timezone);
     setTouched({});
+    setLogoKey(null);
+    setLocalPreview(null);
+    setLogoError(null);
   };
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
     setTouched({
       name: true,
-      logoUrl: true,
       maxAttempts: true,
       expiryDays: true,
       timezone: true,
@@ -288,30 +381,27 @@ export function OrgSettingsPage() {
             </div>
 
             <div className="flex flex-col gap-2.5">
-              <Label htmlFor="org-logo">Logo URL</Label>
-              <Input
-                id="org-logo"
-                value={logoUrl}
-                onChange={(e) => setLogoUrl(e.target.value)}
-                onBlur={() => setTouched((t) => ({ ...t, logoUrl: true }))}
-                placeholder="https://cdn.example.com/logo.png"
-                disabled={!canWrite}
-                aria-invalid={Boolean(touched.logoUrl && logoError)}
-              />
-              {touched.logoUrl && logoError ? (
+              <Label htmlFor="org-logo">Logo</Label>
+              {logoError ? (
                 <p className="text-xs text-destructive">{logoError}</p>
               ) : (
                 <p className="text-xs text-muted-foreground">
                   This logo goes out on every candidate invite email and heads
                   the screening page candidates take their interview on — for
                   most candidates it&apos;s the only branding they ever see.
-                  Leave it empty to fall back to the Jobjen mark.
+                  PNG, JPEG, SVG or WebP, up to 2 MB. Remove it to fall back to
+                  the Jobjen mark.
                 </p>
               )}
               <div className="flex h-20 items-center justify-center rounded-lg border border-dashed border-border bg-muted/30 px-4">
-                {logoUrl.trim() && !logoError && !logoBroken ? (
+                {isUploading ? (
+                  <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Uploading… {uploadPct}%
+                  </span>
+                ) : previewUrl && !logoBroken ? (
                   <img
-                    src={logoUrl.trim()}
+                    src={previewUrl}
                     alt={`${name || "Organization"} logo preview`}
                     className="max-h-12 max-w-[14rem] object-contain"
                     onError={() => setLogoBroken(true)}
@@ -320,11 +410,53 @@ export function OrgSettingsPage() {
                   <span className="flex items-center gap-2 text-xs text-muted-foreground">
                     <ImageOff className="h-4 w-4" />
                     {logoBroken
-                      ? "That URL didn't load — candidates would see the fallback mark."
+                      ? "That image didn't load — candidates would see the fallback mark."
                       : "No logo set — the Jobjen mark is used instead."}
                   </span>
                 )}
               </div>
+              {canWrite ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={fileInputRef}
+                    id="org-logo"
+                    type="file"
+                    accept={LOGO_ACCEPT}
+                    className="sr-only"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) void handleLogoFile(file);
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={isUploading}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Upload className="mr-2 h-4 w-4" />
+                    {previewUrl ? "Replace logo" : "Upload logo"}
+                  </Button>
+                  {previewUrl ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={isUploading}
+                      onClick={removeLogo}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Remove
+                    </Button>
+                  ) : null}
+                  {logoKey !== null && !isUploading ? (
+                    <span className="text-xs text-muted-foreground">
+                      Not saved yet — hit Save changes.
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           </CardContent>
         </Card>
