@@ -1,0 +1,326 @@
+import axios, { AxiosError, type AxiosRequestConfig, type InternalAxiosRequestConfig } from "axios"
+import {
+  decryptBody,
+  encryptBody,
+  invalidateCryptoBootstrap,
+  makeRequestCrypto,
+  type EncryptedEnvelope,
+  type RequestCrypto
+} from "@/lib/crypto"
+import { BASIC_AUTH_HEADER } from "@/lib/basicAuth"
+
+/**
+ * Default request headers sent on every backend call.
+ *
+ * `Authorization: Basic <…>` is added when the build was configured
+ * with `VITE_API_BASIC_AUTH(_USER/_PASS)`. The backend's perimeter
+ * `BasicAuthMiddleware` runs in front of every route — including the
+ * crypto bootstrap and the admin login — so this header has to be on
+ * the request the very first time the SPA touches the API, before the
+ * cookie-based admin session even exists.
+ */
+const defaultHeaders: Record<string, string> = {
+  "X-Requested-With": "XMLHttpRequest"
+}
+if (BASIC_AUTH_HEADER) defaultHeaders.Authorization = BASIC_AUTH_HEADER
+
+/**
+ * Absolute origin of jobjen-backend (no trailing slash, no `/api`).
+ *
+ * The app talks to the backend DIRECTLY in every environment — there's no
+ * Vite dev proxy and no Vercel `/api` rewrite. Set `VITE_API_BASE_URL`
+ * per deployment:
+ *   - local dev   → http://localhost:3001 (the default below)
+ *   - production  → https://api.jobjen.com
+ *   - dev branch  → the dev backend origin (e.g. the Railway dev URL)
+ *
+ * Calls are therefore cross-origin, so the target backend must allow this
+ * app's origin via CORS. `admin.jobjen.com` ↔ `api.jobjen.com` (and
+ * `localhost:5174` ↔ `localhost:3001`) are same-SITE, so `SameSite=Lax`
+ * cookies ride along. Only a cross-SITE pair (e.g. `*.vercel.app` ↔
+ * `*.up.railway.app`) needs `SameSite=None; Secure` on the backend.
+ */
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001").replace(
+  /\/+$/,
+  ""
+)
+
+/**
+ * Resolve a backend path (e.g. `/api/admin/interviews/:id/video`) to an
+ * absolute URL against `API_BASE_URL`.
+ *
+ * Use this for the handful of requests that DON'T go through the axios
+ * instance below — the crypto bootstrap fetch and the media elements
+ * (`<video>`, hls.js) whose URLs the browser would otherwise resolve
+ * against the page origin, not the axios `baseURL`.
+ */
+export function apiUrl(path: string): string {
+  // Already an absolute URL (e.g. a direct S3 link) — leave it alone.
+  if (/^https?:\/\//i.test(path)) return path
+  return `${API_BASE_URL}${path.startsWith("/") ? "" : "/"}${path}`
+}
+
+/**
+ * The admin app uses cookie-auth (httpOnly access + refresh tokens).
+ * `withCredentials: true` is required so the browser sends cookies on every
+ * (cross-origin) request to the backend. Keep the SPA and the API on the
+ * same parent domain (e.g. *.jobjen.com) so SameSite=Lax cookies work; for
+ * a cross-site pair set SAME_SITE=none + SECURE=true on the backend.
+ */
+export const api = axios.create({
+  baseURL: `${API_BASE_URL}/api`,
+  withCredentials: true,
+  headers: defaultHeaders
+})
+
+/**
+ * URLs that must NEVER trigger the refresh-and-retry flow:
+ *   - login    → 401 here means "wrong password", not "expired session".
+ *   - refresh  → 401 here means the refresh token itself is invalid; recursing
+ *                would loop forever.
+ *   - logout   → 401 here means we were already logged out. No retry needed.
+ *
+ * Crucially, `/admin/auth/me` is NOT in this list. A 401 from /me is
+ * exactly the case we want to recover from: the access cookie has expired
+ * but the refresh cookie is still valid. Refresh once, retry /me, the user
+ * stays signed in. (Treating /me like the other auth endpoints was the
+ * bug that made sessions feel like they expired after 15 minutes.)
+ */
+const AUTH_ENDPOINTS_NO_REFRESH = [
+  "/admin/auth/login",
+  "/admin/auth/refresh",
+  "/admin/auth/logout"
+]
+
+function shouldSkipRefresh(url: string | undefined): boolean {
+  if (!url) return false
+  return AUTH_ENDPOINTS_NO_REFRESH.some((ep) => url === ep || url.startsWith(`${ep}?`))
+}
+
+interface RetryConfig extends InternalAxiosRequestConfig {
+  _retry?: boolean
+}
+
+/**
+ * Single-flight refresh: if multiple requests 401 at once we only call /refresh
+ * one time and replay them all once the rotation completes (or all fail if it
+ * doesn't).
+ */
+let refreshInFlight: Promise<void> | null = null
+
+async function refreshSession(): Promise<void> {
+  if (!refreshInFlight) {
+    refreshInFlight = api
+      .post("/admin/auth/refresh")
+      .then(() => undefined)
+      .finally(() => {
+        refreshInFlight = null
+      })
+  }
+  return refreshInFlight
+}
+
+const onAuthFailureSubscribers = new Set<() => void>()
+
+export function subscribeToAuthFailure(cb: () => void) {
+  onAuthFailureSubscribers.add(cb)
+  return () => {
+    onAuthFailureSubscribers.delete(cb)
+  }
+}
+
+function notifyAuthFailure() {
+  onAuthFailureSubscribers.forEach((cb) => {
+    try {
+      cb()
+    } catch {
+      // ignore
+    }
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Encrypted-traffic layer
+//
+// Each outgoing request gets a fresh AES-256-GCM key, wrapped with the
+// server's RSA-OAEP-256 public key. We attach the wrapped key as
+// `X-Crypto-Key`, AES-encrypt the JSON body if any, and decrypt the
+// response with the same key when the server signals
+// `X-Crypto-Encrypted: 1`.
+//
+// The 401-refresh interceptor below then runs on top — by the time it
+// inspects `error.response.data`, the encryption response interceptor
+// has already decrypted the body, so the existing refresh-and-retry
+// flow keeps working unchanged. On retry the request re-enters the
+// request interceptor and gets a brand-new AES key.
+// ---------------------------------------------------------------------------
+
+interface CryptoRequestMeta {
+  __crypto?: RequestCrypto
+  /**
+   * Snapshot of `config.data` taken BEFORE encryption so a kid-mismatch
+   * retry can replay the ORIGINAL payload — without it the retry would
+   * re-encrypt the already-encrypted envelope from the failed first
+   * attempt and fail server-side validation, forcing the user to
+   * manually refresh after every backend restart.
+   */
+  __originalData?: unknown
+  _retriedAfterKidMismatch?: boolean
+}
+
+const SKIP_HEADER = "x-skip-crypto"
+
+function shouldSkipEntirely(config: InternalAxiosRequestConfig): boolean {
+  const skipHeader = config.headers?.[SKIP_HEADER]
+  if (skipHeader === "1" || skipHeader === 1 || skipHeader === true) return true
+  const url = config.url ?? ""
+  if (url.includes("/crypto/public-key")) return true
+  return false
+}
+
+function isBinaryBody(data: unknown): boolean {
+  if (typeof FormData !== "undefined" && data instanceof FormData) return true
+  if (typeof Blob !== "undefined" && data instanceof Blob) return true
+  if (data instanceof ArrayBuffer) return true
+  if (ArrayBuffer.isView(data as ArrayBufferView)) return true
+  return false
+}
+
+api.interceptors.request.use(async (config) => {
+  if (shouldSkipEntirely(config)) {
+    if (config.headers) delete config.headers[SKIP_HEADER]
+    return config
+  }
+
+  const meta = config as InternalAxiosRequestConfig & CryptoRequestMeta
+
+  const reqCrypto = await makeRequestCrypto()
+  meta.__crypto = reqCrypto
+
+  config.headers = config.headers ?? ({} as InternalAxiosRequestConfig["headers"])
+  config.headers["X-Crypto-Key"] = reqCrypto.wrappedKeyB64
+  config.headers["X-Crypto-Kid"] = reqCrypto.kid
+
+  const isGetLike = config.method?.toLowerCase() === "get"
+  const hasBody = config.data !== undefined && config.data !== null && !isGetLike
+  if (hasBody && !isBinaryBody(config.data)) {
+    if (meta.__originalData === undefined) {
+      meta.__originalData = config.data
+    }
+    const env = await encryptBody(meta.__originalData, reqCrypto.aesKey)
+    config.data = env
+    config.headers["Content-Type"] = "application/json"
+  }
+
+  config.responseType = "json"
+  return config
+})
+
+// Decrypt successful responses + decrypt + (maybe) recover on errors.
+api.interceptors.response.use(
+  async (response) => {
+    if (response.headers["x-crypto-encrypted"] !== "1") return response
+    const reqCrypto = (response.config as CryptoRequestMeta).__crypto
+    if (!reqCrypto) {
+      throw new Error("Server returned an encrypted response but no AES key was available.")
+    }
+    const env = response.data as EncryptedEnvelope
+    if (env && typeof env.iv === "string" && typeof env.ciphertext === "string") {
+      response.data = await decryptBody(env, reqCrypto.aesKey)
+    }
+    return response
+  },
+  async (error: AxiosError) => {
+    const response = error.response
+    const config = error.config as
+      | (InternalAxiosRequestConfig & CryptoRequestMeta)
+      | undefined
+
+    // Decrypt error bodies first so all downstream handlers (including
+    // the 401-refresh logic below) can see the real payload.
+    if (
+      response?.headers?.["x-crypto-encrypted"] === "1" &&
+      config?.__crypto &&
+      response.data &&
+      typeof (response.data as EncryptedEnvelope).iv === "string"
+    ) {
+      try {
+        response.data = await decryptBody(
+          response.data as EncryptedEnvelope,
+          config.__crypto.aesKey
+        )
+      } catch {
+        // Leave it as-is.
+      }
+    }
+
+    // Key rotation: if the server tells us the kid is stale, drop the
+    // cached public key and retry once with a fresh handshake. Must
+    // succeed transparently — admins should never see the encryption
+    // layer recover from a backend restart.
+    if (response?.status === 400 && config) {
+      const data = response.data as
+        | { code?: string; message?: string }
+        | undefined
+      const code = typeof data?.code === "string" ? data.code : undefined
+      const message = typeof data?.message === "string" ? data.message : undefined
+
+      // Defense-in-depth: older deployments don't echo `code` on the
+      // wire. Fall back to a message-keyword check so the experience
+      // stays smooth on a mixed-version cluster.
+      const messageLooksLikeKidMismatch =
+        typeof message === "string" &&
+        /encryption key id|public key|crypto[_-]?(kid|unwrap)/i.test(message)
+
+      const isCryptoRotation =
+        code === "CRYPTO_KID_MISMATCH" ||
+        code === "CRYPTO_UNWRAP_FAILED" ||
+        code === "CRYPTO_BODY_DECRYPT_FAILED" ||
+        messageLooksLikeKidMismatch
+
+      if (isCryptoRotation) {
+        invalidateCryptoBootstrap()
+        if (!config._retriedAfterKidMismatch) {
+          config._retriedAfterKidMismatch = true
+          delete config.__crypto
+          // Restore the plaintext body — `config.data` currently holds
+          // the encrypted envelope from the failed first attempt.
+          if (config.__originalData !== undefined) {
+            config.data = config.__originalData
+          }
+          return api(config as AxiosRequestConfig)
+        }
+      }
+    }
+
+    return Promise.reject(error)
+  }
+)
+
+api.interceptors.response.use(
+  (response) => response,
+  async (error: AxiosError) => {
+    const original = error.config as RetryConfig | undefined
+    const status = error.response?.status
+
+    if (
+      status !== 401 ||
+      !original ||
+      original._retry ||
+      shouldSkipRefresh(original.url)
+    ) {
+      return Promise.reject(error)
+    }
+
+    original._retry = true
+    try {
+      await refreshSession()
+      return api(original as AxiosRequestConfig)
+    } catch (refreshError) {
+      notifyAuthFailure()
+      return Promise.reject(refreshError)
+    }
+  }
+)
+
+export default api

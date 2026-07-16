@@ -1,0 +1,17 @@
+export const ROUTES = {
+  LOGIN: "/login",
+  DASHBOARD: "/dashboard",
+  OVERVIEW: "/dashboard/overview",
+  APPLICANTS: "/dashboard/applicants",
+  ACTIVE_CANDIDATES: "/dashboard/active-candidates",
+  LINK_REQUESTS: "/dashboard/link-requests",
+  INTERVIEW_QUESTIONS: "/dashboard/interview/questions",
+  TECHNICAL_DEMO_VIDEOS: "/dashboard/technical/demo-videos",
+  TRAINING_MODULES: "/dashboard/training/modules",
+  TRAINING_ANALYTICS: "/dashboard/training/analytics",
+  LANDING_APPLY_VIDEO: "/dashboard/landing/apply-video",
+  LANDING_CASE_STUDIES: "/dashboard/landing/case-studies",
+  INTERVIEW_DEMO_VIDEO: "/dashboard/interview/demo-video",
+  TEMPLATES: "/dashboard/templates",
+  PIPELINE_BUILDER: "/dashboard/settings/pipeline",
+} as const;
