@@ -4,7 +4,6 @@ import { yupResolver } from "@hookform/resolvers/yup"
 import { Navigate, useLocation, useNavigate } from "react-router-dom"
 import * as yup from "yup"
 import toast from "react-hot-toast"
-import axios from "axios"
 import { Eye, EyeOff, Loader2 } from "lucide-react"
 import { BrandLogo } from "@/components/BrandLogo"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -12,6 +11,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useAuth } from "@/features/auth/AuthContext"
+import { errorMessage } from "@/lib/errors"
 import { ROUTES } from "@/routes"
 
 const schema = yup.object({
@@ -25,7 +25,7 @@ interface FormValues {
 }
 
 export function LoginPage() {
-  const { login, isAuthenticating, admin } = useAuth()
+  const { login, isAuthenticating, user } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [showPassword, setShowPassword] = useState(false)
@@ -39,7 +39,7 @@ export function LoginPage() {
     defaultValues: { email: "", password: "" }
   })
 
-  if (admin) {
+  if (user) {
     return <Navigate to={ROUTES.OVERVIEW} replace />
   }
 
@@ -49,11 +49,7 @@ export function LoginPage() {
       const dest = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || ROUTES.OVERVIEW
       navigate(dest, { replace: true })
     } catch (err) {
-      const message =
-        axios.isAxiosError(err) && (err.response?.data as { message?: string } | undefined)?.message
-          ? (err.response!.data as { message: string }).message
-          : "Login failed. Check your credentials and try again."
-      toast.error(message)
+      toast.error(errorMessage(err, "Login failed. Check your credentials and try again."))
     }
   })
 

@@ -1,17 +1,25 @@
 export const ROUTES = {
   LOGIN: "/login",
-  DASHBOARD: "/dashboard",
   OVERVIEW: "/dashboard/overview",
-  APPLICANTS: "/dashboard/applicants",
-  ACTIVE_CANDIDATES: "/dashboard/active-candidates",
-  LINK_REQUESTS: "/dashboard/link-requests",
-  INTERVIEW_QUESTIONS: "/dashboard/interview/questions",
-  TECHNICAL_DEMO_VIDEOS: "/dashboard/technical/demo-videos",
-  TRAINING_MODULES: "/dashboard/training/modules",
-  TRAINING_ANALYTICS: "/dashboard/training/analytics",
-  LANDING_APPLY_VIDEO: "/dashboard/landing/apply-video",
-  LANDING_CASE_STUDIES: "/dashboard/landing/case-studies",
-  INTERVIEW_DEMO_VIDEO: "/dashboard/interview/demo-video",
-  TEMPLATES: "/dashboard/templates",
-  PIPELINE_BUILDER: "/dashboard/settings/pipeline",
+  JOBS: "/dashboard/jobs",
+  JOB_NEW: "/dashboard/jobs/new",
+  JOB_DETAIL: "/dashboard/jobs/:jobId",
+  JOB_EDIT: "/dashboard/jobs/:jobId/edit",
+  /** The kanban board for a single job — the board endpoint is per-job. */
+  JOB_CANDIDATES: "/dashboard/jobs/:jobId/candidates",
+  CANDIDATES: "/dashboard/candidates",
+  QUESTIONS: "/dashboard/questions",
+  ORG_SETTINGS: "/dashboard/settings",
+  TEAM: "/dashboard/team",
 } as const;
+
+// Builders for the `:jobId` routes above. The pattern constants are what
+// `<Route path>` wants; these are what every `navigate()` / `<Link to>`
+// wants — so the param is interpolated in exactly one place per route.
+export const jobDetail = (jobId: string): string => `/dashboard/jobs/${jobId}`;
+
+export const jobEdit = (jobId: string): string =>
+  `/dashboard/jobs/${jobId}/edit`;
+
+export const jobCandidates = (jobId: string): string =>
+  `/dashboard/jobs/${jobId}/candidates`;

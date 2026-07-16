@@ -4,11 +4,11 @@
  * Mirrors `jobjen-ai-interview-frontend/src/lib/crypto.ts`. The two
  * deliberately stay in sync (no shared package in this monorepo) — if
  * you change the wire format here, change it there too. The only
- * difference is the bootstrap URL: the admin app uses Vite's dev proxy
- * (`/api/...`) while the candidate app talks to the backend directly.
+ * difference is the bootstrap URL, which this app resolves against
+ * `VITE_API_BASE_URL` (there is no Vite dev proxy — see `@/lib/api`).
  *
  *  - Bootstraps the server's RSA-OAEP-256 public key once on app start
- *    via `GET /api/crypto/public-key` and re-bootstraps automatically
+ *    via `GET /api/v1/crypto/public-key` and re-bootstraps automatically
  *    whenever the server says the key has rotated.
  *  - For every encrypted request we generate a fresh AES-256-GCM key,
  *    wrap it with the server's public key (`X-Crypto-Key` header), and
@@ -77,7 +77,7 @@ async function importPublicKey(jwk: JsonWebKey): Promise<CryptoKey> {
 async function fetchPublicKey(): Promise<PublicKeyBundle> {
   // Native fetch — we can't use the axios instance because that's where
   // this very layer is plugged into. The endpoint is marked
-  // `@SkipCrypto()` on the server. Sent through the Vite proxy in dev.
+  // `@SkipCrypto()` on the server.
   //
   // `cache: "no-store"` is critical: after a `CRYPTO_KID_MISMATCH` we
   // re-bootstrap to pick up the server's NEW kid. If we let the
@@ -100,7 +100,7 @@ async function fetchPublicKey(): Promise<PublicKeyBundle> {
     ""
   )
 
-  const res = await fetch(`${apiBaseUrl}/api/crypto/public-key`, {
+  const res = await fetch(`${apiBaseUrl}/api/v1/crypto/public-key`, {
     credentials: "include",
     cache: "no-store",
     headers

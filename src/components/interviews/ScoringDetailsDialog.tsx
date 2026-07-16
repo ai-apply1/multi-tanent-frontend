@@ -18,33 +18,45 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { formatScore, formatRole } from "@/features/interviews/helpers";
+import { formatScore } from "@/features/interviews/helpers";
 import type {
   DisfluencyRating,
-  FluencyResult,
-  OverallScores,
+  InterviewScores,
+  ScoringWeights,
 } from "@/features/interviews/types";
 
 /**
- * The default (documented) scoring weights, shown only as LABELS next to the
- * plugged-in numbers so a reviewer can see HOW the score was combined. The
- * authoritative result in every card is always the persisted value the backend
- * computed — we never recompute client-side, so an env-tuned weight can't make
- * the display lie. See `docs/ai-scoring.md` §7–§8.
+ * The job's fold weights when a scored row predates the snapshot
+ * (`scores.scoringWeights`). Mirrors the backend's
+ * `SCORING_WEIGHT_DEFAULTS` — 0–100, summing to 100.
  */
-const W_TECH = 0.4;
-const W_COMM = 0.6;
-const W_SUBSTANCE = 0.15;
+const WEIGHT_DEFAULTS: ScoringWeights = { technical: 60, communication: 40 };
+
+/**
+ * The communication-fold + fluency weights, shown only as LABELS next to the
+ * plugged-in numbers so a reviewer can see HOW the score was combined. Unlike
+ * the job's scoring weights (snapshotted onto every scored row), these are
+ * backend constants — the fluency split is fixed in code, the communication
+ * split is env-tunable — so they're the DOCUMENTED defaults, not necessarily
+ * what ran. The authoritative result in every card is always the persisted
+ * value the backend computed; we never recompute client-side, so a tuned
+ * weight can't make the displayed result lie.
+ */
 const W_FLUENCY = 0.85;
+const W_SUBSTANCE = 1 - W_FLUENCY;
 const W_TEMPORAL = 0.35;
 const W_LLM = 0.65;
+
+/** How far above the cut line an overall must land to earn a `strong_yes`. */
+const STRONG_YES_MARGIN = 20;
+const STRONG_YES_CAP = 90;
 
 /** 1-decimal score or an em-dash for missing/NaN. */
 function s1(n?: number | null): string {
   return formatScore(n ?? undefined, { suffix: "" });
 }
 
-/** A weight coefficient like `0.40`. */
+/** A weight coefficient like `0.85`. */
 function w(n: number): string {
   return n.toFixed(2);
 }
@@ -185,10 +197,10 @@ function FormulaCard({
 
 const DISFLUENCY_META: Record<
   DisfluencyRating,
-  { label: string; variant: "success" | "warning" | "destructive" }
+  { label: string; variant: "secondary" | "outline" | "destructive" }
 > = {
-  none: { label: "None", variant: "success" },
-  occasional: { label: "Occasional", variant: "warning" },
+  none: { label: "None", variant: "secondary" },
+  occasional: { label: "Occasional", variant: "outline" },
   frequent: { label: "Frequent", variant: "destructive" },
 };
 
@@ -196,36 +208,39 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   candidateName?: string | null;
-  overall: OverallScores;
-  fluency: FluencyResult | null;
+  scores: InterviewScores;
 }
 
 /**
  * The full "how this candidate was scored" breakdown, opened from the Overall
  * scoring section. Shows every number the backend persisted AND the formulas
- * that combine them: the overall blend, the communication fluency-dominant
- * fold, the pooled spoken-English fluency (temporal delivery metrics + the LLM
- * axes), pacing, the per-section rollup, and the supporting integrity/coverage
+ * that combine them: the job-weighted overall blend, the communication
+ * fluency-dominant fold, the pooled spoken-English fluency (temporal delivery
+ * metrics + the LLM axes), pacing, and the supporting integrity/coverage
  * stats. Every value is the persisted one — nothing is recomputed here.
  */
 export function ScoringDetailsDialog({
   open,
   onOpenChange,
   candidateName,
-  overall,
-  fluency,
+  scores,
 }: Props) {
-  const substance = overall.communicationSubstance;
+  const substance = scores.communicationSubstance;
+  const fluency = scores.fluency ?? null;
+  // The fold ran iff the floor factor was recorded AND a fluency score was
+  // produced to fold in.
   const folded =
-    typeof overall.fluencyScore === "number" &&
-    typeof overall.communicationFloor === "number";
+    typeof scores.communicationFloor === "number" &&
+    typeof fluency?.fluencyScore === "number";
   const features = fluency?.features ?? null;
   const assessment = fluency?.assessment ?? null;
   const disfluency = assessment?.disfluency?.rating
     ? DISFLUENCY_META[assessment.disfluency.rating]
     : null;
-  const categories = overall.categoryBreakdown ?? [];
-  const pacing = overall.pacing;
+  const pacing = scores.pacing;
+  const integrity = scores.integrity;
+  const weights = scores.scoringWeights ?? WEIGHT_DEFAULTS;
+  const threshold = scores.rejectionThreshold;
   const firstName = candidateName?.trim()
     ? candidateName.trim().split(/\s+/)[0]
     : "this candidate";
@@ -246,7 +261,11 @@ export function ScoringDetailsDialog({
         </DialogHeader>
 
         <div className="max-h-[70vh] space-y-5 overflow-y-auto pr-1">
-          {/* --- How the overall is built ------------------------------- */}
+          {/* --- How the overall is built -------------------------------
+
+              The fold weights and the cut line are the JOB's, snapshotted
+              onto this row at scoring time — so a later edit to the job
+              can't retroactively misexplain a score that already shipped. */}
           <section className="space-y-2">
             <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Composition
@@ -254,29 +273,37 @@ export function ScoringDetailsDialog({
             <FormulaCard
               icon={Calculator}
               title="Overall"
-              result={overall.overall}
+              result={scores.overall}
               formula={
                 <>
-                  {w(W_TECH)} × Technical ({s1(overall.technicalSkills)}) +{" "}
-                  {w(W_COMM)} × Communication ({s1(overall.communication)})
+                  {weights.technical}% × Technical ({s1(scores.technical)}) +{" "}
+                  {weights.communication}% × Communication (
+                  {s1(scores.communication)})
                 </>
               }
-              note="Passes when Overall ≥ 7 and Technical ≥ 5 (both required)."
+              note={
+                typeof threshold === "number"
+                  ? `Passes when Overall × 10 ≥ ${threshold} (the job's rejection threshold). ` +
+                    `A strong yes needs ≥ ${Math.min(threshold + STRONG_YES_MARGIN, STRONG_YES_CAP)}.`
+                  : "Passes when Overall × 10 clears the job's rejection threshold."
+              }
             />
             <div className="grid gap-2 sm:grid-cols-2">
               <FormulaCard
                 icon={Layers}
                 title="Communication"
-                result={overall.communication}
+                result={scores.communication}
                 formula={
                   folded ? (
                     <>
                       ({w(W_SUBSTANCE)} × Substance ({s1(substance)}) +{" "}
-                      {w(W_FLUENCY)} × Fluency ({s1(overall.fluencyScore)})) ×{" "}
-                      g ({s1(overall.communicationFloor)})
+                      {w(W_FLUENCY)} × Fluency ({s1(fluency?.fluencyScore)})) × g
+                      ({s1(scores.communicationFloor)})
                     </>
                   ) : (
-                    <>Substance mean ({s1(substance ?? overall.communication)})</>
+                    <>
+                      Substance mean ({s1(substance ?? scores.communication)})
+                    </>
                   )
                 }
                 note={
@@ -286,7 +313,7 @@ export function ScoringDetailsDialog({
                 }
               />
               <div className="grid grid-cols-2 gap-2">
-                <ScoreBar label="Technical" value={overall.technicalSkills} />
+                <ScoreBar label="Technical" value={scores.technical} />
                 <ScoreBar
                   label="Substance"
                   value={substance}
@@ -304,24 +331,22 @@ export function ScoringDetailsDialog({
                 Spoken-English fluency
               </h4>
               {fluency ? (
-                <span className="flex items-center gap-1.5">
-                  <Badge
-                    variant={fluency.llmMode === "audio" ? "success" : "muted"}
-                    className="gap-1 text-[10px]"
-                  >
-                    {fluency.llmMode === "audio" ? (
-                      <>
-                        <AudioLines className="h-3 w-3" />
-                        Heard the audio
-                      </>
-                    ) : (
-                      <>
-                        <Mic className="h-3 w-3" />
-                        Text-judge fallback
-                      </>
-                    )}
-                  </Badge>
-                </span>
+                <Badge
+                  variant={fluency.llmMode === "audio" ? "secondary" : "muted"}
+                  className="gap-1 text-[10px]"
+                >
+                  {fluency.llmMode === "audio" ? (
+                    <>
+                      <AudioLines className="h-3 w-3" />
+                      Heard the audio
+                    </>
+                  ) : (
+                    <>
+                      <Mic className="h-3 w-3" />
+                      Text-judge fallback
+                    </>
+                  )}
+                </Badge>
               ) : null}
             </div>
 
@@ -434,8 +459,8 @@ export function ScoringDetailsDialog({
             ) : (
               <p className="rounded-lg border border-dashed border-border p-3 text-xs text-muted-foreground">
                 Fluency wasn&apos;t scored for this interview — either there was
-                no scorable speech, or it was graded before the fluency pass
-                shipped. Communication is the substance mean alone.
+                no scorable speech, or the fold was turned off. Communication is
+                the substance mean alone.
               </p>
             )}
           </section>
@@ -464,84 +489,24 @@ export function ScoringDetailsDialog({
             </section>
           ) : null}
 
-          {/* --- Per-section rollup ------------------------------------ */}
-          {categories.length > 0 ? (
-            <section className="space-y-2">
-              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                By section
-              </h4>
-              <div className="overflow-hidden rounded-lg border border-border">
-                <table className="w-full text-xs">
-                  <thead className="bg-muted/50 text-muted-foreground">
-                    <tr>
-                      <th className="px-3 py-1.5 text-left font-medium">
-                        Section
-                      </th>
-                      <th className="px-2 py-1.5 text-right font-medium">
-                        Answered
-                      </th>
-                      <th className="px-2 py-1.5 text-right font-medium">
-                        Tech
-                      </th>
-                      <th className="px-2 py-1.5 text-right font-medium">
-                        Comm
-                      </th>
-                      <th className="px-3 py-1.5 text-right font-medium">
-                        Overall
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {categories.map((c) => (
-                      <tr
-                        key={c.category}
-                        className="border-t border-border tabular-nums"
-                      >
-                        <td className="px-3 py-1.5 text-left font-medium">
-                          {formatRole(c.category)}
-                        </td>
-                        <td className="px-2 py-1.5 text-right text-muted-foreground">
-                          {c.answered}/{c.count}
-                        </td>
-                        <td className="px-2 py-1.5 text-right">
-                          {s1(c.technical)}
-                        </td>
-                        <td className="px-2 py-1.5 text-right">
-                          {s1(c.communication)}
-                        </td>
-                        <td className="px-3 py-1.5 text-right font-semibold">
-                          {s1(c.overall)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <p className="text-[10px] text-muted-foreground">
-                Section rollups are a stat only — they don&apos;t feed the pass
-                gate. Technical uses technical questions only.
-              </p>
-            </section>
-          ) : null}
-
           {/* --- Supporting stats -------------------------------------- */}
           <section className="space-y-2">
             <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Supporting signals
             </h4>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {typeof overall.coverage === "number" ? (
+              {typeof scores.coverage === "number" ? (
                 <MetricTile
                   label="Coverage"
-                  value={pct(overall.coverage)}
+                  value={pct(scores.coverage)}
                   hint="questions answered"
                 />
               ) : null}
-              {typeof overall.integrity === "number" ? (
+              {integrity ? (
                 <div
                   className={cn(
                     "rounded-lg border px-3 py-2",
-                    overall.integrity < 6
+                    integrity.score < 6
                       ? "border-amber-500/40 bg-amber-500/10"
                       : "border-border bg-card",
                   )}
@@ -551,14 +516,14 @@ export function ScoringDetailsDialog({
                     Integrity
                   </p>
                   <p className="mt-0.5 text-sm font-semibold tabular-nums">
-                    {s1(overall.integrity)}
+                    {s1(integrity.score)}
                     <span className="text-[10px] font-normal text-muted-foreground">
                       {" "}
                       / 10
                     </span>
                   </p>
                   <p className="mt-0.5 text-[10px] leading-tight text-muted-foreground">
-                    {overall.integrity < 6
+                    {integrity.score < 6
                       ? "flag — human review"
                       : "flag-only, never auto-fails"}
                   </p>
@@ -569,8 +534,10 @@ export function ScoringDetailsDialog({
 
           <p className="flex items-start gap-1.5 pt-1 text-[10px] leading-snug text-muted-foreground">
             <Timer className="mt-0.5 h-3 w-3 shrink-0" />
-            Weights shown are the defaults; the results above are the exact
-            values the backend persisted for this interview.
+            The Technical/Communication split and the threshold above are this
+            job&apos;s, recorded at scoring time. The fluency and fold weights
+            are the backend defaults; the results are the exact values persisted
+            for this interview.
           </p>
         </div>
       </DialogContent>

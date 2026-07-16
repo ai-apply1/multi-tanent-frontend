@@ -10,8 +10,15 @@ const badgeVariants = cva(
         default: "border-transparent bg-primary/10 text-primary",
         secondary: "border-transparent bg-secondary text-secondary-foreground",
         outline: "text-foreground",
-        success: "border-transparent bg-[color-mix(in_oklch,var(--success),white_82%)] text-[var(--success)]",
-        warning: "border-transparent bg-[color-mix(in_oklch,var(--warning),white_75%)] text-[color-mix(in_oklch,var(--warning),black_30%)]",
+        // `.dark` never overrides --success/--warning, and mixing them toward
+        // white renders a near-white chip on a dark card. The dark: rules
+        // composite alpha over the surface instead (the idiom `destructive`
+        // already uses) and lighten the text to suit. Light mode is unchanged:
+        // a bare `text-warning` there would land too close to the chip.
+        success:
+          "border-transparent bg-[color-mix(in_oklch,var(--success),white_82%)] text-[var(--success)] dark:bg-success/15 dark:text-[color-mix(in_oklch,var(--success),white_35%)]",
+        warning:
+          "border-transparent bg-[color-mix(in_oklch,var(--warning),white_75%)] text-[color-mix(in_oklch,var(--warning),black_30%)] dark:bg-warning/15 dark:text-[color-mix(in_oklch,var(--warning),white_20%)]",
         destructive: "border-transparent bg-destructive/10 text-destructive",
         successSolid: "border-transparent bg-[var(--success)] text-white",
         destructiveSolid: "border-transparent bg-destructive text-white",

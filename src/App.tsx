@@ -3,10 +3,13 @@ import { GuestRoute, ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { LoginPage } from "@/pages/LoginPage";
 import { OverviewPage } from "@/pages/OverviewPage";
-import { ApplicantsPage } from "@/pages/ApplicantsPage";
-import { InterviewQuestionsPage } from "@/pages/InterviewQuestionsPage";
-import { DemoVideoPage } from "@/pages/DemoVideoPage";
-import { ApplyVideoPage } from "@/pages/ApplyVideoPage";
+import { JobsPage } from "@/pages/JobsPage";
+import { JobFormPage } from "@/pages/JobFormPage";
+import { JobDetailPage } from "@/pages/JobDetailPage";
+import { CandidatesPage } from "@/pages/CandidatesPage";
+import { QuestionBankPage } from "@/pages/QuestionBankPage";
+import { OrgSettingsPage } from "@/pages/OrgSettingsPage";
+import { TeamPage } from "@/pages/TeamPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
 import { ROUTES } from "@/routes";
 
@@ -22,8 +25,15 @@ export default function App() {
         }
       />
 
+      {/*
+       * Child paths are the absolute `ROUTES` constants rather than relative
+       * segments, so `routes.ts` stays the single source of truth for every
+       * URL in the app. React Router permits this as long as each child path
+       * starts with the parent's — which is why the parent is the literal
+       * "/dashboard" prefix those constants are built on.
+       */}
       <Route
-        path={ROUTES.DASHBOARD}
+        path="/dashboard"
         element={
           <ProtectedRoute>
             <DashboardLayout />
@@ -31,11 +41,30 @@ export default function App() {
         }
       >
         <Route index element={<Navigate to={ROUTES.OVERVIEW} replace />} />
-        <Route path="overview" element={<OverviewPage />} />
-        <Route path="applicants" element={<ApplicantsPage />} />
-        <Route path="interview/questions" element={<InterviewQuestionsPage />} />
-        <Route path="interview/demo-video" element={<DemoVideoPage />} />
-        <Route path="landing/apply-video" element={<ApplyVideoPage />} />
+        <Route path={ROUTES.OVERVIEW} element={<OverviewPage />} />
+
+        {/*
+         * JOB_NEW and JOB_DETAIL both match "/dashboard/jobs/new". Router v7
+         * ranks by specificity rather than declaration order, so the static
+         * "new" segment wins over ":jobId" wherever it sits — the ordering
+         * below is for readability, not correctness. Keep them adjacent so the
+         * overlap stays obvious to the next reader.
+         */}
+        <Route path={ROUTES.JOBS} element={<JobsPage />} />
+        <Route path={ROUTES.JOB_NEW} element={<JobFormPage />} />
+        <Route path={ROUTES.JOB_DETAIL} element={<JobDetailPage />} />
+        <Route path={ROUTES.JOB_EDIT} element={<JobFormPage />} />
+        {/* Both routes render CandidatesPage, so React would reconcile them in
+            place and carry the per-job board's filter/view onto the org-wide
+            URL. Distinct keys force a remount when crossing between them; job
+            A → job B keeps one key, so the page's own re-seed effect still
+            handles that case without a needless remount. */}
+        <Route path={ROUTES.JOB_CANDIDATES} element={<CandidatesPage key="job-scoped" />} />
+
+        <Route path={ROUTES.CANDIDATES} element={<CandidatesPage key="org-wide" />} />
+        <Route path={ROUTES.QUESTIONS} element={<QuestionBankPage />} />
+        <Route path={ROUTES.ORG_SETTINGS} element={<OrgSettingsPage />} />
+        <Route path={ROUTES.TEAM} element={<TeamPage />} />
       </Route>
 
       <Route path="/" element={<Navigate to={ROUTES.OVERVIEW} replace />} />

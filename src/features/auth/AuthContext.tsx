@@ -1,11 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import { subscribeToAuthFailure } from "@/lib/api"
 import { loginRequest, logoutRequest, meRequest } from "@/features/auth/authApi"
-import type { AdminUser } from "@/features/auth/types"
+import type { SessionUser } from "@/features/auth/types"
 
 interface AuthContextValue {
-  admin: AdminUser | null
+  user: SessionUser | null
   isInitializing: boolean
   isAuthenticating: boolean
   login: (email: string, password: string) => Promise<void>
@@ -16,7 +17,8 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [admin, setAdmin] = useState<AdminUser | null>(null)
+  const queryClient = useQueryClient()
+  const [user, setUser] = useState<SessionUser | null>(null)
   const [isInitializing, setIsInitializing] = useState(true)
   const [isAuthenticating, setIsAuthenticating] = useState(false)
   const initialized = useRef(false)
@@ -24,13 +26,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshMe = useCallback(async () => {
     try {
       const me = await meRequest()
-      setAdmin(me)
+      setUser(me)
     } catch {
-      setAdmin(null)
+      setUser(null)
     }
   }, [])
 
   useEffect(() => {
+    // StrictMode double-invokes effects in dev; without this guard the
+    // bootstrap `/me` fires twice and the second one can race the first.
     if (initialized.current) return
     initialized.current = true
     refreshMe().finally(() => setIsInitializing(false))
@@ -38,31 +42,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     return subscribeToAuthFailure(() => {
-      setAdmin(null)
+      setUser(null)
+      // The tab is never reloaded on an expired session — ProtectedRoute only
+      // routes to /login — so without this the previous org's cached rows
+      // survive in the module-level QueryClient for the next admin to log in.
+      queryClient.clear()
     })
-  }, [])
+  }, [queryClient])
 
-  const login = useCallback(async (email: string, password: string) => {
-    setIsAuthenticating(true)
-    try {
-      const next = await loginRequest(email, password)
-      setAdmin(next)
-    } finally {
-      setIsAuthenticating(false)
-    }
-  }, [])
+  const login = useCallback(
+    async (email: string, password: string) => {
+      setIsAuthenticating(true)
+      try {
+        // Clear before `setUser` so no render of the shell can ever observe
+        // the previous tenant's entries under the new identity.
+        queryClient.clear()
+        const next = await loginRequest(email, password)
+        setUser(next)
+      } finally {
+        setIsAuthenticating(false)
+      }
+    },
+    [queryClient]
+  )
 
   const logout = useCallback(async () => {
     try {
       await logoutRequest()
     } finally {
-      setAdmin(null)
+      // In the `finally` alongside `setUser`: a failing logout request still
+      // tears the session down locally, so the cache must go with it.
+      setUser(null)
+      queryClient.clear()
     }
-  }, [])
+  }, [queryClient])
 
   const value = useMemo<AuthContextValue>(
-    () => ({ admin, isInitializing, isAuthenticating, login, logout, refreshMe }),
-    [admin, isInitializing, isAuthenticating, login, logout, refreshMe]
+    () => ({ user, isInitializing, isAuthenticating, login, logout, refreshMe }),
+    [user, isInitializing, isAuthenticating, login, logout, refreshMe]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

@@ -46,7 +46,7 @@ export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "http://localh
 )
 
 /**
- * Resolve a backend path (e.g. `/api/admin/interviews/:id/video`) to an
+ * Resolve a backend path (e.g. `/api/v1/admin/interviews/:id/video`) to an
  * absolute URL against `API_BASE_URL`.
  *
  * Use this for the handful of requests that DON'T go through the axios
@@ -68,7 +68,7 @@ export function apiUrl(path: string): string {
  * a cross-site pair set SAME_SITE=none + SECURE=true on the backend.
  */
 export const api = axios.create({
-  baseURL: `${API_BASE_URL}/api`,
+  baseURL: `${API_BASE_URL}/api/v1`,
   withCredentials: true,
   headers: defaultHeaders
 })
@@ -99,6 +99,14 @@ function shouldSkipRefresh(url: string | undefined): boolean {
 
 interface RetryConfig extends InternalAxiosRequestConfig {
   _retry?: boolean
+  /**
+   * Separate from `_retry` on purpose: a REFRESH_IN_FLIGHT replay must not
+   * consume the refresh-and-retry budget (the replay can still 401 for a
+   * genuinely expired session and deserve a real refresh), and a refresh
+   * retry must not consume this one. Two flags, each capping its own path
+   * at exactly one extra attempt, so the two can't ping-pong.
+   */
+  _retriedAfterRefreshInFlight?: boolean
 }
 
 /**
@@ -302,6 +310,24 @@ api.interceptors.response.use(
   async (error: AxiosError) => {
     const original = error.config as RetryConfig | undefined
     const status = error.response?.status
+
+    // Racing tabs. The backend keeps a ~30s grace window while a refresh
+    // rotation is in flight and answers concurrent requests with
+    // REFRESH_IN_FLIGHT rather than a real "you're logged out" 401. By the
+    // time we read this the winning tab has (or is about to have) set the
+    // new cookie, so replay once and let the request succeed. Calling
+    // notifyAuthFailure here would sign the user out of every tab for what
+    // is really just a lost race.
+    //
+    // `error.response.data` is already decrypted: the crypto response
+    // interceptor is registered before this one, so it runs first.
+    if (status === 401 && original && !original._retriedAfterRefreshInFlight) {
+      const code = (error.response?.data as { code?: string } | undefined)?.code
+      if (code === "REFRESH_IN_FLIGHT") {
+        original._retriedAfterRefreshInFlight = true
+        return api(original as AxiosRequestConfig)
+      }
+    }
 
     if (
       status !== 401 ||

@@ -1,49 +1,42 @@
-import type { InterviewStatus, OverallScores } from "@/features/interviews/types"
+import type { InterviewStatus } from "@/features/interviews/types"
 
 export const statusLabels: Record<InterviewStatus, string> = {
+  pending: "Pending",
   in_progress: "In progress",
   submitted: "Submitted",
-  analyzed: "Analyzed"
-}
-
-export const statusVariant: Record<InterviewStatus, "default" | "warning" | "success" | "muted"> = {
-  in_progress: "warning",
-  submitted: "default",
-  analyzed: "success"
+  expired: "Expired"
 }
 
 /**
- * Binary recommendation labels — `strong_yes` / `maybe` were
- * retired in the May 2026 simplification (overall >=
- * `APPLICATION_AI_PASS_THRESHOLD` on backend, default 7 → "yes",
- * else "no"). Legacy interview docs scored under the old prompt
- * still get rendered correctly because the backend's
- * `mirrorVerdictToApplicant` overrides their `recommendation`
- * field to the new binary value the next time a scoring job
- * touches the doc.
+ * `success`/`warning`/`purple` don't adapt to dark mode (see `ui/badge.tsx`),
+ * so the drawer's badges stick to variants that do.
+ */
+export const statusVariant: Record<
+  InterviewStatus,
+  "default" | "secondary" | "outline" | "muted"
+> = {
+  pending: "muted",
+  in_progress: "default",
+  submitted: "secondary",
+  expired: "outline"
+}
+
+/**
+ * AI verdict labels. The band is derived from the JOB's `rejectionThreshold`,
+ * not a global constant:
+ *   overall×10 ≥ min(threshold + 20, 90) → strong_yes
+ *   overall×10 ≥ threshold               → yes
+ *   else                                 → no
  */
 export const recommendationLabels: Record<string, string> = {
+  strong_yes: "Strong yes",
   yes: "Yes",
-  no: "No",
-  // Defensive fallbacks for legacy records that haven't been
-  // re-touched by the scoring worker yet.
-  strong_yes: "Yes",
-  maybe: "No"
+  no: "No"
 }
 
-export const recommendationVariant: Record<
-  string,
-  "successSolid" | "default" | "warning" | "destructiveSolid" | "muted"
-> = {
-  yes: "successSolid",
-  no: "destructiveSolid",
-  strong_yes: "successSolid",
-  maybe: "destructiveSolid"
-}
-
-export function formatRecommendation(rec?: string) {
+export function formatRecommendation(rec?: string | null) {
   if (!rec) return "—"
-  return recommendationLabels[rec] ?? rec.replace(/_/g, " ").toUpperCase()
+  return recommendationLabels[rec] ?? rec.replace(/_/g, " ")
 }
 
 export function formatRole(role?: string | null) {
@@ -56,6 +49,13 @@ export function formatRole(role?: string | null) {
     .join(" ")
 }
 
+/** Years of experience, trimmed to at most one decimal ("3", "3.5"). */
+export function formatYears(years?: number | null) {
+  if (years == null || Number.isNaN(years)) return "—"
+  const rounded = Math.round(years * 10) / 10
+  return `${rounded}`
+}
+
 export function formatSessionIdTail(id?: string | null, length = 8) {
   if (!id) return ""
   return id.slice(-length)
@@ -65,20 +65,6 @@ export function formatScore(score?: number | null, opts?: { suffix?: string }) {
   if (score == null || Number.isNaN(score)) return "—"
   const rounded = Math.round(score * 10) / 10
   return `${rounded}${opts?.suffix ?? ""}`
-}
-
-export function formatDateTime(value?: string | null) {
-  if (!value) return "—"
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true
-  })
 }
 
 export function durationBetween(start?: string | null, end?: string | null) {
@@ -94,7 +80,14 @@ export function durationBetween(start?: string | null, end?: string | null) {
   return m ? `${h}h ${m}m` : `${h}h`
 }
 
-export function overallScoreOf(item: { scores?: { overall?: OverallScores } | undefined }): number | null {
-  const v = item.scores?.overall?.overall
-  return typeof v === "number" ? v : null
+/** Format a recording offset (seconds) as a clock string ("1:23" / "1:02:03"). */
+export function formatClock(totalSec: number): string {
+  const s = Math.max(0, Math.floor(totalSec))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  if (h > 0) {
+    return `${h}:${m.toString().padStart(2, "0")}:${sec.toString().padStart(2, "0")}`
+  }
+  return `${m}:${sec.toString().padStart(2, "0")}`
 }

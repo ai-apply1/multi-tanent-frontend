@@ -5,28 +5,28 @@ import type {
   OverviewFilterOption,
   OverviewStat
 } from "@/features/overview/types"
-import type { ApplicantSource } from "@/features/applicants/types"
 
 /** Filter dimensions an admin can build a stat card from. */
 export async function fetchOverviewFilterOptions() {
-  const { data } = await api.get<{ options: OverviewFilterOption[] }>(
+  const { data } = await api.get<{ data: OverviewFilterOption[] }>(
     "/admin/overview/filter-options"
   )
-  return data.options
+  return data.data
 }
 
 /**
- * Saved stat cards, each with a LIVE count. The backend recomputes counts on
- * every call, so refetching this query is how a card "fetches new counts".
+ * Saved stat cards in board order, each with a LIVE count. The backend
+ * recomputes counts on every call, so refetching this query is how a card
+ * "fetches new counts".
  *
- * `source` is the page-level marketing-channel overlay: pass a bucket to scope
- * every card to that channel, or omit it (the "All sources" default) to count
- * across every source.
+ * `jobId` is the page-level overlay: pass a job to scope every card to it, or
+ * omit it (the "All jobs" default) to count across the whole org. It ANDs on
+ * top of each card's own criteria — including the empty-criteria card.
  */
-export async function fetchOverviewStats(source?: ApplicantSource) {
+export async function fetchOverviewStats(jobId?: string) {
   const { data } = await api.get<{ data: OverviewStat[] }>(
     "/admin/overview/stats",
-    source ? { params: { source } } : undefined
+    jobId ? { params: { jobId } } : undefined
   )
   return data.data
 }
@@ -53,7 +53,10 @@ export async function createManualOverviewStat(
   return data
 }
 
-/** Update a filter metric card (title and/or its filter criteria). */
+/**
+ * Update a filter metric card (title and/or its filter criteria). `criteria`
+ * REPLACES the stored list, so always send the complete end state.
+ */
 export async function updateOverviewStat(
   id: string,
   payload: CreateOverviewStatPayload
@@ -78,15 +81,15 @@ export async function updateManualOverviewStat(
 }
 
 export async function deleteOverviewStat(id: string) {
-  const { data } = await api.delete<{ success: boolean; id: string }>(
+  const { data } = await api.delete<{ deleted: true; statId: string }>(
     `/admin/overview/stats/${id}`
   )
   return data
 }
 
-/** Delete several metrics in one call (the dashboard's multi-select). */
+/** Delete several cards in one call (the dashboard's multi-select). */
 export async function bulkDeleteOverviewStats(ids: string[]) {
-  const { data } = await api.post<{ requested: number; deleted: number }>(
+  const { data } = await api.post<{ deleted: number }>(
     "/admin/overview/stats/bulk-delete",
     { ids }
   )
@@ -98,9 +101,9 @@ export async function bulkDeleteOverviewStats(ids: string[]) {
  * the backend rewrites each card's position to its index, so the order sticks.
  */
 export async function reorderOverviewStats(ids: string[]) {
-  const { data } = await api.patch<{ requested: number; updated: number }>(
+  const { data } = await api.patch<{ data: OverviewStat[] }>(
     "/admin/overview/stats/reorder",
     { ids }
   )
-  return data
+  return data.data
 }

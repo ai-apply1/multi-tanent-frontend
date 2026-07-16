@@ -10,25 +10,6 @@ import type { OverviewStat } from "@/features/overview/types";
 import { cn } from "@/lib/utils";
 
 /**
- * The funnel is an explicit, ordered whitelist of metric titles, not "every
- * card minus a few". Only these stages appear, in exactly this order, matched
- * case-insensitively against the stat-card title (so a re-cased card still
- * matches; a full rename needs this list updated). Any card not listed here
- * (AI Interview Pending, Interview to be reviewed, Agreed to come on-site, the
- * off-ramps, etc.) is simply not part of the funnel. Its metric card on the
- * page is untouched.
- */
-const FUNNEL_STAGES = [
-  "Total Applicants",
-  "Initial Pass",
-  "AI Interview Given",
-  "Manual Pass",
-  "People came to office",
-  "Final Pass",
-  "Active Candidates",
-];
-
-/**
  * Opaque band fills for the funnel, indexed by stage. Bright enough that the
  * fixed dark label text stays legible in both light and dark themes; cycled if
  * there are ever more stages than colors.
@@ -82,22 +63,22 @@ interface Stage {
 }
 
 /**
- * Select the whitelisted stages from the live, source-scoped cards and put them
- * in FUNNEL_STAGES order. Widths narrow monotonically (running minimum of the
- * share) so the stack always reads as a funnel even when a later, parallel-path
- * stage (e.g. Manual Pass) outcounts the stage above it; sqrt softens the steep
- * first drop, and MIN_BAND keeps the deep neck visible. The true, linear
- * proportion is carried by `share` in the label, so nothing is misreported.
+ * Build the stages from the live, job-scoped cards: the filter cards in the
+ * order the operator dragged them into, top of funnel first. Manual cards are
+ * excluded — their number is typed, not counted, so it shares no denominator
+ * with the rest and would misreport every conversion below it.
+ *
+ * The board order IS the funnel order, so renaming a card can't drop it and a
+ * new stage needs no code change; reordering the grid reorders the funnel.
+ *
+ * Widths narrow monotonically (running minimum of the share) so the stack
+ * always reads as a funnel even when a later, parallel-path stage outcounts the
+ * stage above it; sqrt softens the steep first drop, and MIN_BAND keeps the deep
+ * neck visible. The true, linear proportion is carried by `share` in the label,
+ * so nothing is misreported.
  */
 function buildStages(stats: OverviewStat[]): Stage[] {
-  const byTitle = new Map<string, OverviewStat>();
-  for (const s of stats) {
-    const key = s.title.trim().toLowerCase();
-    if (!byTitle.has(key)) byTitle.set(key, s);
-  }
-  const ordered = FUNNEL_STAGES.map((title) =>
-    byTitle.get(title.trim().toLowerCase()),
-  ).filter((s): s is OverviewStat => Boolean(s));
+  const ordered = stats.filter((s) => s.kind === "filter");
 
   const maxCount = ordered.reduce((m, s) => Math.max(m, s.count), 0);
   let runningMin = 1;
@@ -164,11 +145,11 @@ interface Props {
 
 /**
  * Right-side drawer (same Sheet pattern as the interview detail drawer) that
- * visualizes a fixed sequence of stages as a hiring funnel plus a horizontal
- * pipeline. Derived live from the source-scoped stat cards, so it follows the
- * page Source overlay and every refetch for free. The body is a non-scrolling
- * flex column: the funnel bands share the leftover height so the whole thing
- * fits the drawer without a scrollbar.
+ * visualizes the board's filter cards as a hiring funnel plus a horizontal
+ * pipeline. Derived live from the job-scoped stat cards, so it follows the page
+ * Job overlay, the card order, and every refetch for free. The body is a
+ * non-scrolling flex column: the funnel bands share the leftover height so the
+ * whole thing fits the drawer without a scrollbar.
  */
 export function OverviewFunnelDrawer({ open, onOpenChange, stats }: Props) {
   const stages = useMemo(() => buildStages(stats), [stats]);
@@ -192,7 +173,7 @@ export function OverviewFunnelDrawer({ open, onOpenChange, stats }: Props) {
             <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center text-muted-foreground">
               <Filter className="h-8 w-8 opacity-40" />
               <p className="text-sm">
-                Add the funnel metrics to see the flow.
+                Add at least two metrics to see the flow.
               </p>
             </div>
           ) : (

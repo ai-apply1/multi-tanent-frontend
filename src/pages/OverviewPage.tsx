@@ -5,7 +5,6 @@ import {
   useQueryClient,
   keepPreviousData,
 } from "@tanstack/react-query";
-import axios from "axios";
 import toast from "react-hot-toast";
 import {
   Filter,
@@ -76,34 +75,15 @@ import {
 import type {
   OverviewFilterOption,
   OverviewStat,
+  OverviewStatCriterion,
 } from "@/features/overview/types";
 import { OverviewFunnelDrawer } from "@/features/overview/OverviewFunnel";
-import { getSourceOptions } from "@/features/applicants/applicantsApi";
-import { formatSourceLabel } from "@/features/applicants/helpers";
+import { JOB_OPTIONS_QUERY_KEY, listJobOptions } from "@/features/jobs/jobsApi";
+import { errorMessage } from "@/lib/errors";
 import { cn } from "@/lib/utils";
 
 const STATS_QUERY_KEY = ["overviewStats"] as const;
 const OPTIONS_QUERY_KEY = ["overviewFilterOptions"] as const;
-
-/**
- * Page-level Source overlay. "all" is the default and counts every source (no
- * filter); the rest scope EVERY metric card to one source via the backend
- * `?source=` param. Options are fetched live from the DB (distinct utmSource
- * tags plus the synthetic "direct"), identical to the Applicants Source filter.
- */
-
-function errorMessage(err: unknown, fallback: string): string {
-  if (axios.isAxiosError(err)) {
-    const data = err.response?.data as
-      | { message?: string | string[] }
-      | undefined;
-    const message = data?.message;
-    if (Array.isArray(message) && message.length > 0) return message[0];
-    if (typeof message === "string" && message) return message;
-  }
-  if (err instanceof Error && err.message) return err.message;
-  return fallback;
-}
 
 /**
  * Compact count for the small metric cards: plain under 1,000, then abbreviated
@@ -138,29 +118,27 @@ function groupOptions(
 export function OverviewPage() {
   const queryClient = useQueryClient();
 
-  // Page-level Source overlay. Folded into the stats query key so switching it
-  // refetches every card's count scoped to that source; "all" sends no param.
-  const [sourceFilter, setSourceFilter] = useState<string>("all");
+  // Page-level Job overlay. Folded into the stats query key so switching it
+  // refetches every card's count scoped to that job; "all" sends no param. The
+  // backend ANDs it over every card, the "All applicants" one included.
+  const [jobFilter, setJobFilter] = useState<string>("all");
   const statsQueryKey = useMemo(
-    () => [...STATS_QUERY_KEY, sourceFilter] as const,
-    [sourceFilter],
+    () => [...STATS_QUERY_KEY, jobFilter] as const,
+    [jobFilter],
   );
 
-  // Source dropdown options, fetched live from the DB (shared with Applicants).
-  const { data: sourceTags } = useQuery({
-    queryKey: ["applicant-source-options"],
-    queryFn: getSourceOptions,
+  // Shares the Candidates page's key + fetcher: one request, one cache entry.
+  const { data: jobs } = useQuery({
+    queryKey: JOB_OPTIONS_QUERY_KEY,
+    queryFn: listJobOptions,
     staleTime: 5 * 60 * 1000,
   });
-  const sourceOptions = useMemo(
+  const jobOptions = useMemo(
     () => [
-      { value: "all", label: "All sources" },
-      ...(sourceTags ?? []).map((s) => ({
-        value: s,
-        label: formatSourceLabel(s),
-      })),
+      { value: "all", label: "All jobs" },
+      ...(jobs ?? []).map((job) => ({ value: job._id, label: job.title })),
     ],
-    [sourceTags],
+    [jobs],
   );
 
   const {
@@ -172,7 +150,7 @@ export function OverviewPage() {
   } = useQuery({
     queryKey: statsQueryKey,
     queryFn: () =>
-      fetchOverviewStats(sourceFilter === "all" ? undefined : sourceFilter),
+      fetchOverviewStats(jobFilter === "all" ? undefined : jobFilter),
     placeholderData: keepPreviousData,
   });
 
@@ -261,8 +239,8 @@ export function OverviewPage() {
   const reorderMutation = useMutation({
     mutationFn: (orderedIds: string[]) => reorderOverviewStats(orderedIds),
     onMutate: async (orderedIds) => {
-      // Operate on the currently displayed (source-scoped) list so the cards
-      // stay put under the cursor. Card order/position is source-independent, so
+      // Operate on the currently displayed (job-scoped) list so the cards stay
+      // put under the cursor. Card order/position is job-independent, so
       // persisting from the filtered view is correct.
       await queryClient.cancelQueries({ queryKey: statsQueryKey });
       const previous = queryClient.getQueryData<OverviewStat[]>(statsQueryKey);
@@ -323,22 +301,19 @@ export function OverviewPage() {
           </h1>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <Select
-            value={sourceFilter}
-            onValueChange={(v) => setSourceFilter(v)}
-          >
+          <Select value={jobFilter} onValueChange={(v) => setJobFilter(v)}>
             <SelectTrigger
               className={cn(
                 "h-8 w-[150px] shrink-0 text-xs",
-                sourceFilter !== "all" &&
+                jobFilter !== "all" &&
                   "border-primary bg-primary/10 text-primary",
               )}
-              aria-label="Source"
+              aria-label="Job"
             >
-              <SelectValue placeholder="All sources" />
+              <SelectValue placeholder="All jobs" />
             </SelectTrigger>
             <SelectContent>
-              {sourceOptions.map((opt) => (
+              {jobOptions.map((opt) => (
                 <SelectItem key={opt.value} value={opt.value}>
                   {opt.label}
                 </SelectItem>
@@ -429,8 +404,8 @@ export function OverviewPage() {
             <div>
               <p className="font-medium">No metrics yet</p>
               <p className="text-sm text-muted-foreground">
-                Add a live metric (for example the number of applicants at AI
-                pass), or a manual card with a title and number you type
+                Add a live metric (for example the number of applicants at
+                pre-screened), or a manual card with a title and number you type
                 yourself.
               </p>
             </div>
@@ -939,8 +914,25 @@ function StatDialog({ open, editing, onOpenChange, onSaved }: StatDialogProps) {
   const grouped = useMemo(() => groupOptions(options ?? []), [options]);
   const selectedSet = useMemo(() => new Set(selected), [selected]);
 
+  // The card stores each criterion's label/group, not just its key, so a chip
+  // still reads after the job or status it points at is renamed or deleted.
+  // The card's own saved criteria seed the map so a key that has since left the
+  // registry keeps its snapshot instead of being dropped on the next save; a
+  // live option then overwrites it, picking up any rename.
+  const criterionByKey = useMemo(() => {
+    const map = new Map<string, OverviewStatCriterion>();
+    for (const criterion of editing?.criteria ?? []) {
+      map.set(criterion.key, criterion);
+    }
+    for (const option of options ?? []) map.set(option.key, option);
+    return map;
+  }, [editing, options]);
+
   const mutation = useMutation({
-    mutationFn: (payload: { title: string; criteria: string[] }) =>
+    mutationFn: (payload: {
+      title: string;
+      criteria: OverviewStatCriterion[];
+    }) =>
       editing
         ? updateOverviewStat(editing.id, payload)
         : createOverviewStat(payload),
@@ -984,7 +976,7 @@ function StatDialog({ open, editing, onOpenChange, onSaved }: StatDialogProps) {
           <DialogTitle>{isEditing ? "Edit metric" : "New metric"}</DialogTitle>
           <DialogDescription>
             Give the metric a title and choose the filters to count by, the same
-            filters as the Applicants page. Filters in the same group are
+            filters as the Candidates page. Filters in the same group are
             combined with OR (an applicant in any of them is counted), while
             filters from different groups are combined with AND. Leave the
             filters empty to count all applicants.
@@ -996,7 +988,10 @@ function StatDialog({ open, editing, onOpenChange, onSaved }: StatDialogProps) {
           onSubmit={(e) => {
             e.preventDefault();
             if (!canSubmit) return;
-            mutation.mutate({ title: trimmedTitle, criteria: selected });
+            const criteria = selected
+              .map((key) => criterionByKey.get(key))
+              .filter((c): c is OverviewStatCriterion => Boolean(c));
+            mutation.mutate({ title: trimmedTitle, criteria });
           }}
         >
           <div className="space-y-1.5">
@@ -1010,7 +1005,7 @@ function StatDialog({ open, editing, onOpenChange, onSaved }: StatDialogProps) {
               id="overview-stat-title"
               value={title}
               maxLength={120}
-              placeholder="e.g. Applicants at AI pass"
+              placeholder="e.g. Applicants at pre-screened"
               onChange={(e) => setTitle(e.target.value)}
               autoComplete="off"
             />
@@ -1105,7 +1100,7 @@ interface ManualCardDialogProps {
 /**
  * Create or edit a manual card: just a title and a fixed number the admin types.
  * Unlike a filter metric, this number is stored and shown verbatim, it never
- * recalculates from applicant data and ignores the page Source overlay.
+ * recalculates from candidate data and ignores the page Job overlay.
  */
 function ManualCardDialog({
   open,

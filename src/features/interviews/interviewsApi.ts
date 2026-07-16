@@ -1,46 +1,62 @@
 import api from "@/lib/api"
 import type {
-  InterviewAttempt,
-  InterviewDetail,
-  InterviewListItem,
+  AdminInterviewAttempt,
+  AdminInterviewDetail,
+  AdminInterviewListItem,
   ListInterviewsParams,
   PaginatedResponse,
-  ScoringStatus
+  ScoringStatus,
+  WebcamHlsStatus
 } from "@/features/interviews/types"
 
+/**
+ * `:sessionId` on every route below is the interview's `publicSessionId`
+ * (a UUID) — never the Mongo `_id`.
+ */
+
 export async function listInterviews(params: ListInterviewsParams = {}) {
-  const { data } = await api.get<PaginatedResponse<InterviewListItem>>("/admin/interviews", {
-    params: {
-      page: params.page ?? 1,
-      limit: params.limit ?? 20,
-      ...(params.status ? { status: params.status } : {})
+  const { data } = await api.get<PaginatedResponse<AdminInterviewListItem>>(
+    "/admin/interviews",
+    {
+      params: {
+        page: params.page ?? 1,
+        limit: params.limit ?? 25,
+        ...(params.jobId ? { jobId: params.jobId } : {}),
+        ...(params.status ? { status: params.status } : {}),
+        ...(params.scoringStatus ? { scoringStatus: params.scoringStatus } : {}),
+        ...(params.search ? { search: params.search } : {}),
+        ...(params.latestOnly === false ? { latestOnly: false } : {})
+      }
     }
-  })
+  )
   return data
 }
 
 export async function getInterview(sessionId: string) {
-  const { data } = await api.get<InterviewDetail>(`/admin/interviews/${sessionId}`)
+  const { data } = await api.get<AdminInterviewDetail>(
+    `/admin/interviews/${sessionId}`
+  )
   return data
 }
 
 /**
- * Every interview ATTEMPT for the applicant who owns this sessionId, oldest
- * to newest, for the detail drawer's version dropdown. A single-element list
- * for candidates who only attempted once (or legacy direct-entry sessions).
+ * Every interview ATTEMPT by the candidate who owns this sessionId, oldest to
+ * newest, for the detail drawer's version dropdown. A single-element list for
+ * candidates who only attempted once. The backend resolves every attempt from
+ * any one of the candidate's sessionIds.
  */
 export async function getInterviewAttempts(sessionId: string) {
-  const { data } = await api.get<InterviewAttempt[]>(
+  const { data } = await api.get<AdminInterviewAttempt[]>(
     `/admin/interviews/${sessionId}/attempts`
   )
   return data
 }
 
 /**
- * Mint a short-lived presigned GET URL for this interview's CV.
- * Mirrors `getApplicantCvUrl` — same private-bucket constraint, same
- * popup-then-redirect callsite pattern in the interview detail
- * drawer.
+ * Mint a short-lived presigned GET URL for this interview's CV. The bucket is
+ * private, so this is the only way to open it; called on click (not at drawer
+ * open) so the link can't expire before the reviewer uses it. 404s with an
+ * explanatory message when the candidate has no CV on file.
  */
 export async function getInterviewCvUrl(sessionId: string) {
   const { data } = await api.get<{ url: string; expiresIn: number }>(
@@ -110,28 +126,29 @@ export async function downloadInterviewVideo(sessionId: string) {
 /**
  * (Re)queue the webcam recording for HLS transcoding — used to retry a
  * failed transcode or backfill an older recording. Idempotent on the
- * backend.
+ * backend. Note `failed` is never auto-retried (the detail GET only lazily
+ * backfills a recording that was NEVER transcoded), so this is the only way
+ * back from a failure.
  */
 export async function retranscodeInterviewVideo(sessionId: string) {
   const { data } = await api.post<{
     success: boolean
-    status: "pending" | "processing" | "ready" | "failed" | null
+    status: WebcamHlsStatus | null
     queued: boolean
   }>(`/admin/interviews/${sessionId}/transcode`)
   return data
 }
 
 /**
- * Re-run the FULL AI scoring pipeline for a submitted interview:
- * re-judge the stored transcripts, redo the fluency pass + the
- * communication fold, and re-mirror the (possibly changed) verdict
- * onto the applicant. Useful after the backend's weights/prompts are
- * tuned, or to retry a failed scoring run.
+ * Re-run the FULL AI scoring pipeline for a submitted interview: re-judge the
+ * stored transcripts, redo the fluency pass + the communication fold, and
+ * re-mirror the (possibly changed) verdict onto the candidate. Useful after
+ * the job's weights/threshold are tuned, or to retry a failed run.
  *
- * Safe to call while a run is already in flight — the backend reports
- * the current state (`queued: false`, `alreadyQueued: true`) instead of
- * stacking a second job. Only submitted interviews are scorable; any other
- * state is a 400 with an explanatory message.
+ * Safe to call while a run is already in flight — the backend reports the
+ * current state (`queued: false`, `alreadyQueued: true`) instead of stacking a
+ * second job. Only submitted interviews are scorable; any other state is a 409
+ * with an explanatory message.
  */
 export async function rescoreInterview(sessionId: string) {
   const { data } = await api.post<{
@@ -170,34 +187,18 @@ export async function getInterviewScoringStatus(sessionId: string) {
 }
 
 /**
- * Mint a fresh short-lived presigned download URL for one technical-round
- * answer file, addressed by its question + index in that question's
- * `answerFiles`. Called on click (not at drawer open) so the link can't expire
- * before the reviewer uses it. Mirrors `getInterviewCvUrl`.
+ * Authorise attempt N+1 for the candidate: mints a fresh invite link and
+ * emails it. 409 `MAX_ATTEMPTS` when they've used
+ * `job.maxAttempts ?? org.settings.maxInterviewAttempts ?? 1` already.
  */
-export async function getTechnicalSolutionUrl(
-  sessionId: string,
-  questionId: string,
-  index: number
-) {
-  const { data } = await api.get<{
-    url: string
-    expiresIn: number
-    name: string
-  }>(
-    `/admin/technical/${sessionId}/solution/${encodeURIComponent(questionId)}/${index}/url`
-  )
-  return data
-}
-
-/**
- * (Re)queue the candidate's technical-round SCREEN recording for HLS
- * transcoding — retry a failed transcode or backfill an older recording.
- */
-export async function retranscodeTechnicalVideo(sessionId: string) {
+export async function reinviteInterview(sessionId: string) {
   const { data } = await api.post<{
-    success: boolean
-    status: "pending" | "processing" | "ready" | "failed" | null
-  }>(`/admin/technical/${sessionId}/transcode`)
+    success: true
+    sessionId: string
+    candidateId: string
+    /** The freshly authorised attempt (1-based). */
+    attemptNumber: number
+    expiresAt: string
+  }>(`/admin/interviews/${sessionId}/reinvite`)
   return data
 }
