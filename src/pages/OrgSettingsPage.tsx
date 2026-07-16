@@ -32,6 +32,7 @@ import {
 import type { NotificationPrefs } from "@/features/users/types";
 import { useAuth } from "@/features/auth/AuthContext";
 import { errorMessage as apiError } from "@/lib/errors";
+import { cn } from "@/lib/utils";
 
 const MAX_ATTEMPTS_MIN = 1;
 const MAX_ATTEMPTS_MAX = 10;
@@ -138,6 +139,7 @@ export function OrgSettingsPage() {
   const [localPreview, setLocalPreview] = useState<string | null>(null);
   const [uploadPct, setUploadPct] = useState<number | null>(null);
   const [logoError, setLogoError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Seed once the profile lands, and re-seed after a save so the form's
@@ -409,80 +411,131 @@ export function OrgSettingsPage() {
 
             <div className="flex flex-col gap-2.5">
               <Label htmlFor="org-logo">Logo</Label>
+              <p className="text-xs text-muted-foreground">
+                Goes out on every candidate invite email and heads the screening
+                page candidates take their interview on — for most candidates
+                it&apos;s the only branding they ever see.
+              </p>
+
+              <div
+                onDragOver={(e) => {
+                  if (!canWrite || isUploading) return;
+                  e.preventDefault();
+                  setIsDragging(true);
+                }}
+                onDragLeave={(e) => {
+                  // Fires when crossing into a CHILD too, which would flicker
+                  // the highlight — only clear when the cursor has actually
+                  // left the drop zone's subtree.
+                  if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+                  setIsDragging(false);
+                }}
+                onDrop={(e) => {
+                  if (!canWrite || isUploading) return;
+                  e.preventDefault();
+                  setIsDragging(false);
+                  const file = e.dataTransfer.files?.[0];
+                  if (file) void handleLogoFile(file);
+                }}
+                className={cn(
+                  "flex items-center gap-4 rounded-xl border p-4 transition-colors",
+                  isDragging
+                    ? "border-primary border-dashed bg-primary/5"
+                    : "border-border bg-muted/20",
+                )}
+              >
+                {/* Fixed-size tile so the row never reflows between the empty,
+                    uploading and loaded states. */}
+                <div className="relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-background">
+                  {isUploading ? (
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                  ) : previewUrl && !logoBroken ? (
+                    <img
+                      src={previewUrl}
+                      alt={`${name || "Organization"} logo`}
+                      className="h-full w-full object-contain p-2"
+                      onError={() => setLogoBroken(true)}
+                    />
+                  ) : (
+                    <ImageOff className="h-5 w-5 text-muted-foreground" />
+                  )}
+                </div>
+
+                <div className="flex min-w-0 flex-1 flex-col gap-2">
+                  {isUploading ? (
+                    <>
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-medium">Uploading…</span>
+                        <span className="tabular-nums text-muted-foreground">
+                          {uploadPct}%
+                        </span>
+                      </div>
+                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-primary transition-[width] duration-200"
+                          style={{ width: `${uploadPct ?? 0}%` }}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-xs text-muted-foreground">
+                        {logoBroken
+                          ? "That image didn't load — candidates would see the Jobjen mark."
+                          : previewUrl
+                            ? "PNG, JPEG, SVG or WebP · up to 2 MB"
+                            : "No logo set — the Jobjen mark is used instead."}
+                      </p>
+                      {canWrite ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <input
+                            ref={fileInputRef}
+                            id="org-logo"
+                            type="file"
+                            accept={LOGO_ACCEPT}
+                            className="sr-only"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) void handleLogoFile(file);
+                            }}
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => fileInputRef.current?.click()}
+                          >
+                            <Upload className="mr-2 h-4 w-4" />
+                            {previewUrl ? "Replace" : "Upload logo"}
+                          </Button>
+                          {previewUrl ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="text-muted-foreground hover:text-destructive"
+                              onClick={removeLogo}
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Remove
+                            </Button>
+                          ) : null}
+                          <span className="text-xs text-muted-foreground">
+                            or drop an image here
+                          </span>
+                        </div>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              </div>
+
               {logoError ? (
                 <p className="text-xs text-destructive">{logoError}</p>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  This logo goes out on every candidate invite email and heads
-                  the screening page candidates take their interview on — for
-                  most candidates it&apos;s the only branding they ever see.
-                  PNG, JPEG, SVG or WebP, up to 2 MB. Remove it to fall back to
-                  the Jobjen mark.
+              ) : logoKey !== null && !isUploading ? (
+                <p className="text-xs font-medium text-amber-600 dark:text-amber-500">
+                  Not saved yet — hit Save changes.
                 </p>
-              )}
-              <div className="flex h-20 items-center justify-center rounded-lg border border-dashed border-border bg-muted/30 px-4">
-                {isUploading ? (
-                  <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Uploading… {uploadPct}%
-                  </span>
-                ) : previewUrl && !logoBroken ? (
-                  <img
-                    src={previewUrl}
-                    alt={`${name || "Organization"} logo preview`}
-                    className="max-h-12 max-w-[14rem] object-contain"
-                    onError={() => setLogoBroken(true)}
-                  />
-                ) : (
-                  <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <ImageOff className="h-4 w-4" />
-                    {logoBroken
-                      ? "That image didn't load — candidates would see the fallback mark."
-                      : "No logo set — the Jobjen mark is used instead."}
-                  </span>
-                )}
-              </div>
-              {canWrite ? (
-                <div className="flex items-center gap-2">
-                  <input
-                    ref={fileInputRef}
-                    id="org-logo"
-                    type="file"
-                    accept={LOGO_ACCEPT}
-                    className="sr-only"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) void handleLogoFile(file);
-                    }}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={isUploading}
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <Upload className="mr-2 h-4 w-4" />
-                    {previewUrl ? "Replace logo" : "Upload logo"}
-                  </Button>
-                  {previewUrl ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      disabled={isUploading}
-                      onClick={removeLogo}
-                    >
-                      <Trash2 className="mr-2 h-4 w-4" />
-                      Remove
-                    </Button>
-                  ) : null}
-                  {logoKey !== null && !isUploading ? (
-                    <span className="text-xs text-muted-foreground">
-                      Not saved yet — hit Save changes.
-                    </span>
-                  ) : null}
-                </div>
               ) : null}
             </div>
           </CardContent>
