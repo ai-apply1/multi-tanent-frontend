@@ -9,7 +9,8 @@ interface AuthContextValue {
   user: SessionUser | null
   isInitializing: boolean
   isAuthenticating: boolean
-  login: (email: string, password: string) => Promise<void>
+  /** `identifier` is an email or a userName — either authenticates. */
+  login: (identifier: string, password: string) => Promise<void>
   logout: () => Promise<void>
   refreshMe: () => Promise<void>
 }
@@ -51,13 +52,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [queryClient])
 
   const login = useCallback(
-    async (email: string, password: string) => {
+    async (identifier: string, password: string) => {
       setIsAuthenticating(true)
       try {
         // Clear before `setUser` so no render of the shell can ever observe
         // the previous tenant's entries under the new identity.
         queryClient.clear()
-        const next = await loginRequest(email, password)
+        const next = await loginRequest(identifier, password)
         setUser(next)
       } finally {
         setIsAuthenticating(false)

@@ -14,13 +14,19 @@ import { useAuth } from "@/features/auth/AuthContext"
 import { errorMessage } from "@/lib/errors"
 import { ROUTES } from "@/routes"
 
+// No `.email()` on `identifier` — it accepts a username too, and the
+// backend resolves which one it got. Validating it as an email here would
+// reject every username before the request was even sent.
 const schema = yup.object({
-  email: yup.string().required("Email is required").email("Enter a valid email"),
+  identifier: yup
+    .string()
+    .required("Email or username is required")
+    .min(3, "At least 3 characters"),
   password: yup.string().required("Password is required").min(8, "At least 8 characters")
 })
 
 interface FormValues {
-  email: string
+  identifier: string
   password: string
 }
 
@@ -36,16 +42,16 @@ export function LoginPage() {
     formState: { errors }
   } = useForm<FormValues>({
     resolver: yupResolver(schema),
-    defaultValues: { email: "", password: "" }
+    defaultValues: { identifier: "", password: "" }
   })
 
   if (user) {
     return <Navigate to={ROUTES.OVERVIEW} replace />
   }
 
-  const onSubmit = handleSubmit(async ({ email, password }) => {
+  const onSubmit = handleSubmit(async ({ identifier, password }) => {
     try {
-      await login(email, password)
+      await login(identifier, password)
       const dest = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || ROUTES.OVERVIEW
       navigate(dest, { replace: true })
     } catch (err) {
@@ -68,17 +74,17 @@ export function LoginPage() {
           <CardContent>
             <form noValidate className="space-y-4" onSubmit={onSubmit}>
               <div className="space-y-1.5">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="identifier">Email or username</Label>
                 <Input
-                  id="email"
-                  type="email"
+                  id="identifier"
+                  type="text"
                   autoComplete="username"
-                  placeholder="Enter email"
-                  {...register("email")}
-                  aria-invalid={Boolean(errors.email)}
+                  placeholder="Enter email or username"
+                  {...register("identifier")}
+                  aria-invalid={Boolean(errors.identifier)}
                 />
-                {errors.email ? (
-                  <p className="text-xs text-destructive">{errors.email.message}</p>
+                {errors.identifier ? (
+                  <p className="text-xs text-destructive">{errors.identifier.message}</p>
                 ) : null}
               </div>
 
