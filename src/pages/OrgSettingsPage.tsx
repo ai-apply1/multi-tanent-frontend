@@ -527,8 +527,12 @@ function NotificationPrefsCard() {
           </p>
         ) : (
           <div className="space-y-4">
-            {/* Not a <label> wrapper: `Checkbox` renders a <button>, which is
-                itself labelable — nesting it would let one click toggle twice. */}
+            {/* A <label> wrapper would be safe here — `Checkbox` renders a
+                <button>, which is interactive content, so label activation bails
+                when the box itself is clicked (see the select-all in
+                OverviewPage). It's a plain <div> only because the visible text is
+                a two-line title + description block, which reads better as an
+                aria-label than as a giant click target. */}
             <div className="flex items-start gap-3">
               <Checkbox
                 checked={prefs.interviewCompleted}

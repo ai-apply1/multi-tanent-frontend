@@ -61,6 +61,29 @@ export function apiUrl(path: string): string {
 }
 
 /**
+ * Request ceilings. Without one axios waits forever, and against a host that
+ * BLACKHOLES packets (wrong `VITE_API_BASE_URL`, firewall DROP) rather than
+ * refusing them, the boot `/admin/auth/me` never settles — so
+ * `setIsInitializing(false)` never runs and the app sits on FullScreenLoader
+ * with no error and no way out. A refused connection fails fast, so this only
+ * bites a hanging host: exactly the case a human can't diagnose from the UI.
+ *
+ * Two budgets, because one can't honestly serve both shapes of request:
+ *
+ *  - JSON calls carry kBs and every one is on a user's critical path. 30s is
+ *    far beyond the slowest legitimate one (a cold backend plus a heavy
+ *    interview detail) while still failing visibly rather than hanging.
+ *
+ *  - Raw-byte downloads are unbounded: `/admin/candidates/export` streams up
+ *    to 50k CSV rows and `/admin/interviews/:id/video/download` can be
+ *    hundreds of MB. axios's `timeout` covers the WHOLE exchange including
+ *    the response body, so the JSON budget would sever a healthy download on
+ *    a slow link. 10 minutes is unreachable in practice but still a bound.
+ */
+const JSON_TIMEOUT_MS = 30_000
+const BLOB_TIMEOUT_MS = 10 * 60_000
+
+/**
  * The admin app uses cookie-auth (httpOnly access + refresh tokens).
  * `withCredentials: true` is required so the browser sends cookies on every
  * (cross-origin) request to the backend. Keep the SPA and the API on the
@@ -70,6 +93,7 @@ export function apiUrl(path: string): string {
 export const api = axios.create({
   baseURL: `${API_BASE_URL}/api/v1`,
   withCredentials: true,
+  timeout: JSON_TIMEOUT_MS,
   headers: defaultHeaders
 })
 
@@ -195,6 +219,17 @@ function isBinaryBody(data: unknown): boolean {
 }
 
 api.interceptors.request.use(async (config) => {
+  // Lift the instance's JSON ceiling for raw-byte downloads. `responseType`
+  // is the discriminator rather than a URL list because it IS the property
+  // that matters — a non-JSON response is bytes of unbounded size — and a
+  // future download then gets the right budget by construction. Callers only
+  // set an explicit `responseType` for exactly these; note the crypto path
+  // below forces it back to "json", so this can only widen a request that
+  // also skips the envelope.
+  if (config.responseType && config.responseType !== "json") {
+    config.timeout = BLOB_TIMEOUT_MS
+  }
+
   if (shouldSkipEntirely(config)) {
     if (config.headers) delete config.headers[SKIP_HEADER]
     return config
@@ -203,6 +238,13 @@ api.interceptors.request.use(async (config) => {
   const meta = config as InternalAxiosRequestConfig & CryptoRequestMeta
 
   const reqCrypto = await makeRequestCrypto()
+  // `null` when the browser withholds WebCrypto (insecure context — see
+  // `makeRequestCrypto`, which has already warned). Send in the clear: with
+  // no `X-Crypto-Key` the backend treats this as plain JSON, which it accepts
+  // by design, and its reply then carries no `X-Crypto-Encrypted` so the
+  // response interceptors pass it through untouched. Leaving `responseType`
+  // alone here is deliberate — there's no envelope to force it to "json" for.
+  if (!reqCrypto) return config
   meta.__crypto = reqCrypto
 
   config.headers = config.headers ?? ({} as InternalAxiosRequestConfig["headers"])

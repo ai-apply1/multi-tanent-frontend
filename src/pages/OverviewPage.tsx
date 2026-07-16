@@ -324,7 +324,9 @@ export function OverviewPage() {
             variant="outline"
             size="sm"
             onClick={() => setFunnelOpen(true)}
-            disabled={!stats || stats.length < 2}
+            // Only filter cards become funnel stages, so counting every card
+            // would enable the button on a board the drawer renders empty.
+            disabled={metricStats.length < 2}
           >
             <Filter className="h-4 w-4" />
             View Funnel
@@ -1043,15 +1045,20 @@ function StatDialog({ open, editing, onOpenChange, onSaved }: StatDialogProps) {
                       {section.options.map((option) => {
                         const checked = selectedSet.has(option.key);
                         return (
-                          <button
+                          // The Checkbox is a <button>: labelable, so clicking
+                          // the text forwards one click to it, and interactive
+                          // content, so clicking the box itself doesn't also
+                          // fire the label. Either way it toggles exactly once.
+                          <label
                             key={option.key}
-                            type="button"
-                            onClick={() => toggle(option.key)}
-                            className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent"
+                            className="flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
                           >
-                            <Checkbox checked={checked} />
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={() => toggle(option.key)}
+                            />
                             <span>{option.label}</span>
-                          </button>
+                          </label>
                         );
                       })}
                     </div>

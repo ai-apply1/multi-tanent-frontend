@@ -182,6 +182,30 @@ export function CandidatesPage() {
   const boardAvailable = jobFilter !== ALL;
   // Uploading creates candidates on the job, which only an `open` job accepts.
   const canUpload = selectedJob?.status === "open";
+  // `selectedJob` is null for THREE different reasons — no job filter, a job
+  // outside the options list's cap, or a list that simply hasn't arrived yet —
+  // and anything that puts the selection into words has to tell them apart.
+  // Without this, `/dashboard/jobs/:jobId/candidates` flashes the not-listed
+  // copy on every single load, in the window before `jobsQuery` settles.
+  const jobsLoading = jobsQuery.isPending;
+
+  /**
+   * The Job filter's own label. Radix renders the SELECTED ITEM's text on the
+   * trigger and `placeholder` only covers an EMPTY value — so a `jobFilter`
+   * with no matching `SelectItem` (the options list is capped at the API's
+   * 100-per-page max) left the trigger completely blank while the board below
+   * was visibly filtered to that job. Passing explicit children makes the
+   * label ours in every state — which also means spelling out the two cases
+   * Radix used to derive on its own.
+   */
+  const jobFilterLabel =
+    jobFilter === ALL
+      ? "All jobs"
+      : selectedJob
+        ? selectedJob.title
+        : jobsLoading
+          ? "Loading…"
+          : "Job not listed";
 
   // Re-seed when the URL's job changes under a mounted page (job A's board →
   // job B's). The `useState` initialisers above only cover the mount. Keyed on
@@ -498,6 +522,7 @@ export function CandidatesPage() {
             canUpload={canUpload}
             jobSelected={jobFilter !== ALL}
             jobStatus={selectedJob?.status ?? null}
+            jobsLoading={jobsLoading}
             onClick={() => setUploadOpen(true)}
           />
         </div>
@@ -545,7 +570,7 @@ export function CandidatesPage() {
                   )}
                   aria-label="Job"
                 >
-                  <SelectValue placeholder="All jobs" />
+                  <SelectValue>{jobFilterLabel}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={ALL}>All jobs</SelectItem>
@@ -933,16 +958,27 @@ function UploadCta({
   canUpload,
   jobSelected,
   jobStatus,
+  jobsLoading,
   onClick,
 }: {
   canUpload: boolean;
   jobSelected: boolean;
+  /** Null while the options list is loading AND for a job outside its cap. */
   jobStatus: string | null;
+  jobsLoading: boolean;
   onClick: () => void;
 }) {
+  // `jobStatus` is null in three situations and only one of them is a status,
+  // so it can only be interpolated once it's known to be one — reading it
+  // blind is what rendered "This job is null" to operators. The branches
+  // mirror `jobFilterLabel`'s, so the tooltip and the filter can't disagree.
   const reason = !jobSelected
     ? "Pick a job to upload CVs into"
-    : `This job is ${jobStatus} — only open jobs accept new candidates`;
+    : jobStatus
+      ? `This job is ${jobStatus} — only open jobs accept new candidates`
+      : jobsLoading
+        ? "Checking this job…"
+        : "Can't confirm this job is open — it isn't in the jobs list";
 
   return (
     <TooltipProvider delayDuration={200}>

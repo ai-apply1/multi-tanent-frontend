@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Briefcase, Loader2, Plus, Save, Trash2 } from "lucide-react";
@@ -30,6 +30,7 @@ import {
   WORK_MODE_LABELS,
   type CreateJobPayload,
   type EmploymentType,
+  type Job,
   type JobEligibilityPayload,
   type SeniorityLevel,
   type VettingConfigPayload,
@@ -71,88 +72,119 @@ const parseOptionalNumber = (raw: string): number | undefined => {
 export function JobFormPage() {
   const { jobId } = useParams<{ jobId: string }>();
   const isEdit = Boolean(jobId);
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const metricKey = useRef(0);
-  const nextMetricKey = () => {
-    metricKey.current += 1;
-    return metricKey.current;
-  };
-
-  // ── Basics
-  const [title, setTitle] = useState("");
-  const [titleTouched, setTitleTouched] = useState(false);
-  const [description, setDescription] = useState("");
-  const [descTab, setDescTab] = useState<"write" | "preview">("write");
-
-  // ── Classification
-  const [employmentType, setEmploymentType] = useState<string>(NONE);
-  const [workMode, setWorkMode] = useState<string>(NONE);
-  const [seniorityLevel, setSeniorityLevel] = useState<string>(NONE);
-
-  // ── Scoring. ONE number: communication is always `100 - technical`, so the
-  // backend's "must sum to 100" invariant can't be violated from this form.
-  const [technicalWeight, setTechnicalWeight] = useState(60);
-  const [rejectionThreshold, setRejectionThreshold] = useState("70");
-  const [maxAttempts, setMaxAttempts] = useState("");
-
-  // ── Eligibility & vetting
-  const [city, setCity] = useState("");
-  const [minYearsExperience, setMinYearsExperience] = useState("");
-  const [requiredSkills, setRequiredSkills] = useState<string[]>([]);
-  const [metrics, setMetrics] = useState<MetricRow[]>([]);
-  const [acceptThreshold, setAcceptThreshold] = useState("");
-  const [rejectThreshold, setRejectThreshold] = useState("");
-
-  const { data: organization } = useOrganization();
 
   const jobQuery = useQuery({
     queryKey: ["job", jobId],
     queryFn: () => getJob(jobId!),
     enabled: isEdit,
   });
-  const job = jobQuery.data;
 
-  // Seed the form from the loaded job. The whole eligibility block is read
-  // into state here — that read is what makes the REPLACE-semantics write
-  // below safe (we always send back a COMPLETE block, never a diff).
-  useEffect(() => {
-    if (!job) return;
-    setTitle(job.title);
-    setDescription(job.description ?? "");
-    setEmploymentType(job.employmentType ?? NONE);
-    setWorkMode(job.workMode ?? NONE);
-    setSeniorityLevel(job.seniorityLevel ?? NONE);
-    setTechnicalWeight(job.scoringWeights.technical);
-    setRejectionThreshold(String(job.rejectionThreshold));
-    setMaxAttempts(job.maxAttempts === null ? "" : String(job.maxAttempts));
-    setCity(job.eligibility.city ?? "");
-    setMinYearsExperience(
-      job.eligibility.minYearsExperience === null
-        ? ""
-        : String(job.eligibility.minYearsExperience),
+  if (isEdit && jobQuery.isLoading) {
+    return (
+      <div className="flex items-center justify-center gap-2 py-24 text-sm text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin text-primary" />
+        Loading job…
+      </div>
     );
-    const custom = job.eligibility.custom;
-    setRequiredSkills(custom?.requiredSkills ?? []);
-    setMetrics(
-      (custom?.metrics ?? []).map((m) => ({
-        key: nextMetricKey(),
-        name: m.name,
-        rule: m.rule,
-        weight: String(m.weight),
-      })),
+  }
+
+  if (isEdit && jobQuery.isError) {
+    return (
+      <Card>
+        <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
+          <p className="text-sm text-destructive">
+            {errorMessage(jobQuery.error, "Could not load this job.")}
+          </p>
+          <Button variant="outline" size="sm" onClick={() => jobQuery.refetch()}>
+            Retry
+          </Button>
+        </CardContent>
+      </Card>
     );
-    setAcceptThreshold(
-      custom?.acceptThreshold === null || custom?.acceptThreshold === undefined
-        ? ""
-        : String(custom.acceptThreshold),
-    );
-    setRejectThreshold(
-      custom?.rejectThreshold === null || custom?.rejectThreshold === undefined
-        ? ""
-        : String(custom.rejectThreshold),
-    );
-  }, [job]);
+  }
+
+  // Mounted only once the job resolves, and seeds state straight from it rather
+  // than from a post-mount effect. Both halves are load-bearing:
+  //
+  //  - Seeding from props, not an effect: Radix's Select syncs a hidden native
+  //    <select> whenever `value` changes and dispatches a real change event. Its
+  //    <option>s aren't registered on first render, so an effect that flips the
+  //    value right after mount lands in that window, reads back "", and feeds ""
+  //    into state — the Selects render blank and every PATCH 400s on @IsEnum.
+  //  - `key`: the deleted effect also re-seeded on job change. Without a remount,
+  //    an SPA nav between two edit routes on a warm cache never re-seeds and saves
+  //    the previous job's data to the new job's id.
+  return (
+    <JobForm key={jobId ?? "new"} job={jobQuery.data ?? null} jobId={jobId} />
+  );
+}
+
+function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
+  const isEdit = Boolean(jobId);
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  const custom = job?.eligibility.custom ?? null;
+  // Seeded rows take keys 1..n, so the counter starts at n.
+  const metricKey = useRef(custom?.metrics.length ?? 0);
+  const nextMetricKey = () => {
+    metricKey.current += 1;
+    return metricKey.current;
+  };
+
+  // ── Basics
+  const [title, setTitle] = useState(job?.title ?? "");
+  const [titleTouched, setTitleTouched] = useState(false);
+  const [description, setDescription] = useState(job?.description ?? "");
+  const [descTab, setDescTab] = useState<"write" | "preview">("write");
+
+  // ── Classification
+  const [employmentType, setEmploymentType] = useState<string>(
+    job?.employmentType ?? NONE,
+  );
+  const [workMode, setWorkMode] = useState<string>(job?.workMode ?? NONE);
+  const [seniorityLevel, setSeniorityLevel] = useState<string>(
+    job?.seniorityLevel ?? NONE,
+  );
+
+  // ── Scoring. ONE number: communication is always `100 - technical`, so the
+  // backend's "must sum to 100" invariant can't be violated from this form.
+  const [technicalWeight, setTechnicalWeight] = useState(
+    job?.scoringWeights.technical ?? 60,
+  );
+  const [rejectionThreshold, setRejectionThreshold] = useState(
+    job ? String(job.rejectionThreshold) : "70",
+  );
+  const [maxAttempts, setMaxAttempts] = useState(
+    job?.maxAttempts == null ? "" : String(job.maxAttempts),
+  );
+
+  // ── Eligibility & vetting
+  const [city, setCity] = useState(job?.eligibility.city ?? "");
+  const [minYearsExperience, setMinYearsExperience] = useState(
+    job?.eligibility.minYearsExperience == null
+      ? ""
+      : String(job.eligibility.minYearsExperience),
+  );
+  const [requiredSkills, setRequiredSkills] = useState<string[]>(
+    custom?.requiredSkills ?? [],
+  );
+  const [metrics, setMetrics] = useState<MetricRow[]>(() =>
+    (custom?.metrics ?? []).map((m, i) => ({
+      key: i + 1,
+      name: m.name,
+      rule: m.rule,
+      weight: String(m.weight),
+    })),
+  );
+  const [acceptThreshold, setAcceptThreshold] = useState(
+    custom?.acceptThreshold == null ? "" : String(custom.acceptThreshold),
+  );
+  const [rejectThreshold, setRejectThreshold] = useState(
+    custom?.rejectThreshold == null ? "" : String(custom.rejectThreshold),
+  );
+
+  const { data: organization } = useOrganization();
 
   // ── validation
   const trimmedTitle = title.trim();
@@ -302,30 +334,6 @@ export function JobFormPage() {
   });
 
   const busy = mutation.isPending;
-
-  if (isEdit && jobQuery.isLoading) {
-    return (
-      <div className="flex items-center justify-center gap-2 py-24 text-sm text-muted-foreground">
-        <Loader2 className="h-5 w-5 animate-spin text-primary" />
-        Loading job…
-      </div>
-    );
-  }
-
-  if (isEdit && jobQuery.isError) {
-    return (
-      <Card>
-        <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
-          <p className="text-sm text-destructive">
-            {errorMessage(jobQuery.error, "Could not load this job.")}
-          </p>
-          <Button variant="outline" size="sm" onClick={() => jobQuery.refetch()}>
-            Retry
-          </Button>
-        </CardContent>
-      </Card>
-    );
-  }
 
   return (
     <form
