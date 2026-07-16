@@ -39,8 +39,8 @@ const EXPIRY_DAYS_MIN = 1;
 const EXPIRY_DAYS_MAX = 365;
 
 /**
- * The IANA zones the runtime knows about — the same catalog the backend's
- * `@IsTimeZone` validates against. Empty on engines without
+ * The IANA zones the runtime knows about — the picker's OPTIONS, not the
+ * validity test (see `isValidTimezone`). Empty on engines without
  * `Intl.supportedValuesOf` (pre-2022), in which case the field falls back to a
  * plain text input and the backend does the validating.
  */
@@ -55,8 +55,37 @@ function loadTimezones(): string[] {
   return [];
 }
 
+/**
+ * `Intl.supportedValuesOf("timeZone")` lists canonical IANA zones and omits
+ * the "UTC" alias — which is exactly what the org schema DEFAULTS
+ * `settings.timezone` to. So UTC has to be offered explicitly, or a
+ * default-timezone org can't even see its own saved value in the picker.
+ */
 const TIMEZONES = loadTimezones();
-const TIMEZONE_OPTIONS = TIMEZONES.map((value) => ({ value }));
+const TIMEZONE_OPTIONS = (
+  TIMEZONES.includes("UTC") ? TIMEZONES : ["UTC", ...TIMEZONES]
+).map((value) => ({ value }));
+
+/**
+ * Is this a zone the runtime (and therefore the backend) accepts?
+ *
+ * This MUST be a try/catch on `Intl.DateTimeFormat`, not a lookup in
+ * `TIMEZONES`. class-validator's `@IsTimeZone` — the backend's gate — does
+ * exactly this, and it accepts aliases like "UTC" that the canonical catalog
+ * leaves out. Testing catalog membership instead made this form STRICTER than
+ * the server: every org on the default "UTC" failed validation, which
+ * disabled Save permanently and made the whole page unsaveable.
+ */
+function isValidTimezone(value: string): boolean {
+  const tz = value.trim();
+  if (!tz) return false;
+  try {
+    new Intl.DateTimeFormat(undefined, { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Mirrors the backend's `ALLOWED_LOGO_CONTENT_TYPES` / `MAX_LOGO_BYTES`. The
@@ -214,12 +243,10 @@ export function OrgSettingsPage() {
     expiryValue > EXPIRY_DAYS_MAX
       ? `Enter a whole number between ${EXPIRY_DAYS_MIN} and ${EXPIRY_DAYS_MAX}.`
       : null;
-  // Only checkable when the runtime gave us the catalog; otherwise the
-  // backend's @IsTimeZone is the only gate.
-  const timezoneError =
-    TIMEZONES.length > 0 && !TIMEZONES.includes(timezone.trim())
-      ? "Pick a time zone from the list."
-      : null;
+  // Same test the backend's @IsTimeZone runs — see `isValidTimezone`.
+  const timezoneError = !isValidTimezone(timezone)
+    ? "Pick a time zone from the list."
+    : null;
 
   const hasErrors = Boolean(
     nameError || attemptsError || expiryError || timezoneError,
