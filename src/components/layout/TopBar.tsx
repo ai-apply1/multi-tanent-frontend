@@ -121,11 +121,16 @@ export function TopBar({ onToggleSidebar, sidebarCollapsed = false }: TopBarProp
         {/* The tenant's identity, not ours. The fixed `h-8` reserves the row
             before the org resolves, so swapping in a logo of any aspect ratio
             can't reflow the header — and while it's in flight we render
-            nothing rather than flashing the Jobjen mark at an org that has
+            nothing rather than flashing the platform mark at an org that has
             its own. `isLoading` (not `isPending`) is the right signal: the
             query is disabled without a session, and a disabled query stays
             pending forever, which would hide the fallback on the login-
-            adjacent renders. */}
+            adjacent renders.
+
+            An org with NO logo shows its own NAME as the mark, never the
+            platform's: their brand IS the name. The platform mark is only for
+            the case where no org resolved at all. The secondary name label
+            below is then suppressed, or the name would appear twice. */}
         <div className="flex h-8 min-w-0 items-center gap-2">
           {organization?.logoUrl ? (
             <img
@@ -134,10 +139,17 @@ export function TopBar({ onToggleSidebar, sidebarCollapsed = false }: TopBarProp
               className="h-8 w-auto max-w-36 shrink-0 object-contain"
               draggable={false}
             />
+          ) : organization?.name ? (
+            <span
+              className="max-w-56 truncate text-base font-semibold"
+              title={organization.name}
+            >
+              {organization.name}
+            </span>
           ) : isOrgLoading ? null : (
             <BrandLogo size="md" />
           )}
-          {organization?.name ? (
+          {organization?.logoUrl && organization?.name ? (
             <span
               className="hidden max-w-48 truncate text-sm font-semibold sm:block"
               title={organization.name}

@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom"
 import { ROUTES } from "@/routes"
 import { cn } from "@/lib/utils"
+import { PLATFORM_LOGO, PLATFORM_NAME } from "@/lib/platform"
 
 interface BrandLogoProps {
   /** Render as a non-clickable mark (no Link wrapping). */
@@ -33,14 +34,14 @@ export function BrandLogo({
   const inner = (
     <>
       <img
-        src="/jobjen-logo-dark.svg"
-        alt="Jobjen"
+        src={PLATFORM_LOGO.light}
+        alt={PLATFORM_NAME}
         className={cn(sizeCls, "w-auto block dark:hidden select-none")}
         draggable={false}
       />
       <img
-        src="/jobjen-logo.svg"
-        alt="Jobjen"
+        src={PLATFORM_LOGO.dark}
+        alt={PLATFORM_NAME}
         className={cn(sizeCls, "w-auto hidden dark:block select-none")}
         draggable={false}
       />
@@ -55,14 +56,14 @@ export function BrandLogo({
 
   if (staticMark) {
     return (
-      <span className={cn(baseCls, "cursor-default")} aria-label="Jobjen">
+      <span className={cn(baseCls, "cursor-default")} aria-label={PLATFORM_NAME}>
         {inner}
       </span>
     )
   }
 
   return (
-    <Link to={to} aria-label="Jobjen" className={baseCls}>
+    <Link to={to} aria-label={PLATFORM_NAME} className={baseCls}>
       {inner}
     </Link>
   )

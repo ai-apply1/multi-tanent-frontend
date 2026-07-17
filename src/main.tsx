@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { Toaster } from "react-hot-toast"
 import App from "@/App"
 import { AuthProvider } from "@/features/auth/AuthContext"
+import { TenantBrandingProvider } from "@/features/tenant/TenantBrandingContext"
+import { DevTenantSync } from "@/features/tenant/DevTenantSync"
 import { ThemeProvider } from "@/features/theme/ThemeContext"
 import { ensureCryptoReady } from "@/lib/crypto"
 import "@/styles/globals.css"
@@ -35,20 +37,29 @@ createRoot(root).render(
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
-          <AuthProvider>
-            <App />
-            <Toaster
-              position="top-right"
-              toastOptions={{
-                style: {
-                  background: "var(--card)",
-                  color: "var(--card-foreground)",
-                  border: "1px solid var(--border)",
-                  fontSize: "14px"
-                }
-              }}
-            />
-          </AuthProvider>
+          {/* INSIDE the query client (it fetches) but OUTSIDE auth (it must
+              not need a session). The branding comes from the public
+              host-resolved endpoint, so the LOGIN page is already the
+              employer's: their name in the tab, their favicon, their logo. */}
+          {/* Inside the router (it reads the location), above everything that
+              navigates. Renders nothing and no-ops entirely in production. */}
+          <DevTenantSync />
+          <TenantBrandingProvider>
+              <AuthProvider>
+              <App />
+              <Toaster
+                position="top-right"
+                toastOptions={{
+                  style: {
+                    background: "var(--card)",
+                    color: "var(--card-foreground)",
+                    border: "1px solid var(--border)",
+                    fontSize: "14px"
+                  }
+                }}
+              />
+            </AuthProvider>
+          </TenantBrandingProvider>
         </BrowserRouter>
       </QueryClientProvider>
     </ThemeProvider>

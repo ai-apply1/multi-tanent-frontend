@@ -34,6 +34,7 @@ import type { NotificationPrefs } from "@/features/users/types";
 import { useAuth } from "@/features/auth/AuthContext";
 import { errorMessage as apiError } from "@/lib/errors";
 import { cn } from "@/lib/utils";
+import { PLATFORM_NAME } from "@/lib/platform"
 
 const MAX_ATTEMPTS_MIN = 1;
 const MAX_ATTEMPTS_MAX = 10;
@@ -482,10 +483,10 @@ export function OrgSettingsPage() {
                     <>
                       <p className="text-xs text-muted-foreground">
                         {logoBroken
-                          ? "That image didn't load — candidates would see the Jobjen mark."
+                          ? `That image didn't load — candidates would see the ${PLATFORM_NAME} mark.`
                           : previewUrl
                             ? "PNG, JPEG, SVG or WebP · up to 2 MB"
-                            : "No logo set — the Jobjen mark is used instead."}
+                            : `No logo set — the ${PLATFORM_NAME} mark is used instead.`}
                       </p>
                       {canWrite ? (
                         <div className="flex flex-wrap items-center gap-2">

@@ -8,6 +8,7 @@ import {
   type RequestCrypto
 } from "@/lib/crypto"
 import { BASIC_AUTH_HEADER } from "@/lib/basicAuth"
+import { devTenant } from "@/lib/devTenant"
 
 /**
  * Default request headers sent on every backend call.
@@ -219,6 +220,24 @@ function isBinaryBody(data: unknown): boolean {
 }
 
 api.interceptors.request.use(async (config) => {
+  /**
+   * DEV ONLY: name the tenant this dashboard is standing in for.
+   *
+   * Applied to EVERY request, not just the branding lookup, because the host is
+   * what the backend reads for three different things — branding, which org's
+   * password table a login checks, and the JWT-vs-host cross-check on guarded
+   * routes. Attaching it to one call and not the others would give a page that
+   * paints Acme's logo and then logs you into whoever `DEV_LOGIN_ORG_SLUG`
+   * happens to name.
+   *
+   * `""` outside dev (see `devTenant`), so this is a no-op in production and
+   * the request goes out exactly as it does today.
+   */
+  const tenant = devTenant()
+  if (tenant) {
+    config.params = { ...(config.params as object | undefined), tenant }
+  }
+
   // Lift the instance's JSON ceiling for raw-byte downloads. `responseType`
   // is the discriminator rather than a URL list because it IS the property
   // that matters — a non-JSON response is bytes of unbounded size — and a

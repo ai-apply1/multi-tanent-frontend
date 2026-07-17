@@ -1,0 +1,8 @@
+<!--
+  PLACEHOLDER platform mark, dark ink for the light theme. See platform-logo.svg.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 132 28" role="img" aria-label="Talent Portal" fill="none">
+  <rect x="0.5" y="0.5" width="27" height="27" rx="7" stroke="#14101f" stroke-opacity="0.3"/>
+  <circle cx="14" cy="14" r="5.5" fill="#14101f"/>
+  <text x="38" y="19" font-family="Inter, Segoe UI, system-ui, sans-serif" font-size="14" font-weight="600" fill="#14101f">Talent Portal</text>
+</svg>

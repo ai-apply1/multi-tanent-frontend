@@ -6,6 +6,7 @@ import * as yup from "yup"
 import toast from "react-hot-toast"
 import { Eye, EyeOff, Loader2 } from "lucide-react"
 import { BrandLogo } from "@/components/BrandLogo"
+import { useTenantBranding } from "@/features/tenant/TenantBrandingContext"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -45,6 +46,12 @@ export function LoginPage() {
     defaultValues: { identifier: "", password: "" }
   })
 
+  // Above the `if (user)` early return below: a hook after it would be skipped
+  // on the render where a session already exists, changing hook order between
+  // renders. React throws "rendered fewer hooks than expected" for that, and it
+  // would fire exactly when a login succeeds.
+  const branding = useTenantBranding()
+
   if (user) {
     return <Navigate to={ROUTES.OVERVIEW} replace />
   }
@@ -62,8 +69,33 @@ export function LoginPage() {
   return (
     <div className="auth-gradient relative flex min-h-screen w-full items-center justify-center px-4 py-12">
       <div className="w-full max-w-md">
+        {/* The EMPLOYER's mark, not ours. This page is served from their own
+            domain, so the platform's logo here would be the first thing a
+            customer's HR user sees on their own site.
+
+            Three states, and the middle one is the point: an org that has not
+            uploaded a logo gets its own NAME, never the platform's mark. Their
+            brand is the name; ours is nobody's. The platform mark is reserved
+            for the one case where there is genuinely no employer to name —
+            localhost with no `?tenant=`, or a domain we have no org for.
+
+            Same fallback the apply portal's `TenantLogo` already uses, so a
+            candidate and an HR user see the same thing for a logo-less org. */}
         <div className="mb-8 flex flex-col items-center text-center">
-          <BrandLogo staticMark size="lg" />
+          {branding?.logoUrl ? (
+            <img
+              src={branding.logoUrl}
+              alt={branding.name}
+              className="h-12 w-auto max-w-56 object-contain"
+              draggable={false}
+            />
+          ) : branding?.name ? (
+            <span className="text-2xl font-semibold tracking-tight">
+              {branding.name}
+            </span>
+          ) : (
+            <BrandLogo staticMark size="lg" />
+          )}
         </div>
 
         <Card>

@@ -3,7 +3,7 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ------------------------------------------------------------------ */
-/* Jobjen Admin theme tokens (light by default; data-rich UI)          */
+/* Admin theme tokens (light by default; data-rich UI)                 */
 /* ------------------------------------------------------------------ */
 
 :root {

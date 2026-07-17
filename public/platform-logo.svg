@@ -1,0 +1,12 @@
+<!--
+  PLACEHOLDER platform mark, white ink for the dark theme.
+
+  Deliberately plain: it is a fallback shown only when there is no tenant to
+  brand with (localhost, a preview URL, an org with no logo). Replace this file
+  to rebrand; nothing imports it by name except `lib/platform.ts`.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 132 28" role="img" aria-label="Talent Portal" fill="none">
+  <rect x="0.5" y="0.5" width="27" height="27" rx="7" stroke="#ffffff" stroke-opacity="0.35"/>
+  <circle cx="14" cy="14" r="5.5" fill="#ffffff"/>
+  <text x="38" y="19" font-family="Inter, Segoe UI, system-ui, sans-serif" font-size="14" font-weight="600" fill="#ffffff">Talent Portal</text>
+</svg>

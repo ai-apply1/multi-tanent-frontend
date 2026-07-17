@@ -7,7 +7,7 @@ import { TopBar } from "@/components/layout/TopBar"
 // everyone: the previous key was persisted on every mount, so existing
 // sessions all carried the old open-by-default value and would otherwise
 // never see the change.
-const SIDEBAR_COLLAPSED_KEY = "jobjen-admin-sidebar-collapsed-v2"
+const SIDEBAR_COLLAPSED_KEY = "admin-sidebar-collapsed-v2"
 
 const readInitialCollapsed = (): boolean => {
   // The sidebar starts CLOSED by default. We only keep it open when the
