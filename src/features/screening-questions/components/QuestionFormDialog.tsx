@@ -32,6 +32,8 @@ import {
   DIFFICULTY_LEVELS,
   QUESTION_TEXT_MAX_LENGTH,
   QUESTION_VARIANTS_MAX,
+  VARIANT_SUGGEST_MAX,
+  VARIANT_SUGGEST_MIN,
   type DifficultyLevel,
   type ScreeningQuestion
 } from "@/features/screening-questions/types"
@@ -63,6 +65,9 @@ interface VariantDraft {
 /** Case/space-insensitive — the only difference a candidate would notice. */
 const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim()
 
+/** Enough to choose from without burying the reviewer on the first click. */
+const DEFAULT_SUGGEST_COUNT = 3
+
 /**
  * Create / edit one bank question and all of its wordings.
  *
@@ -93,6 +98,8 @@ export function QuestionFormDialog({
   // DTO never lets through).
   const [difficulty, setDifficulty] = useState<DifficultyLevel | "">("")
   const [tags, setTags] = useState<string[]>([])
+  /** How many drafts to ask for. Fewer may come back — see the suggest call. */
+  const [suggestCount, setSuggestCount] = useState(DEFAULT_SUGGEST_COUNT)
 
   const isEdit = Boolean(question)
 
@@ -111,6 +118,7 @@ export function QuestionFormDialog({
     )
     setDifficulty(question?.difficultyLevel ?? "")
     setTags(question?.tags ?? [])
+    setSuggestCount(DEFAULT_SUGGEST_COUNT)
   }, [open, question])
 
   const patch = (index: number, next: Partial<VariantDraft>) =>
@@ -158,12 +166,20 @@ export function QuestionFormDialog({
 
   const room = QUESTION_VARIANTS_MAX - variants.length
 
+  // Two independent ceilings: what one suggest call may return, and how many
+  // wordings this question can still hold. Offering a number the save would
+  // then refuse is worse than a short menu.
+  const maxSuggest = Math.min(VARIANT_SUGGEST_MAX, Math.max(room, 0))
+  // Clamp for DISPLAY too, not just on send: a picked 5 that silently becomes
+  // 2 because rows were added afterwards would look like the AI ignored them.
+  const askFor = Math.min(Math.max(suggestCount, VARIANT_SUGGEST_MIN), maxSuggest)
+
   const suggestMutation = useMutation({
     mutationFn: () =>
       suggestQuestionVariants({
         sourceText: variants[0]?.text.trim() ?? "",
         ...(difficulty ? { difficultyLevel: difficulty } : {}),
-        count: Math.min(3, Math.max(room, 1))
+        count: askFor
       }),
     onSuccess: (drafts) => {
       // The server already drops drafts that echo the source, but it has
@@ -363,30 +379,59 @@ export function QuestionFormDialog({
                   <Plus className="h-4 w-4" />
                   Add wording
                 </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={
-                    originalEmpty ||
-                    room <= 0 ||
-                    suggestMutation.isPending ||
-                    saveMutation.isPending
-                  }
-                  title={
-                    originalEmpty
-                      ? "Write the original wording first"
-                      : "Draft alternatives with AI — nothing is saved until you do"
-                  }
-                  onClick={() => suggestMutation.mutate()}
-                >
-                  {suggestMutation.isPending ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Sparkles className="h-4 w-4" />
-                  )}
-                  {suggestMutation.isPending ? "Drafting…" : "Suggest with AI"}
-                </Button>
+                <div className="flex items-center gap-1.5">
+                  <Select
+                    value={String(askFor)}
+                    onValueChange={(v) => setSuggestCount(Number(v))}
+                    disabled={
+                      room <= 0 ||
+                      suggestMutation.isPending ||
+                      saveMutation.isPending
+                    }
+                  >
+                    <SelectTrigger
+                      className="h-8 w-[4.25rem]"
+                      aria-label="How many wordings to draft"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Array.from({ length: maxSuggest }, (_, i) => i + 1).map(
+                        (n) => (
+                          <SelectItem key={n} value={String(n)}>
+                            {n}
+                          </SelectItem>
+                        )
+                      )}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={
+                      originalEmpty ||
+                      room <= 0 ||
+                      suggestMutation.isPending ||
+                      saveMutation.isPending
+                    }
+                    title={
+                      originalEmpty
+                        ? "Write the original wording first"
+                        : "Draft alternatives with AI — nothing is saved until you do"
+                    }
+                    onClick={() => suggestMutation.mutate()}
+                  >
+                    {suggestMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-4 w-4" />
+                    )}
+                    {suggestMutation.isPending
+                      ? "Drafting…"
+                      : `Suggest ${askFor === 1 ? "a wording" : `${askFor} wordings`} with AI`}
+                  </Button>
+                </div>
                 {room <= 0 && (
                   <span className="text-xs text-muted-foreground">
                     Limit of {QUESTION_VARIANTS_MAX} wordings reached.
@@ -397,7 +442,10 @@ export function QuestionFormDialog({
               <p className="text-xs text-muted-foreground">
                 {isEdit
                   ? "Editing a wording changes what future interviews ask. Interviews already asked keep the exact words they used — which is why a wording is retired, never deleted."
-                  : "Add a few wordings so candidates for the same job don't all get identical questions."}
+                  : "Add a few wordings so candidates for the same job don't all get identical questions."}{" "}
+                AI drafts are proposals: you may get fewer than you asked for
+                (any that drift in meaning or length are dropped), and nothing
+                is saved until you press {isEdit ? "Save changes" : "Create question"}.
               </p>
             </div>
 
