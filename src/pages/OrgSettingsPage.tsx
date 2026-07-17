@@ -15,6 +15,7 @@ import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useOrganization } from "@/features/organization/useOrganization";
+import { EmailDomainCard } from "@/features/organization/components/EmailDomainCard";
 import {
   presignLogo,
   updateOrganization,
@@ -671,6 +672,13 @@ export function OrgSettingsPage() {
           </CardContent>
         </Card>
       </form>
+
+      {/* Outside the form: it has its own action (ask Resend to re-check) and
+          nothing here is part of the profile PATCH. Guarded because a response
+          cached from before this field shipped has no emailDomain block. */}
+      {org.emailDomain ? (
+        <EmailDomainCard emailDomain={org.emailDomain} canWrite={canWrite} />
+      ) : null}
 
       <NotificationPrefsCard />
     </div>

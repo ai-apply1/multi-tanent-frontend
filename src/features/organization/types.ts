@@ -13,6 +13,63 @@ export interface OrganizationSettings {
 }
 
 /**
+ * Verification state of the org's own sending domain on Resend. Resend's
+ * vocabulary, stored and shown verbatim so this app never disagrees with their
+ * console.
+ *
+ * `verified` is the ONLY state in which candidate emails come from the org's
+ * own address; every other one means the platform address is still being used.
+ * `not_configured` means no domain was ever registered (or the backend ran
+ * without a Resend key).
+ */
+export type EmailDomainStatus =
+  | "not_configured"
+  | "not_started"
+  | "pending"
+  | "verified"
+  | "partially_verified"
+  | "partially_failed"
+  | "failed"
+  | "temporary_failure"
+
+/**
+ * One DNS record the org admin must publish at their registrar.
+ *
+ * Render whatever the array holds and never assume a count or a type: the set
+ * is Resend's to decide and has already changed once (their docs say three DKIM
+ * CNAMEs; the live API returns a single DKIM TXT plus two SPF records).
+ */
+export interface EmailDomainRecord {
+  /** Resend's grouping, e.g. "SPF" | "DKIM". */
+  record: string
+  /** "MX" | "TXT" | "CNAME". */
+  type: string
+  /** The host, e.g. `send` or `resend._domainkey`. */
+  name: string
+  value: string
+  /** Resend returns the string "Auto", not a number. */
+  ttl: string
+  /** Per-record state — this is what tells the admin WHICH record is missing. */
+  status: string
+  /** MX only; null otherwise. */
+  priority: number | null
+}
+
+/** The org's sending domain, as `/admin/organization` returns it. */
+export interface OrgEmailDomain {
+  /** The apex we registered, e.g. `acme.com`. Empty if never registered. */
+  name: string
+  status: EmailDomainStatus
+  /** True only when emails really are coming from the org's own domain. */
+  active: boolean
+  /** The resolved From: candidates will actually see. Never guess this locally. */
+  fromAddress: string
+  records: EmailDomainRecord[]
+  lastCheckedAt: string | null
+  error: string
+}
+
+/**
  * `slug`, `status`, `seats` and `industry` are super-admin owned: they come
  * back on the profile but the org-settings PATCH ignores them.
  */
@@ -33,6 +90,12 @@ export interface OrgProfile {
   industry: string
   seats: number
   settings: OrganizationSettings
+  /**
+   * The org's own sending domain + the DNS records to publish. Read-only:
+   * the domain is registered by the backend at provisioning; the only action
+   * here is asking Resend to re-check (see `verifyEmailDomain`).
+   */
+  emailDomain: OrgEmailDomain
   createdAt: string
   updatedAt: string
 }

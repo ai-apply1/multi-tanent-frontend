@@ -3,6 +3,7 @@ import api from "@/lib/api"
 import type {
   LogoPresignPayload,
   LogoPresignResult,
+  OrgEmailDomain,
   OrgProfile,
   UpdateOrganizationPayload
 } from "@/features/organization/types"
@@ -69,4 +70,19 @@ export async function uploadLogoToPresignedUrl(
       }
     }
   })
+}
+
+/**
+ * Ask Resend to re-check the org's sending domain now — the "I've added the
+ * records" button.
+ *
+ * An accelerator, not the mechanism: Resend verifies asynchronously and also
+ * pushes webhooks, so a domain reaches `verified` on its own once the records
+ * resolve. This just saves the admin from refreshing and hoping.
+ */
+export async function verifyEmailDomain() {
+  const { data } = await api.post<OrgEmailDomain>(
+    "/admin/organization/email-domain/verify"
+  )
+  return data
 }
