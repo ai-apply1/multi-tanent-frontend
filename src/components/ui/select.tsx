@@ -14,7 +14,7 @@ export const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      "flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition focus:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:min-w-0 [&>span]:flex-1 [&>span]:truncate [&>span]:text-left",
+      "flex h-10 w-full items-center justify-between gap-2 rounded-lg border border-[var(--field-border)] bg-surface px-3.5 py-2 text-[13px] font-medium text-ink transition focus:outline-none focus-visible:border-primary focus-visible:shadow-[0_0_0_3px_var(--accent-ring)] disabled:cursor-not-allowed disabled:opacity-50 [&>span]:min-w-0 [&>span]:flex-1 [&>span]:truncate [&>span]:text-left",
       className
     )}
     {...props}
@@ -36,7 +36,7 @@ export const SelectContent = React.forwardRef<
       ref={ref}
       position={position}
       className={cn(
-        "relative z-50 max-h-72 min-w-[8rem] overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-md",
+        "relative z-50 max-h-72 min-w-[8rem] overflow-hidden rounded-lg border border-line bg-popover text-popover-foreground shadow-[0_12px_34px_rgba(13,11,11,0.16)]",
         position === "popper" &&
           "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
         className
@@ -58,7 +58,7 @@ export const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex w-full cursor-pointer select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      "relative flex w-full cursor-pointer select-none items-center rounded-md py-2 pl-8 pr-2 text-[13px] font-medium outline-none focus:bg-surface-3 focus:text-ink data-[state=checked]:bg-accent data-[state=checked]:text-primary data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       className
     )}
     {...props}

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react"
-import { useMutation } from "@tanstack/react-query"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import toast from "react-hot-toast"
 import {
   AlertTriangle,
@@ -15,12 +15,16 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
-  DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   bulkConfirmCvs,
   bulkPresignCvs,
@@ -34,6 +38,10 @@ import {
   type BulkConfirmResult,
   type BulkConfirmSkipReason,
 } from "@/features/candidates/types"
+import {
+  JOB_OPTIONS_QUERY_KEY,
+  listJobOptions,
+} from "@/features/jobs/jobsApi"
 import { errorMessage } from "@/lib/errors"
 import { cn } from "@/lib/utils"
 
@@ -99,7 +107,7 @@ interface UploadRow {
 interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
-  /** The import target. The dialog only opens for an `open` job (422 otherwise). */
+  /** The initial import target — pre-selects the "Attach to job" picker. */
   jobId: string
   jobTitle: string
   /** Fired once the confirm lands with at least one created row. */
@@ -125,6 +133,8 @@ export function UploadCvsDialog({
   const [rows, setRows] = useState<UploadRow[]>([])
   const [touched, setTouched] = useState<Set<string>>(new Set())
   const [result, setResult] = useState<BulkConfirmResult | null>(null)
+  const [selectedJobId, setSelectedJobId] = useState(jobId)
+  const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Fresh dialog every time: a previous run's rows/result must not leak into
@@ -135,7 +145,30 @@ export function UploadCvsDialog({
     setRows([])
     setTouched(new Set())
     setResult(null)
-  }, [open])
+    setSelectedJobId(jobId)
+    setIsDragging(false)
+  }, [open, jobId])
+
+  // Open jobs only — closed/archived jobs 422 on presign.
+  const jobsQuery = useQuery({
+    queryKey: JOB_OPTIONS_QUERY_KEY,
+    queryFn: listJobOptions,
+    enabled: open,
+    staleTime: 60_000,
+  })
+
+  const jobOptions = useMemo(() => {
+    const all = jobsQuery.data ?? []
+    const open = all.filter((j) => j.status === "open")
+    // If the caller's job isn't open (rare — the caller should have blocked
+    // opening this dialog) show it anyway so the picker isn't visibly empty
+    // of the "current" job.
+    if (jobId && !open.some((j) => j._id === jobId)) {
+      const passed = all.find((j) => j._id === jobId)
+      if (passed) return [passed, ...open]
+    }
+    return open
+  }, [jobsQuery.data, jobId])
 
   const addFiles = (fileList: FileList | null) => {
     if (!fileList?.length) return
@@ -196,13 +229,15 @@ export function UploadCvsDialog({
     row.fullName.trim() ? null : "Name is required."
 
   const canSubmit =
-    rows.length > 0 && rows.every((r) => !emailError(r) && !nameError(r))
+    Boolean(selectedJobId) &&
+    rows.length > 0 &&
+    rows.every((r) => !emailError(r) && !nameError(r))
 
   const uploadMutation = useMutation({
     mutationFn: async (): Promise<BulkConfirmResult> => {
       // 1. Presign — one URL per file, same order as we sent them.
       const presigned = await bulkPresignCvs(
-        jobId,
+        selectedJobId,
         rows.map((r) => ({
           fileName: r.file.name,
           contentType: r.contentType,
@@ -251,7 +286,7 @@ export function UploadCvsDialog({
       // 3. Confirm. Per-row on the server too: duplicates and bad keys are
       //    reported, not thrown.
       return bulkConfirmCvs(
-        jobId,
+        selectedJobId,
         uploaded.map(({ row, key }) => ({
           fullName: row.fullName.trim(),
           email: row.email.trim(),
@@ -288,65 +323,132 @@ export function UploadCvsDialog({
         onOpenChange(next)
       }}
     >
-      <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-3xl">
-        <DialogHeader className="shrink-0">
-          <DialogTitle>Upload CVs</DialogTitle>
-          <DialogDescription>
-            {result ? (
-              <>Import summary for {jobTitle}.</>
-            ) : (
-              <>
-                Add up to {MAX_CV_UPLOAD_FILES} CVs to <strong>{jobTitle}</strong>. Each
-                one becomes a candidate at <em>Applied</em>, and the CV is parsed and
-                pre-screened automatically. PDF, DOC and DOCX only.
-              </>
-            )}
-          </DialogDescription>
-        </DialogHeader>
+      <DialogContent className="flex max-h-[90vh] max-w-[480px] flex-col gap-0 p-0">
+        <div className="flex items-start justify-between gap-4 px-6 pt-[22px] pb-[14px]">
+          <div className="min-w-0">
+            <DialogTitle className="text-[18px] font-semibold leading-tight">
+              Upload CVs
+            </DialogTitle>
+            <DialogDescription className="mt-1.5 text-[13px] leading-relaxed text-ink-muted">
+              {result
+                ? `Import summary for ${jobTitle}.`
+                : "Drop resumes and Jobjen parses each into a candidate, runs the CV pre-screen, and emails an interview invite to anyone who clears the gates."}
+            </DialogDescription>
+          </div>
+        </div>
 
-        <div className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1 py-2">
+        <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto px-6 pb-5">
           {result ? (
             <ImportSummary result={result} />
           ) : (
-            <div className="space-y-4">
-              <button
-                type="button"
-                disabled={busy || rows.length >= MAX_CV_UPLOAD_FILES}
-                onClick={() => fileInputRef.current?.click()}
-                className={cn(
-                  "flex w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border px-4 py-8 text-center transition-colors",
-                  "hover:border-primary hover:bg-primary/5",
-                  "disabled:pointer-events-none disabled:opacity-50"
-                )}
-              >
-                <UploadCloud className="h-6 w-6 text-primary" />
-                <span className="text-sm font-medium">Choose CV files</span>
-                <span className="text-xs text-muted-foreground">
-                  {rows.length > 0
-                    ? `${rows.length} of ${MAX_CV_UPLOAD_FILES} selected`
-                    : "PDF, DOC or DOCX"}
-                </span>
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept={ACCEPT_ATTR}
-                className="hidden"
-                onChange={(e) => {
-                  addFiles(e.target.files)
-                  // Reset so re-picking the same file fires `change` again.
-                  e.target.value = ""
+            <>
+              <div>
+                <label
+                  htmlFor="upl-job"
+                  className="mb-1.5 block text-[13px] font-semibold text-ink"
+                >
+                  Attach to job
+                </label>
+                <Select
+                  value={selectedJobId}
+                  onValueChange={(v) => setSelectedJobId(v)}
+                  disabled={busy || jobsQuery.isLoading}
+                >
+                  <SelectTrigger
+                    id="upl-job"
+                    className="h-11"
+                    aria-label="Attach to job"
+                  >
+                    <SelectValue placeholder={jobTitle || "Select a job…"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {jobOptions.length === 0 ? (
+                      <div className="px-2 py-2 text-[12.5px] text-ink-muted">
+                        No open jobs.
+                      </div>
+                    ) : (
+                      jobOptions.map((j) => (
+                        <SelectItem key={j._id} value={j._id}>
+                          {j.title}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+                <p className="mt-1.5 text-[12px] text-ink-muted">
+                  New candidates are added to this job and screened against
+                  its gates.
+                </p>
+              </div>
+
+              <div
+                onDragEnter={(e) => {
+                  e.preventDefault()
+                  if (!busy) setIsDragging(true)
                 }}
-              />
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  if (!busy) setIsDragging(true)
+                }}
+                onDragLeave={(e) => {
+                  // Only clear when leaving the drop zone itself, not a child.
+                  if (e.currentTarget.contains(e.relatedTarget as Node)) return
+                  setIsDragging(false)
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  setIsDragging(false)
+                  if (busy) return
+                  addFiles(e.dataTransfer.files)
+                }}
+              >
+                <button
+                  type="button"
+                  disabled={busy || rows.length >= MAX_CV_UPLOAD_FILES}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={cn(
+                    "flex w-full flex-col items-center justify-center rounded-xl border-2 border-dashed border-line-2 bg-surface-2 px-5 py-8 text-center transition-colors",
+                    "hover:border-primary/60",
+                    isDragging ? "border-primary bg-accent" : "",
+                    "disabled:pointer-events-none disabled:opacity-50",
+                  )}
+                >
+                  <span className="mb-3 inline-flex h-[46px] w-[46px] items-center justify-center rounded-xl bg-accent text-primary">
+                    <UploadCloud
+                      className="h-[22px] w-[22px]"
+                      strokeWidth={1.7}
+                    />
+                  </span>
+                  <span className="text-[14px] font-semibold text-ink">
+                    Drag & drop PDFs here
+                  </span>
+                  <span className="mt-1.5 text-[12.5px] text-ink-muted">
+                    or click to browse · PDF or DOCX, up to{" "}
+                    {MAX_CV_UPLOAD_FILES} files
+                  </span>
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept={ACCEPT_ATTR}
+                  className="hidden"
+                  onChange={(e) => {
+                    addFiles(e.target.files)
+                    // Reset so re-picking the same file fires `change` again.
+                    e.target.value = ""
+                  }}
+                />
+              </div>
 
               {rows.length === 0 ? (
-                <p className="text-center text-xs text-muted-foreground">
-                  Name and email are required per CV — they're the candidate's identity
-                  and the email is how the interview invite reaches them.
+                <p className="text-center text-[12px] text-ink-muted">
+                  Name and email are required per CV — they're the candidate's
+                  identity and the email is how the interview invite reaches
+                  them.
                 </p>
               ) : (
-                <div className="space-y-3">
+                <div className="grid gap-2.5">
                   {rows.map((row) => {
                     const isTouched = touched.has(row.id)
                     const emailMsg = isTouched ? emailError(row) : null
@@ -354,151 +456,146 @@ export function UploadCvsDialog({
                     return (
                       <div
                         key={row.id}
-                        className="rounded-lg border border-border bg-card p-3"
+                        className="rounded-xl border border-line bg-surface p-3"
                       >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-                            <span
-                              className="truncate text-xs font-medium"
-                              title={row.file.name}
-                            >
-                              {row.file.name}
-                            </span>
-                            <span className="shrink-0 text-[11px] text-muted-foreground">
-                              {formatBytes(row.file.size)}
-                            </span>
+                        <div className="flex items-start gap-2.5">
+                          <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-primary">
+                            <FileText className="h-4 w-4" strokeWidth={1.7} />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <span
+                                className="truncate text-[12.5px] font-medium text-ink"
+                                title={row.file.name}
+                              >
+                                {row.file.name}
+                              </span>
+                              <span className="shrink-0 text-[11px] text-ink-subtle">
+                                {formatBytes(row.file.size)}
+                              </span>
+                            </div>
+
+                            <div className="mt-2.5 grid gap-2">
+                              <Input
+                                value={row.fullName}
+                                disabled={busy}
+                                aria-invalid={Boolean(nameMsg)}
+                                maxLength={200}
+                                placeholder="Full name"
+                                onChange={(e) =>
+                                  patchRow(row.id, {
+                                    fullName: e.target.value,
+                                  })
+                                }
+                                onBlur={() =>
+                                  setTouched((prev) =>
+                                    new Set(prev).add(row.id),
+                                  )
+                                }
+                                className="h-9 text-[13px]"
+                              />
+                              {nameMsg ? (
+                                <p className="text-[11.5px] text-[var(--danger)]">
+                                  {nameMsg}
+                                </p>
+                              ) : null}
+                              <Input
+                                type="email"
+                                value={row.email}
+                                disabled={busy}
+                                aria-invalid={Boolean(emailMsg)}
+                                maxLength={320}
+                                placeholder="candidate@example.com"
+                                onChange={(e) =>
+                                  patchRow(row.id, { email: e.target.value })
+                                }
+                                onBlur={() =>
+                                  setTouched((prev) =>
+                                    new Set(prev).add(row.id),
+                                  )
+                                }
+                                className="h-9 text-[13px]"
+                              />
+                              {emailMsg ? (
+                                <p className="text-[11.5px] text-[var(--danger)]">
+                                  {emailMsg}
+                                </p>
+                              ) : null}
+                            </div>
+
+                            {row.status === "uploading" ? (
+                              <div className="mt-2.5">
+                                <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-3">
+                                  <div
+                                    className="h-full rounded-full bg-primary transition-[width] duration-200"
+                                    style={{ width: `${row.progress}%` }}
+                                  />
+                                </div>
+                                <p className="mt-1 text-[11px] text-ink-muted">
+                                  Uploading… {row.progress}%
+                                </p>
+                              </div>
+                            ) : null}
+                            {row.error ? (
+                              <p className="mt-2 text-[11.5px] text-[var(--danger)]">
+                                {row.error}
+                              </p>
+                            ) : null}
                           </div>
-                          <div className="flex shrink-0 items-center gap-2">
+                          <div className="flex shrink-0 items-center gap-1.5">
                             {row.status === "uploaded" ? (
                               <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />
                             ) : null}
                             {row.status === "failed" ? (
-                              <AlertTriangle className="h-4 w-4 text-destructive" />
+                              <AlertTriangle className="h-4 w-4 text-[var(--danger)]" />
                             ) : null}
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 hover:bg-destructive/10 hover:text-destructive"
+                            <button
+                              type="button"
                               disabled={busy}
                               onClick={() => removeRow(row.id)}
                               aria-label={`Remove ${row.file.name}`}
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:pointer-events-none disabled:opacity-50"
                             >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
                           </div>
                         </div>
-
-                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                          <div className="space-y-1.5">
-                            <Label htmlFor={`name-${row.id}`} className="text-xs">
-                              Name
-                            </Label>
-                            <Input
-                              id={`name-${row.id}`}
-                              value={row.fullName}
-                              disabled={busy}
-                              aria-invalid={Boolean(nameMsg)}
-                              maxLength={200}
-                              onChange={(e) =>
-                                patchRow(row.id, { fullName: e.target.value })
-                              }
-                              onBlur={() =>
-                                setTouched((prev) => new Set(prev).add(row.id))
-                              }
-                            />
-                            {nameMsg ? (
-                              <p className="text-xs text-destructive">{nameMsg}</p>
-                            ) : null}
-                          </div>
-                          <div className="space-y-1.5">
-                            <Label htmlFor={`email-${row.id}`} className="text-xs">
-                              Email
-                            </Label>
-                            <Input
-                              id={`email-${row.id}`}
-                              type="email"
-                              value={row.email}
-                              disabled={busy}
-                              aria-invalid={Boolean(emailMsg)}
-                              maxLength={320}
-                              placeholder="candidate@example.com"
-                              onChange={(e) => patchRow(row.id, { email: e.target.value })}
-                              onBlur={() =>
-                                setTouched((prev) => new Set(prev).add(row.id))
-                              }
-                            />
-                            {emailMsg ? (
-                              <p className="text-xs text-destructive">{emailMsg}</p>
-                            ) : null}
-                          </div>
-                          <div className="space-y-1.5">
-                            <Label htmlFor={`phone-${row.id}`} className="text-xs">
-                              Phone <span className="text-muted-foreground">(optional)</span>
-                            </Label>
-                            <Input
-                              id={`phone-${row.id}`}
-                              value={row.phone}
-                              disabled={busy}
-                              maxLength={40}
-                              placeholder="+92…"
-                              onChange={(e) => patchRow(row.id, { phone: e.target.value })}
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <Label htmlFor={`city-${row.id}`} className="text-xs">
-                              City <span className="text-muted-foreground">(optional)</span>
-                            </Label>
-                            <Input
-                              id={`city-${row.id}`}
-                              value={row.city}
-                              disabled={busy}
-                              maxLength={120}
-                              onChange={(e) => patchRow(row.id, { city: e.target.value })}
-                            />
-                          </div>
-                        </div>
-
-                        {row.status === "uploading" ? (
-                          <div className="mt-3">
-                            <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                              <div
-                                className="h-full rounded-full bg-primary transition-[width] duration-200"
-                                style={{ width: `${row.progress}%` }}
-                              />
-                            </div>
-                            <p className="mt-1 text-[11px] text-muted-foreground">
-                              Uploading… {row.progress}%
-                            </p>
-                          </div>
-                        ) : null}
-                        {row.error ? (
-                          <p className="mt-2 text-xs text-destructive">{row.error}</p>
-                        ) : null}
                       </div>
                     )
                   })}
                 </div>
               )}
-            </div>
+
+              {failedUploads.length > 0 && !busy ? (
+                <p className="text-[12px] text-[var(--danger)]">
+                  {failedUploads.length} upload
+                  {failedUploads.length === 1 ? "" : "s"} failed — remove or
+                  retry {failedUploads.length === 1 ? "it" : "them"}.
+                </p>
+              ) : null}
+            </>
           )}
         </div>
 
-        <DialogFooter className="shrink-0">
+        <div className="flex justify-end gap-2.5 border-t border-line px-6 py-4">
           {result ? (
             <Button onClick={() => onOpenChange(false)}>Done</Button>
           ) : (
             <>
-              <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>
+              <Button
+                variant="secondary"
+                disabled={busy}
+                onClick={() => onOpenChange(false)}
+              >
                 Cancel
               </Button>
               <Button
-                // Deliberately NOT gated on `canSubmit`: every row starts with
-                // an empty (invalid) email, so a canSubmit-disabled button
+                // Deliberately NOT gated on `canSubmit` alone: every row starts
+                // with an empty (invalid) email, so a canSubmit-disabled button
                 // would sit dead with no explanation. Clicking instead reveals
                 // every field error at once — a fresh dialog stays clean until
                 // the user actually asks to submit.
-                disabled={rows.length === 0 || busy}
+                disabled={rows.length === 0 || !selectedJobId || busy}
                 onClick={() => {
                   setTouched(new Set(rows.map((r) => r.id)))
                   if (!canSubmit) return
@@ -513,24 +610,13 @@ export function UploadCvsDialog({
                 ) : (
                   <>
                     <Upload className="h-4 w-4" />
-                    Upload {rows.length > 0 ? rows.length : ""}{" "}
-                    {rows.length === 1 ? "CV" : "CVs"}
+                    Upload & screen
                   </>
                 )}
               </Button>
             </>
           )}
-        </DialogFooter>
-
-        {/* Uploads that never reached S3 — distinct from the server's
-            `skipped`, and only meaningful while the summary isn't shown yet
-            (the summary folds them into its own section). */}
-        {!result && failedUploads.length > 0 && !busy ? (
-          <p className="shrink-0 text-xs text-destructive">
-            {failedUploads.length} upload{failedUploads.length === 1 ? "" : "s"} failed —
-            remove or retry {failedUploads.length === 1 ? "it" : "them"}.
-          </p>
-        ) : null}
+        </div>
       </DialogContent>
     </Dialog>
   )
@@ -543,14 +629,14 @@ export function UploadCvsDialog({
  */
 function ImportSummary({ result }: { result: BulkConfirmResult }) {
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="inline-flex items-center gap-1.5 font-medium">
+    <div className="grid gap-4">
+      <div className="flex flex-wrap items-center gap-3 text-[13px]">
+        <span className="inline-flex items-center gap-1.5 font-medium text-ink">
           <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />
           {result.created.length} created
         </span>
         {result.skipped.length > 0 ? (
-          <span className="inline-flex items-center gap-1.5 font-medium text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5 font-medium text-ink-muted">
             <AlertTriangle className="h-4 w-4" />
             {result.skipped.length} skipped
           </span>
@@ -558,18 +644,18 @@ function ImportSummary({ result }: { result: BulkConfirmResult }) {
       </div>
 
       {result.created.length > 0 ? (
-        <div className="space-y-1.5">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <div className="grid gap-1.5">
+          <h4 className="text-[11px] font-bold uppercase tracking-[0.05em] text-ink-subtle">
             Created
           </h4>
-          <ul className="space-y-1">
+          <ul className="grid gap-1">
             {result.created.map((row) => (
               <li
                 key={row.candidateId}
-                className="flex flex-wrap items-baseline gap-x-2 rounded-md border border-border px-3 py-2 text-sm"
+                className="flex flex-wrap items-baseline gap-x-2 rounded-lg border border-line px-3 py-2 text-[13px]"
               >
-                <span className="font-medium">{row.fullName}</span>
-                <span className="text-xs text-muted-foreground">{row.email}</span>
+                <span className="font-medium text-ink">{row.fullName}</span>
+                <span className="text-[12px] text-ink-muted">{row.email}</span>
               </li>
             ))}
           </ul>
@@ -577,29 +663,33 @@ function ImportSummary({ result }: { result: BulkConfirmResult }) {
       ) : null}
 
       {result.skipped.length > 0 ? (
-        <div className="space-y-1.5">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <div className="grid gap-1.5">
+          <h4 className="text-[11px] font-bold uppercase tracking-[0.05em] text-ink-subtle">
             Skipped
           </h4>
-          <ul className="space-y-1">
+          <ul className="grid gap-1">
             {result.skipped.map((row, index) => (
               <li
                 key={`${row.email}-${index}`}
-                className="flex flex-wrap items-baseline justify-between gap-x-2 rounded-md border border-border px-3 py-2 text-sm"
+                className="flex flex-wrap items-baseline justify-between gap-x-2 rounded-lg border border-line px-3 py-2 text-[13px]"
               >
                 <span className="flex flex-wrap items-baseline gap-x-2">
-                  <span className="font-medium">{row.fullName}</span>
-                  <span className="text-xs text-muted-foreground">{row.email}</span>
+                  <span className="font-medium text-ink">{row.fullName}</span>
+                  <span className="text-[12px] text-ink-muted">
+                    {row.email}
+                  </span>
                 </span>
-                <span className="text-xs text-muted-foreground">
-                  {SKIP_REASON_LABELS[row.reason as BulkConfirmSkipReason] ?? row.reason}
+                <span className="text-[12px] text-ink-muted">
+                  {SKIP_REASON_LABELS[row.reason as BulkConfirmSkipReason] ??
+                    row.reason}
                 </span>
               </li>
             ))}
           </ul>
-          <p className="text-[11px] text-muted-foreground">
-            Skipped rows created nothing — nothing to undo. Re-upload after fixing the
-            email, or open the existing candidate if they already applied to this job.
+          <p className="text-[11px] text-ink-muted">
+            Skipped rows created nothing — nothing to undo. Re-upload after
+            fixing the email, or open the existing candidate if they already
+            applied to this job.
           </p>
         </div>
       ) : null}

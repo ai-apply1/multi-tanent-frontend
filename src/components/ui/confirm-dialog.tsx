@@ -1,12 +1,10 @@
 import type { ReactNode } from "react"
-import { Loader2 } from "lucide-react"
+import { AlertTriangle, Info, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
-  DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog"
 
@@ -18,11 +16,10 @@ interface ConfirmDialogProps {
   confirmLabel?: string
   cancelLabel?: string
   /**
-   * When true, styles the confirm button with the `destructive`
-   * variant. Use for any irreversible action (delete, reset, revoke,
-   * etc.). The header itself stays icon-free for a clean, low-noise
-   * look — the destructive intent reads from the title copy and the
-   * red button.
+   * When true, styles the confirm button with the `danger` variant and swaps
+   * the header icon square to danger tones. Use for any irreversible action
+   * (delete, reset, revoke, etc.). Otherwise the icon square + button both
+   * fall back to the accent-informational tones.
    */
   destructive?: boolean
   /**
@@ -71,23 +68,40 @@ export function ConfirmDialog({
     onOpenChange(next)
   }
 
+  const Icon = destructive ? AlertTriangle : Info
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
+      <DialogContent className="max-w-[420px] p-0 gap-0">
+        <div className="p-6 pb-2">
+          <span
+            className={
+              destructive
+                ? "h-11 w-11 rounded-xl bg-[var(--danger-soft)] text-[var(--danger)] inline-flex items-center justify-center mb-3.5"
+                : "h-11 w-11 rounded-xl bg-[var(--accent-soft)] text-primary inline-flex items-center justify-center mb-3.5"
+            }
+          >
+            <Icon className="h-[22px] w-[22px]" strokeWidth={1.7} />
+          </span>
+          <DialogTitle className="text-[18px] font-semibold text-ink">
+            {title}
+          </DialogTitle>
+          <DialogDescription className="mt-2 text-[13.5px] text-ink-muted leading-relaxed">
+            {description}
+          </DialogDescription>
+        </div>
+        <div className="border-t border-line px-6 py-4 flex justify-end gap-2.5">
           <Button
-            variant="outline"
+            variant="secondary"
+            size="sm"
             onClick={() => onOpenChange(false)}
             disabled={loading}
           >
             {cancelLabel}
           </Button>
           <Button
-            variant={destructive ? "destructive" : "default"}
+            variant={destructive ? "danger" : "default"}
+            size="sm"
             onClick={onConfirm}
             disabled={loading}
           >
@@ -100,7 +114,7 @@ export function ConfirmDialog({
               confirmLabel
             )}
           </Button>
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   )

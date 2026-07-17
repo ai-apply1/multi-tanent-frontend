@@ -1,17 +1,13 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { keepPreviousData, useQuery } from "@tanstack/react-query"
-import { Loader2, Plus, Search, X } from "lucide-react"
+import { Loader2, Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
-  DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
 import {
   Select,
   SelectContent,
@@ -21,18 +17,50 @@ import {
 } from "@/components/ui/select"
 import { listScreeningQuestions } from "@/features/screening-questions/screeningQuestionsApi"
 import {
-  askableCount,
   DIFFICULTY_LABELS,
-  difficultyVariant,
   questionLabel,
   type DifficultyLevel,
   type ScreeningQuestion,
 } from "@/features/screening-questions/types"
+import { cn } from "@/lib/utils"
 
 const ALL = "all"
-const PAGE_SIZE = 25
+const FETCH_LIMIT = 100
 
 const DIFFICULTIES = Object.keys(DIFFICULTY_LABELS) as DifficultyLevel[]
+
+/**
+ * The bank has no first-class "category" field — the design's category filter
+ * is wired through the `tags` param so a shop that tags its questions with
+ * these familiar buckets can still narrow by them.
+ */
+const CATEGORY_OPTIONS = [
+  "Introductory",
+  "Behavioral",
+  "Technical",
+  "System Design",
+  "Culture Fit",
+  "Situational",
+] as const
+
+/** Tone token per difficulty band — the small chip on each row. */
+const DIFFICULTY_CHIP: Record<
+  DifficultyLevel,
+  { bg: string; text: string }
+> = {
+  easy: {
+    bg: "bg-[var(--success-soft)]",
+    text: "text-[var(--success)]",
+  },
+  medium: {
+    bg: "bg-[var(--warning-soft)]",
+    text: "text-[var(--warning)]",
+  },
+  hard: {
+    bg: "bg-[var(--danger-soft)]",
+    text: "text-[var(--danger)]",
+  },
+}
 
 interface AddJobQuestionsDialogProps {
   open: boolean
@@ -46,9 +74,9 @@ interface AddJobQuestionsDialogProps {
 
 /**
  * Pick questions from the org's bank to append to a job's interview script.
- * Already-attached rows are shown as disabled rather than hidden, so the
- * absence of a question you expected reads as "already on this job" instead
- * of a broken filter.
+ * Already-attached rows are shown as disabled rather than hidden — the absence
+ * of a question you expected reads as "already on this job" instead of a
+ * broken filter.
  *
  * Rows show the bank's FIRST wording. A candidate may be asked any of the
  * question's variants — picking one here picks all of them.
@@ -62,7 +90,7 @@ export function AddJobQuestionsDialog({
 }: AddJobQuestionsDialogProps) {
   const [search, setSearch] = useState("")
   const [difficulty, setDifficulty] = useState<string>(ALL)
-  const [page, setPage] = useState(1)
+  const [category, setCategory] = useState<string>(ALL)
   // Ordered picks — they're appended to the script in this order.
   const [selected, setSelected] = useState<ScreeningQuestion[]>([])
 
@@ -70,35 +98,45 @@ export function AddJobQuestionsDialog({
     if (!open) return
     setSearch("")
     setDifficulty(ALL)
-    setPage(1)
+    setCategory(ALL)
     setSelected([])
   }, [open])
 
   const questionsQuery = useQuery({
-    queryKey: ["screeningQuestions", { search, difficulty, page }],
+    queryKey: [
+      "screeningQuestions",
+      { search, difficulty, category, limit: FETCH_LIMIT },
+    ],
     queryFn: () =>
       listScreeningQuestions({
-        page,
-        limit: PAGE_SIZE,
+        page: 1,
+        limit: FETCH_LIMIT,
         search: search.trim() || undefined,
         difficultyLevel:
           difficulty !== ALL ? (difficulty as DifficultyLevel) : undefined,
+        // The bank has no category field of its own; a category filter is
+        // sent as a tag narrower, which matches any question tagged with it.
+        tags: category !== ALL ? [category] : undefined,
       }),
     enabled: open,
     placeholderData: keepPreviousData,
   })
 
-  const attached = new Set(attachedIds)
-  const selectedIds = selected.map((q) => q._id)
+  const attached = useMemo(() => new Set(attachedIds), [attachedIds])
+  const selectedSet = useMemo(
+    () => new Set(selected.map((q) => q._id)),
+    [selected],
+  )
   const rows = questionsQuery.data?.data ?? []
-  const total = questionsQuery.data?.count ?? 0
 
-  const toggle = (question: ScreeningQuestion) =>
+  const toggle = (question: ScreeningQuestion) => {
+    if (attached.has(question._id)) return
     setSelected((prev) =>
       prev.some((q) => q._id === question._id)
         ? prev.filter((q) => q._id !== question._id)
         : [...prev, question],
     )
+  }
 
   return (
     <Dialog
@@ -108,216 +146,149 @@ export function AddJobQuestionsDialog({
         onOpenChange(next)
       }}
     >
-      <DialogContent className="flex max-h-[90vh] flex-col overflow-hidden sm:max-w-3xl">
-        <DialogHeader className="shrink-0">
-          <DialogTitle>Add questions</DialogTitle>
-          <DialogDescription>
-            Pick from your question bank. They're appended to the end of this
-            job's script — you can reorder them afterwards.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 py-2">
-          <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
-            <div className="relative flex-1">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value)
-                  setPage(1)
-                }}
-                placeholder="Search questions…"
-                className="pl-9"
-              />
-            </div>
-            <Select
-              value={difficulty}
-              onValueChange={(v) => {
-                setDifficulty(v)
-                setPage(1)
-              }}
-            >
-              <SelectTrigger
-                aria-label="Filter by difficulty"
-                className="w-full sm:w-40"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>All difficulties</SelectItem>
-                {DIFFICULTIES.map((d) => (
-                  <SelectItem key={d} value={d}>
-                    {DIFFICULTY_LABELS[d]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+      <DialogContent className="flex max-h-[90vh] max-w-[560px] flex-col gap-0 p-0">
+        <div className="flex items-start justify-between gap-4 px-6 pt-[22px] pb-[14px]">
+          <div className="min-w-0">
+            <DialogTitle className="text-[18px] font-semibold leading-tight">
+              Add questions
+            </DialogTitle>
+            <DialogDescription className="mt-1.5 text-[13px] leading-relaxed text-ink-muted">
+              Pick from your bank and set a weight for each. Weights are
+              normalised to total 100% when the interview is scored.
+            </DialogDescription>
           </div>
-
-          <div className="min-h-48 flex-1 overflow-y-auto rounded-lg border border-border">
-            {questionsQuery.isLoading ? (
-              <p className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading questions…
-              </p>
-            ) : questionsQuery.isError ? (
-              <p className="py-12 text-center text-sm text-destructive">
-                Could not load questions.{" "}
-                <button
-                  onClick={() => questionsQuery.refetch()}
-                  className="underline"
-                >
-                  Retry
-                </button>
-              </p>
-            ) : rows.length === 0 ? (
-              <p className="py-12 text-center text-sm text-muted-foreground">
-                No questions match these filters.
-              </p>
-            ) : (
-              <ul className="divide-y divide-border">
-                {rows.map((question) => {
-                  const order = selectedIds.indexOf(question._id)
-                  const isSelected = order >= 0
-                  const isAttached = attached.has(question._id)
-                  return (
-                    <li key={question._id}>
-                      <button
-                        type="button"
-                        disabled={isAttached}
-                        title={
-                          isAttached ? "Already attached to this job" : undefined
-                        }
-                        onClick={() => toggle(question)}
-                        className={`flex w-full items-start gap-3 px-3 py-2.5 text-left transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${
-                          isSelected ? "bg-primary/10" : ""
-                        }`}
-                      >
-                        <span
-                          className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-[11px] font-semibold ${
-                            isSelected
-                              ? "border-primary bg-primary text-primary-foreground"
-                              : "border-muted-foreground/40"
-                          }`}
-                        >
-                          {isSelected ? order + 1 : null}
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="line-clamp-2 block text-sm font-medium">
-                            {questionLabel(question)}
-                          </span>
-                          <span className="mt-1 flex flex-wrap items-center gap-1.5">
-                            <Badge
-                              variant={difficultyVariant[question.difficultyLevel]}
-                              className="capitalize"
-                            >
-                              {question.difficultyLevel}
-                            </Badge>
-                            {question.tags.map((tag) => (
-                              <Badge key={tag} variant="secondary">
-                                {tag}
-                              </Badge>
-                            ))}
-                            <span className="text-xs text-muted-foreground">
-                              {askableCount(question) === 1
-                                ? "1 wording"
-                                : `${askableCount(question)} wordings`}
-                            </span>
-                            {isAttached ? (
-                              <span className="text-xs text-muted-foreground">
-                                Already attached
-                              </span>
-                            ) : null}
-                          </span>
-                        </span>
-                      </button>
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
-          </div>
-
-          {total > 0 ? (
-            <div className="flex shrink-0 items-center justify-between text-xs text-muted-foreground">
-              <span>
-                {total} question{total === 1 ? "" : "s"} · page {page}
-              </span>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page <= 1 || questionsQuery.isFetching}
-                >
-                  Previous
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPage((p) => p + 1)}
-                  disabled={
-                    !questionsQuery.data?.nextPage || questionsQuery.isFetching
-                  }
-                >
-                  Next
-                </Button>
-              </div>
-            </div>
-          ) : null}
         </div>
 
-        {/* Selection tray — the picks stay visible regardless of filters/paging. */}
-        {selected.length > 0 ? (
-          <div className="shrink-0">
-            <div className="rounded-lg border border-border bg-muted/40 px-4 py-3">
-              <div className="flex max-h-21 flex-wrap content-start items-start gap-1.5 overflow-y-auto">
-                {selected.map((question, i) => (
-                  <span
-                    key={question._id}
-                    className="inline-flex h-6 max-w-56 items-center gap-1.5 rounded-md border border-primary/25 bg-primary/5 pl-1 pr-0.5 text-xs shadow-sm"
-                  >
-                    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded bg-primary/15 text-[10px] font-semibold tabular-nums text-primary">
-                      {i + 1}
-                    </span>
-                    <span
-                      className="truncate text-foreground/90"
-                      title={questionLabel(question)}
-                    >
-                      {questionLabel(question)}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => toggle(question)}
-                      aria-label="Remove from selection"
-                      className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-primary/20 hover:text-foreground"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-              <div className="mt-2.5 flex items-center justify-between gap-2">
-                <p className="text-[11px] text-muted-foreground">
-                  Appended to the script in this order
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setSelected([])}
-                  className="shrink-0 text-[11px] font-medium text-muted-foreground underline-offset-2 transition-colors hover:text-destructive hover:underline"
-                >
-                  Clear all
-                </button>
-              </div>
-            </div>
+        <div className="flex gap-2.5 px-6 pt-1 pb-2">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-[15px] w-[15px] -translate-y-1/2 text-ink-subtle" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search questions…"
+              className="h-[37px] w-full rounded-[9px] border border-[var(--field-border)] bg-surface pl-9 pr-3 text-[13px] text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)]"
+            />
           </div>
-        ) : null}
+          <Select
+            value={difficulty}
+            onValueChange={(v) => setDifficulty(v)}
+          >
+            <SelectTrigger
+              aria-label="Filter by difficulty"
+              className="h-[37px] w-[140px] shrink-0 rounded-[9px]"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>All difficulties</SelectItem>
+              {DIFFICULTIES.map((d) => (
+                <SelectItem key={d} value={d}>
+                  {DIFFICULTY_LABELS[d]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={category} onValueChange={(v) => setCategory(v)}>
+            <SelectTrigger
+              aria-label="Filter by category"
+              className="h-[37px] w-[150px] shrink-0 rounded-[9px]"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>All categories</SelectItem>
+              {CATEGORY_OPTIONS.map((c) => (
+                <SelectItem key={c} value={c}>
+                  {c}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
-        <DialogFooter className="shrink-0 border-t border-border pt-4">
+        <div className="grid max-h-[420px] min-h-0 flex-1 gap-2 overflow-auto px-6 py-2">
+          {questionsQuery.isLoading ? (
+            <p className="flex items-center justify-center gap-2 py-12 text-[13px] text-ink-muted">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading questions…
+            </p>
+          ) : questionsQuery.isError ? (
+            <p className="py-12 text-center text-[13px] text-[var(--danger)]">
+              Could not load questions.{" "}
+              <button
+                onClick={() => questionsQuery.refetch()}
+                className="underline"
+              >
+                Retry
+              </button>
+            </p>
+          ) : rows.length === 0 ? (
+            <p className="py-12 text-center text-[13px] text-ink-muted">
+              No questions match these filters.
+            </p>
+          ) : (
+            rows.map((question) => {
+              const isAttached = attached.has(question._id)
+              const isSelected = selectedSet.has(question._id)
+              const chip = DIFFICULTY_CHIP[question.difficultyLevel]
+              return (
+                <label
+                  key={question._id}
+                  className={cn(
+                    "flex items-start gap-2.5 rounded-lg border border-line p-3",
+                    isAttached
+                      ? "cursor-default opacity-55"
+                      : "cursor-pointer hover:border-primary/40",
+                    isSelected && !isAttached ? "bg-accent border-primary" : "",
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    disabled={isAttached}
+                    checked={isAttached || isSelected}
+                    onChange={() => toggle(question)}
+                    className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--accent-solid,var(--accent))]"
+                    style={{ accentColor: "var(--accent, currentColor)" }}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13.5px] font-medium text-ink">
+                      {questionLabel(question)}
+                    </div>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                      <span
+                        className={cn(
+                          "inline-flex items-center rounded-full px-2 py-0.5 text-[11.5px] font-semibold capitalize",
+                          chip.bg,
+                          chip.text,
+                        )}
+                      >
+                        {question.difficultyLevel}
+                      </span>
+                      {question.tags.slice(0, 3).map((tag) => (
+                        <span
+                          key={tag}
+                          className="inline-flex items-center rounded-full bg-surface-3 px-2 py-0.5 text-[11.5px] font-medium text-ink-2"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                      {isAttached ? (
+                        <span className="text-[11.5px] text-ink-subtle">
+                          · already attached
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                </label>
+              )
+            })
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2.5 border-t border-line px-6 py-4">
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             onClick={() => onOpenChange(false)}
             disabled={saving}
           >
@@ -334,12 +305,12 @@ export function AddJobQuestionsDialog({
               </>
             ) : (
               <>
-                <Plus className="h-4 w-4" />
-                Add {selected.length > 0 ? `(${selected.length})` : ""}
+                Add selected
+                {selected.length > 0 ? ` (${selected.length})` : ""}
               </>
             )}
           </Button>
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   )

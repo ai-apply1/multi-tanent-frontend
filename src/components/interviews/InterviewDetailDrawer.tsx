@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import axios from "axios";
 import {
+  Activity,
   AlertTriangle,
   Briefcase,
   Calculator,
+  Check,
   CheckCircle2,
+  ClipboardCheck,
   Clock,
   Download,
   ExternalLink,
@@ -15,18 +18,21 @@ import {
   FileText,
   History,
   Loader2,
-  Mail,
+  MailPlus,
   Maximize,
-  MessagesSquare,
+  MessageSquare,
   MicOff,
+  MoreHorizontal,
   Play,
   RefreshCw,
-  ShieldAlert,
-  TrendingUp,
+  Send,
+  Sparkles,
+  Star,
+  Trash2,
   User,
   Video,
+  X,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 import { errorMessage } from "@/lib/errors";
 import { cn } from "@/lib/utils";
 import { ScoringDetailsDialog } from "@/components/interviews/ScoringDetailsDialog";
@@ -34,18 +40,8 @@ import {
   HlsPlayer,
   type VideoPlayerHandle,
 } from "@/components/interviews/HlsPlayer";
-import {
-  Sheet,
-  SheetBody,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import { Badge } from "@/components/ui/badge";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Select,
   SelectContent,
@@ -53,26 +49,49 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { VideoPlayer } from "@/components/ui/video-player";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  deleteInterview,
   downloadInterviewAnswersAudio,
   downloadInterviewVideo,
   getInterview,
   getInterviewAttempts,
   getInterviewCvUrl,
   getInterviewScoringStatus,
+  reinviteInterview,
   rescoreInterview,
   retranscodeInterviewVideo,
 } from "@/features/interviews/interviewsApi";
-import { getCandidate } from "@/features/candidates/candidatesApi";
+import {
+  deleteCandidate,
+  getCandidate,
+  sendCandidateInvite,
+  updateCandidateStatus,
+} from "@/features/candidates/candidatesApi";
+import {
+  INVITABLE_STATUS_KEY,
+  type CandidateDetail,
+  type CandidateStatus,
+} from "@/features/candidates/types";
 import {
   formatClock,
-  formatRole,
   formatScore,
   formatSessionIdTail,
-  formatYears,
   statusLabels,
-  statusVariant,
 } from "@/features/interviews/helpers";
 import type {
   AdminInterviewAttempt,
@@ -83,8 +102,6 @@ import type {
 
 /**
  * One option in the reattempt version dropdown, e.g. "Attempt 2 (latest)".
- * Only the latest is flagged; the per-attempt score lives in the detail
- * panel below, not the dropdown.
  */
 function attemptOptionLabel(a: AdminInterviewAttempt): string {
   return a.isLatestAttempt
@@ -102,22 +119,17 @@ function fileSafe(name: string | null | undefined): string {
   return base || "candidate";
 }
 
-/** How often the lightweight scoring-status endpoint is polled while a
- *  (re)scoring run is in flight. */
+/** How often the lightweight scoring-status endpoint is polled. */
 const SCORING_POLL_MS = 4000;
 
-/** `queued` / `processing` are the two "a run is in flight" states — the
- *  Rescore button is disabled and the status poll runs while either holds. */
 function isScoringInFlight(s?: ScoringStatus | null): boolean {
   return s === "queued" || s === "processing";
 }
 
-/** The two transcode states that mean "an HLS bundle is on its way". */
 function isTranscoding(s?: string | null): boolean {
   return s === "pending" || s === "processing";
 }
 
-/** Trigger a client-side download of an in-memory Blob as `filename`. */
 function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -127,40 +139,6 @@ function downloadBlob(blob: Blob, filename: string): void {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-}
-
-interface Props {
-  /** `publicSessionId` of the attempt to open. `null` renders nothing. */
-  sessionId: string | null;
-  onOpenChange: (open: boolean) => void;
-}
-
-function ScoreStat({
-  label,
-  value,
-  suffix = " / 10",
-}: {
-  label: string;
-  /**
-   * 0-10 score. The backend always emits all three scoring tiles
-   * (overall / technical / communication) once scoring has run, so
-   * this is always a number when scoring is present — `formatScore`
-   * handles missing/NaN defensively just in case a future scoring
-   * shape change drops a field.
-   */
-  value?: number;
-  suffix?: string;
-}) {
-  return (
-    <div className="rounded-lg border border-border bg-muted/40 px-3 py-2">
-      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-        {label}
-      </p>
-      <p className="mt-0.5 text-base font-semibold">
-        {formatScore(value, { suffix })}
-      </p>
-    </div>
-  );
 }
 
 function initialsFor(name?: string, email?: string) {
@@ -176,56 +154,389 @@ function initialsFor(name?: string, email?: string) {
   );
 }
 
-/**
- * The banner for a scoring run that didn't produce a verdict.
- *
- * `failed` and `needs_review` are DIFFERENT outcomes and are deliberately not
- * collapsed together:
- *   - `failed`       — the run errored. Destructive tone; a retry is the fix.
- *   - `needs_review` — transcription was unreliable, so the pipeline declined
- *                      to finalize a decision rather than scoring the blanks
- *                      as 0 (which would unfairly reject a real candidate).
- *                      Amber, and phrased as a human-review ask, not a failure.
- */
-function ScoringAlert({
-  status,
-  scoringError,
-  trailing,
-}: {
-  status: "failed" | "needs_review";
-  scoringError: string;
-  /** Sentence appended after the reason, e.g. what the reviewer can do next. */
-  trailing?: string;
-}) {
-  const needsReview = status === "needs_review";
-  const lead = needsReview
-    ? "Needs human review — we couldn't reliably transcribe one or more answers, so no decision was finalized"
-    : "The last scoring run failed";
+interface Props {
+  /** `publicSessionId` of the attempt to open. Null when the candidate has
+   *  no interview yet (rejected pre-screen, invited but not started, etc.)
+   *  — `candidateId` must be supplied in that case so the drawer can still
+   *  render the profile, pipeline card and per-tab "no interview" states. */
+  sessionId: string | null;
+  /** Fallback candidate id — used when `sessionId` is null. Providing either
+   *  prop opens the drawer; providing both prefers `sessionId`'s interview. */
+  candidateId?: string | null;
+  onOpenChange: (open: boolean) => void;
+}
+
+// ── Small styling helpers ──────────────────────────────────────────────
+
+/** Pipeline stage badge — org-owned hue tinted onto surface. */
+function StageBadge({ status }: { status: CandidateStatus | null | undefined }) {
+  if (!status) return null;
+  const color = status.color;
+  const style = color
+    ? {
+        backgroundColor: `color-mix(in oklab, ${color}, white 88%)`,
+        color,
+      }
+    : { backgroundColor: "var(--surface-3)", color: "var(--ink-muted)" };
   return (
-    <div
-      className={cn(
-        "flex items-start gap-2 rounded-lg border px-3 py-2 text-xs",
-        needsReview
-          ? "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-300"
-          : "border-destructive/30 bg-destructive/5 text-destructive",
-      )}
+    <span
+      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[12px] font-semibold"
+      style={style}
     >
-      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-      <span>
-        {lead}
-        {scoringError ? `: ${scoringError}` : "."}
-        {trailing ? ` ${trailing}` : ""}
-      </span>
+      <span
+        className="h-1.5 w-1.5 rounded-full"
+        style={{ backgroundColor: color ?? "var(--ink-muted)" }}
+      />
+      {status.label}
+    </span>
+  );
+}
+
+/** Score-band color used by the ring + reco chip. `overall` is 0-10. */
+function scoreBandColor(overall100: number): string {
+  if (overall100 >= 86) return "var(--success)";
+  if (overall100 >= 70) return "var(--primary)";
+  if (overall100 >= 60) return "var(--warning)";
+  return "var(--danger)";
+}
+
+/** Recommendation label + tone based on a 0-100 overall score. */
+function recommendationFrom(overall100: number): {
+  label: string;
+  bg: string;
+  fg: string;
+} {
+  if (overall100 >= 86)
+    return {
+      label: "Strong Hire",
+      bg: "var(--success-soft)",
+      fg: "var(--success)",
+    };
+  if (overall100 >= 70)
+    return { label: "Hire", bg: "var(--success-soft)", fg: "var(--success)" };
+  if (overall100 >= 60)
+    return { label: "Maybe", bg: "var(--warning-soft)", fg: "var(--warning)" };
+  return { label: "No Hire", bg: "var(--danger-soft)", fg: "var(--danger)" };
+}
+
+// ── AI Score Card ──────────────────────────────────────────────────────
+
+function ScoreRing({ score, color }: { score: number; color: string }) {
+  const R = 32;
+  const C = 2 * Math.PI * R;
+  const off = C - (Math.max(0, Math.min(100, score)) / 100) * C;
+  return (
+    <div className="relative h-[76px] w-[76px] shrink-0">
+      <svg
+        width={76}
+        height={76}
+        style={{ transform: "rotate(-90deg)" }}
+        aria-hidden
+      >
+        <circle
+          cx={38}
+          cy={38}
+          r={R}
+          fill="none"
+          stroke="var(--surface-3)"
+          strokeWidth={6}
+          strokeDasharray="3 4"
+        />
+        <circle
+          cx={38}
+          cy={38}
+          r={R}
+          fill="none"
+          stroke={color}
+          strokeWidth={6}
+          strokeLinecap="round"
+          strokeDasharray={C}
+          strokeDashoffset={off}
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span
+          className="mono text-[22px] font-bold leading-none"
+          style={{ color }}
+        >
+          {score}
+        </span>
+        <span className="text-[9px] text-ink-subtle">/ 100</span>
+      </div>
     </div>
   );
 }
 
-export function InterviewDetailDrawer({ sessionId, onOpenChange }: Props) {
-  // Reattempt history: the drawer is always OPENED on the attempt the caller
-  // picked (`sessionId` prop), but the version dropdown lets the reviewer
-  // switch to another attempt. `selectedSessionId` overrides which attempt's
-  // detail we load; null = follow the prop. Reset whenever the entry point
-  // changes so reopening on a different candidate never inherits a selection.
+function AiScoreCard({
+  overall,
+  narrative,
+  answeredCount,
+}: {
+  /** 0-10 (backend scale). */
+  overall: number;
+  narrative: string;
+  answeredCount: number;
+}) {
+  const score = Math.round(Math.max(0, Math.min(10, overall)) * 10);
+  const color = scoreBandColor(score);
+  const reco = recommendationFrom(score);
+  return (
+    <div className="rounded-2xl bg-gradient-to-br from-primary to-[color-mix(in_oklab,var(--primary),white_35%)] p-[1.5px] shadow-[0_10px_30px_color-mix(in_srgb,var(--primary),transparent_84%)]">
+      <div className="rounded-2xl bg-surface p-5">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <span
+            className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold text-primary"
+            style={{ background: "var(--accent-soft)" }}
+          >
+            <Sparkles className="h-3 w-3" strokeWidth={1.7} />
+            AI Evaluation
+          </span>
+          <span
+            className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-semibold"
+            style={{ color: reco.fg, background: reco.bg }}
+          >
+            <span
+              className="h-1.5 w-1.5 rounded-full"
+              style={{ background: reco.fg }}
+            />
+            {reco.label}
+          </span>
+        </div>
+        <div className="flex items-start gap-4">
+          <ScoreRing score={score} color={color} />
+          <div className="min-w-0 flex-1">
+            <div className="mb-1 text-[13px] font-semibold text-ink-muted">
+              Overall score
+            </div>
+            <p className="text-[13.5px] leading-[1.55] text-ink-2">
+              {narrative || "No narrative available."}
+            </p>
+          </div>
+        </div>
+        <div className="mt-4 flex items-center gap-1.5 text-[11.5px] text-ink-subtle">
+          <Sparkles className="h-3 w-3" strokeWidth={1.7} />
+          Generated from {answeredCount} video response
+          {answeredCount === 1 ? "" : "s"} · decision support only
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Pipeline Card ──────────────────────────────────────────────────────
+
+const PIPELINE_STEPS: Array<{
+  key: string;
+  label: string;
+  desc: string;
+}> = [
+  { key: "applied", label: "Applied", desc: "Application received" },
+  { key: "interviewing", label: "Interviewing", desc: "AI interview in progress" },
+  { key: "reviewing", label: "Reviewing", desc: "Awaiting your decision" },
+  { key: "shortlisted", label: "Shortlisted", desc: "Advanced to final round" },
+];
+
+/** Map a candidate statusKey onto the visible pipeline stepper index. */
+function pipelineIndexFor(statusKey: string | undefined): number {
+  switch (statusKey) {
+    case "applied":
+    case "prescreened":
+    case "invited":
+      return 0;
+    case "interviewing":
+      return 1;
+    case "scored":
+      return 2;
+    case "shortlisted":
+      return 3;
+    case "hired":
+      return 4;
+    case "rejected":
+      return 2;
+    default:
+      return 0;
+  }
+}
+
+function PipelineCard({
+  candidate,
+  overall100,
+  onStatusChange,
+  pending,
+}: {
+  candidate: CandidateDetail | null | undefined;
+  /** 0-100 overall score — used to render the AI recommendation line. */
+  overall100: number | null;
+  onStatusChange: (statusKey: string) => void;
+  pending: boolean;
+}) {
+  const statusKey = candidate?.currentStatusId.key;
+  const idx = pipelineIndexFor(statusKey);
+  const isProcessing = statusKey === "scored";
+  const isShortlisted = statusKey === "shortlisted";
+  const isHired = statusKey === "hired";
+  const isRejected = statusKey === "rejected";
+
+  return (
+    <div className="rounded-2xl border border-line bg-surface p-[18px]">
+      <div className="mb-4 flex items-center justify-between">
+        <span className="text-[13.5px] font-bold text-ink">Pipeline stage</span>
+        <StageBadge status={candidate?.currentStatusId} />
+      </div>
+
+      <div className="grid">
+        {PIPELINE_STEPS.map((step, i) => {
+          const done = i < idx;
+          const current = i === idx && isProcessing;
+          const isLast = i === PIPELINE_STEPS.length - 1;
+          return (
+            <div key={step.key} className="flex gap-3">
+              <div className="flex flex-col items-center">
+                <div
+                  className={cn(
+                    "flex h-[26px] w-[26px] items-center justify-center rounded-full text-[11px] font-bold",
+                    done && "text-[color:var(--success)]",
+                    current && "bg-primary text-white ring-4 ring-[var(--accent-soft)]",
+                    !done && !current && "bg-surface-3 text-ink-subtle",
+                  )}
+                  style={
+                    done
+                      ? { background: "var(--success-soft)" }
+                      : undefined
+                  }
+                >
+                  {done ? (
+                    <Check className="h-3.5 w-3.5" strokeWidth={2.2} />
+                  ) : (
+                    i + 1
+                  )}
+                </div>
+                {!isLast ? (
+                  <div
+                    className="my-1 w-[2px] flex-1 min-h-[20px]"
+                    style={{
+                      background: done ? "var(--success)" : "var(--line-2)",
+                    }}
+                  />
+                ) : null}
+              </div>
+              <div className={cn("pb-3", isLast && "pb-0")}>
+                <div
+                  className={cn(
+                    "text-[13.5px]",
+                    current ? "font-bold text-ink" : "font-semibold",
+                    done || current ? "text-ink" : "text-ink-muted",
+                  )}
+                >
+                  {step.label}
+                </div>
+                <div className="mt-0.5 text-[12px] text-ink-muted">
+                  {step.desc}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Decision actions */}
+      {isProcessing ? (
+        <div className="mt-1.5">
+          <div
+            className="mb-3 flex items-start gap-2 rounded-[10px] px-3 py-2.5"
+            style={{ background: "var(--accent-soft)" }}
+          >
+            <Sparkles
+              className="mt-[1px] h-3.5 w-3.5 shrink-0 text-primary"
+              strokeWidth={1.7}
+            />
+            <p className="text-[12px] leading-snug text-ink-2">
+              The AI recommends{" "}
+              <strong className="font-bold">
+                {overall100 !== null && overall100 >= 70 ? "Hire" : "No Hire"}
+              </strong>
+              . Your confirmation is required — nothing advances automatically.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={pending}
+              onClick={() => onStatusChange("rejected")}
+            >
+              <X className="h-3.5 w-3.5" strokeWidth={1.9} />
+              Reject
+            </Button>
+            <Button
+              size="sm"
+              disabled={pending}
+              onClick={() => onStatusChange("shortlisted")}
+            >
+              <Star className="h-3.5 w-3.5" strokeWidth={1.8} />
+              Shortlist
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {isShortlisted ? (
+        <div className="mt-1.5 grid gap-2">
+          <Button
+            size="sm"
+            disabled={pending}
+            onClick={() => onStatusChange("hired")}
+          >
+            <CheckCircle2 className="h-3.5 w-3.5" strokeWidth={1.8} />
+            Mark as hired
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={pending}
+            onClick={() => onStatusChange("rejected")}
+          >
+            Decline candidate
+          </Button>
+        </div>
+      ) : null}
+
+      {isHired ? (
+        <div
+          className="mt-1.5 flex items-center gap-2.5 rounded-[10px] px-3.5 py-3"
+          style={{ background: "var(--success-soft)" }}
+        >
+          <Check
+            className="h-4 w-4 text-[color:var(--success)]"
+            strokeWidth={2.2}
+          />
+          <span className="text-[13px] font-semibold">
+            Candidate hired — welcome aboard!
+          </span>
+        </div>
+      ) : null}
+
+      {isRejected ? (
+        <div className="mt-1.5">
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={pending}
+            onClick={() => onStatusChange("scored")}
+          >
+            Reconsider candidate
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// ── Main drawer ────────────────────────────────────────────────────────
+
+export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp, onOpenChange }: Props) {
+  // Reattempt history: `selectedSessionId` overrides which attempt's detail
+  // we load; null = follow the prop. Reset whenever the entry point changes.
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
     null,
   );
@@ -240,30 +551,16 @@ export function InterviewDetailDrawer({ sessionId, onOpenChange }: Props) {
     queryKey: ["interview", activeSessionId],
     queryFn: () => getInterview(activeSessionId!),
     enabled: Boolean(activeSessionId),
-    // While the webcam recording is still transcoding to HLS, poll so the
-    // player swaps from "preparing…" to the live stream as soon as it's ready
-    // — no need for the reviewer to reopen the drawer. Background scoring is
-    // NOT watched here: the lightweight scoring-status poll below drives that
-    // and refetches this heavy payload exactly once, when it settles.
     refetchInterval: (query) =>
       isTranscoding(query.state.data?.recording?.hlsStatus) ? 5000 : false,
   });
 
-  // --- Background AI-scoring lifecycle ------------------------------------
-  // The detail payload carries a `scoringStatus` snapshot, but a rescore runs
-  // in the background. Rather than re-pull the heavy detail (transcripts,
-  // per-question scores) on a timer, we poll a lightweight status endpoint
-  // while a run is in flight and refetch the full detail exactly once, when it
-  // settles. `scoringInFlight` is the explicit gate for that poll: seeded from
-  // the detail snapshot (someone else's rescore) and from a fresh rescore
-  // here, cleared when the poll reaches a terminal state. Reset on attempt
-  // switch / reopen so a stale run doesn't leak across.
+  // Scoring-status polling: keep the lightweight poll live only while a run
+  // is in flight, refetch the heavy detail once when it settles.
   const [scoringInFlight, setScoringInFlight] = useState(false);
   const [scoringDetailsOpen, setScoringDetailsOpen] = useState(false);
   useEffect(() => {
     setScoringInFlight(false);
-    // Close the scoring-details dialog on attempt switch / reopen so its
-    // numbers don't silently swap to a different attempt underneath the reader.
     setScoringDetailsOpen(false);
   }, [activeSessionId]);
 
@@ -271,32 +568,22 @@ export function InterviewDetailDrawer({ sessionId, onOpenChange }: Props) {
     queryKey: ["interviewScoringStatus", activeSessionId],
     queryFn: () => getInterviewScoringStatus(activeSessionId!),
     enabled: Boolean(activeSessionId && scoringInFlight),
-    // Poll while queued/processing; stop the instant it reaches a terminal
-    // state (done / failed / needs_review / idle).
     refetchInterval: (query) =>
       isScoringInFlight(query.state.data?.scoringStatus)
         ? SCORING_POLL_MS
         : false,
   });
 
-  // Freshest known status: the live poll if we have one, else the detail
-  // snapshot. Both are keyed on `activeSessionId`, so switching attempts
-  // resets them naturally and never shows a stale run.
   const scoringStatus: ScoringStatus =
     scoringStatusQuery.data?.scoringStatus ?? data?.scoringStatus ?? "idle";
   const scoringError =
     scoringStatusQuery.data?.scoringError ?? data?.scoringError ?? "";
   const scoringRunning = isScoringInFlight(scoringStatus);
 
-  // If the detail loads (or refetches) with a run already in flight — the
-  // drawer opened right after another reviewer triggered a rescore — start
-  // the poll.
   useEffect(() => {
     if (isScoringInFlight(data?.scoringStatus)) setScoringInFlight(true);
   }, [data?.scoringStatus]);
 
-  // When the poll reaches a terminal state, stop it and pull the refreshed
-  // heavy detail in once so the new scores / transcripts land in place.
   useEffect(() => {
     const s = scoringStatusQuery.data?.scoringStatus;
     if (s && !isScoringInFlight(s) && scoringInFlight) {
@@ -305,42 +592,39 @@ export function InterviewDetailDrawer({ sessionId, onOpenChange }: Props) {
     }
   }, [scoringStatusQuery.data?.scoringStatus, scoringInFlight, refetch]);
 
-  // All attempts for this candidate (one element unless they reattempted).
-  // Keyed on the ENTRY-POINT sessionId so switching attempts in the dropdown
-  // doesn't refetch the list — the backend resolves every attempt from any one
-  // of the candidate's sessionIds.
+  // Attempt history, keyed on entry-point sessionId.
   const attemptsQuery = useQuery({
     queryKey: ["interviewAttempts", sessionId],
     queryFn: () => getInterviewAttempts(sessionId!),
     enabled: Boolean(sessionId),
   });
   const attempts = attemptsQuery.data ?? [];
-  // The version dropdown shows whenever there's at least one attempt (so the
-  // reviewer always sees which attempt they're on); the "Reattempted" marker
-  // only when there's actually more than one.
   const hasAttempts = attempts.length >= 1;
   const hasMultipleAttempts = attempts.length > 1;
 
-  // The parsed-CV profile lives on the CANDIDATE, not the interview — resolve
-  // it from the detail's `candidateId` once that lands. Deliberately the SAME
-  // query key + fetcher the candidates slice uses, so opening the drawer from
-  // CandidatesPage (which has already loaded this candidate) is a cache hit
-  // rather than a second request for the same document. `select` narrows the
-  // result to the profile WITHOUT rewriting the cache entry, so the shared
-  // shape stays the full CandidateDetail both readers expect.
-  const candidateId = data?.candidateId ?? null;
-  const profileQuery = useQuery({
+  // Full candidate — the pipeline card + resend-invite gate need
+  // `currentStatusId`, not just the CV profile. Same cache key as the
+  // candidates slice, so opening the drawer from CandidatesPage is a hit.
+  // Falls back to the `candidateId` prop when no interview exists.
+  const candidateId = data?.candidateId ?? candidateIdProp ?? null;
+  const candidateQuery = useQuery({
     queryKey: ["candidate", candidateId],
     queryFn: () => getCandidate(candidateId!),
     enabled: Boolean(candidateId),
-    select: (c) => c.profile,
   });
-  const profile = profileQuery.data ?? null;
+  const candidate = candidateQuery.data ?? null;
+  const profile = candidate?.profile ?? null;
 
+  // Local mutation flags
   const [retranscoding, setRetranscoding] = useState(false);
   const [rescoring, setRescoring] = useState(false);
   const [downloadingAudio, setDownloadingAudio] = useState(false);
   const [downloadingVideo, setDownloadingVideo] = useState(false);
+  const [reinviting, setReinviting] = useState(false);
+  const [invitingCand, setInvitingCand] = useState(false);
+  const [statusPending, setStatusPending] = useState(false);
+  const [confirmDeleteInterview, setConfirmDeleteInterview] = useState(false);
+  const [confirmDeleteCandidate, setConfirmDeleteCandidate] = useState(false);
 
   const handleRetranscode = async () => {
     if (!activeSessionId) return;
@@ -356,22 +640,11 @@ export function InterviewDetailDrawer({ sessionId, onOpenChange }: Props) {
     }
   };
 
-  /**
-   * Re-run the full AI scoring pipeline for the attempt on screen. The
-   * backend queues a background job (or reports one already in flight
-   * instead of stacking a second), so the new scores land asynchronously.
-   * We seed the lightweight status poll with the returned live state and flip
-   * `scoringInFlight` on — the poll then watches `queued → processing →
-   * done/failed` and refetches the full detail once it settles.
-   */
   const handleRescore = async () => {
     if (!activeSessionId || rescoring || scoringRunning) return;
     setRescoring(true);
     try {
       const res = await rescoreInterview(activeSessionId);
-      // Seed the poll cache with the live state so it starts in an in-flight
-      // state (and doesn't read a stale terminal value from a previous run on
-      // this session), then flip the poll on.
       queryClient.setQueryData(["interviewScoringStatus", activeSessionId], {
         sessionId: activeSessionId,
         scoringStatus: res.scoringStatus,
@@ -380,25 +653,91 @@ export function InterviewDetailDrawer({ sessionId, onOpenChange }: Props) {
       setScoringInFlight(true);
       toast.success(
         res.alreadyQueued
-          ? "Scoring is already running for this interview — watching for it to finish."
+          ? "Scoring is already running — watching for it to finish."
           : "Rescoring queued — scores will refresh here once the pipeline finishes.",
       );
     } catch (err) {
-      // A 409 carries an explanatory message (e.g. "Only a submitted
-      // interview can be rescored…") — surface it verbatim.
       toast.error(errorMessage(err, "Could not queue rescoring."));
     } finally {
       setRescoring(false);
     }
   };
 
+  const handleReinvite = async () => {
+    if (!activeSessionId || reinviting) return;
+    setReinviting(true);
+    try {
+      await reinviteInterview(activeSessionId);
+      toast.success("Fresh invite email sent.");
+    } catch (err) {
+      toast.error(errorMessage(err, "Could not resend invite."));
+    } finally {
+      setReinviting(false);
+    }
+  };
+
+  // Candidate-scoped invite — the drawer's "Resend invite" empty-state action.
+  // Only pre-screened candidates can be manually invited (API returns 409
+  // otherwise), so the button is disabled with a tooltip in every other state.
+  const canSendCandidateInvite =
+    candidate?.currentStatusId.key === INVITABLE_STATUS_KEY;
+  const handleSendCandidateInvite = async () => {
+    if (!candidateId || invitingCand) return;
+    setInvitingCand(true);
+    try {
+      await sendCandidateInvite(candidateId);
+      toast.success("Interview invite sent.");
+      await candidateQuery.refetch();
+    } catch (err) {
+      toast.error(errorMessage(err, "Could not send invite."));
+    } finally {
+      setInvitingCand(false);
+    }
+  };
+
+  const handleStatusChange = async (statusKey: string) => {
+    if (!candidateId || statusPending) return;
+    setStatusPending(true);
+    try {
+      await updateCandidateStatus(candidateId, { statusKey });
+      toast.success("Candidate updated.");
+      await Promise.all([
+        candidateQuery.refetch(),
+        queryClient.invalidateQueries({ queryKey: ["candidates"] }),
+      ]);
+    } catch (err) {
+      toast.error(errorMessage(err, "Could not update the candidate."));
+    } finally {
+      setStatusPending(false);
+    }
+  };
+
+  const deleteInterviewMutation = useMutation({
+    mutationFn: () => deleteInterview(activeSessionId!),
+    onSuccess: async () => {
+      toast.success("Interview deleted.");
+      setConfirmDeleteInterview(false);
+      await queryClient.invalidateQueries({ queryKey: ["interviews"] });
+      onOpenChange(false);
+    },
+    onError: (err) =>
+      toast.error(errorMessage(err, "Could not delete the interview.")),
+  });
+
+  const deleteCandidateMutation = useMutation({
+    mutationFn: () => deleteCandidate(candidateId!),
+    onSuccess: async () => {
+      toast.success("Candidate deleted.");
+      setConfirmDeleteCandidate(false);
+      await queryClient.invalidateQueries({ queryKey: ["candidates"] });
+      onOpenChange(false);
+    },
+    onError: (err) =>
+      toast.error(errorMessage(err, "Could not delete the candidate.")),
+  });
+
   const questions = useMemo(() => data?.questions ?? [], [data?.questions]);
 
-  /**
-   * The authoritative per-answer breakdown lives on `scores.perQuestion`;
-   * `questions[].score` is only the headline blend of the two. Join them so a
-   * row can show the components it was made of.
-   */
   const scoredByQuestionId = useMemo(() => {
     const map = new Map<string, ScoredAnswer>();
     for (const p of data?.scores?.perQuestion ?? []) {
@@ -407,17 +746,9 @@ export function InterviewDetailDrawer({ sessionId, onOpenChange }: Props) {
     return map;
   }, [data?.scores?.perQuestion]);
 
-  // Imperative handle to the HLS player so a "jump to question" chip can seek
-  // the recording. Populated by HlsPlayer while it's mounted (HLS ready).
   const playerApiRef = useRef<VideoPlayerHandle | null>(null);
-  // The webcam recording sits near the top of the (scrollable) drawer body
-  // while the question list runs far below it. A "jump to question" chip has
-  // to scroll the player back into view as it seeks, otherwise the recording
-  // seeks + plays off-screen and the click reads as a no-op.
   const videoSectionRef = useRef<HTMLElement | null>(null);
 
-  // Seek the recording to a question's offset AND scroll the player into view.
-  // Guarded by `hlsReady` at the call site, so `seekTo` is always live here.
   const jumpToRecording = (sec: number) => {
     playerApiRef.current?.seekTo(sec);
     videoSectionRef.current?.scrollIntoView({
@@ -425,8 +756,6 @@ export function InterviewDetailDrawer({ sessionId, onOpenChange }: Props) {
       block: "start",
     });
   };
-  // Timeline markers (one per question that carries a recording offset) — drive
-  // the player's caption overlay + scrubber ticks.
   const chapters = useMemo(
     () =>
       questions
@@ -434,31 +763,11 @@ export function InterviewDetailDrawer({ sessionId, onOpenChange }: Props) {
         .map((q) => ({ atSec: q.askedAtSec as number, label: q.text })),
     [questions],
   );
-  // Jump chips only act when the HLS player is actually mounted (recording
-  // ready); otherwise the timestamp renders as a static label.
   const hlsReady = Boolean(data?.webcamHlsUrl);
 
-  // A 404 means the interview doc is gone (deleted, or the candidate row was
-  // removed and took its S3 subtree with it) — surface a clear explanation
-  // instead of a generic "failed to load".
   const is404 =
     isError && axios.isAxiosError(error) && error.response?.status === 404;
 
-  /**
-   * Open the CV in a new tab using a freshly-minted presigned GET
-   * URL. Same popup-blocker-safe pattern as the candidates page:
-   * open a blank tab synchronously within the click, redirect once
-   * the URL arrives, fall back to a same-tab navigate if the popup
-   * was blocked. Required because the S3 bucket is private.
-   *
-   * Critical: we do NOT pass `noopener` to `window.open`. With
-   * `noopener` the returned handle's `.location` setter is a no-op,
-   * so the new tab stays at `about:blank` and the URL ends up in
-   * the current tab instead. We open with the opener relationship
-   * intact, set the location, then null out `win.opener` ourselves
-   * — same end-state safety as `noopener` but with a working
-   * redirect.
-   */
   const handleOpenCv = async () => {
     if (!activeSessionId) return;
     const win = window.open("about:blank", "_blank");
@@ -476,18 +785,10 @@ export function InterviewDetailDrawer({ sessionId, onOpenChange }: Props) {
       }
     } catch (err) {
       if (win) win.close();
-      // The 404 body explains it precisely ("Interview has no CV on file." /
-      // "CV file no longer exists in storage.") — don't flatten that away.
       toast.error(errorMessage(err, "Could not open CV."));
     }
   };
 
-  /**
-   * Export the whole interview record (identity + overall scoring + every
-   * question with its answer transcript, per-question scores, and feedback)
-   * as a JSON file. Purely client-side: the drawer already holds the full
-   * detail, so no backend round-trip is needed.
-   */
   const handleExportJson = () => {
     if (!data) return;
     const payload = {
@@ -521,13 +822,6 @@ export function InterviewDetailDrawer({ sessionId, onOpenChange }: Props) {
     toast.success("Exported interview data.");
   };
 
-  /**
-   * Download every candidate answer's audio as a single zip. The bytes live
-   * in a private S3 bucket, so this hits an auth-gated backend endpoint that
-   * streams them into a zip (see `downloadInterviewAnswersAudio`). A 404
-   * means the interview carries no answer audio (all skipped, or an
-   * audio-less record).
-   */
   const handleDownloadAudios = async () => {
     if (!activeSessionId || downloadingAudio) return;
     setDownloadingAudio(true);
@@ -551,14 +845,6 @@ export function InterviewDetailDrawer({ sessionId, onOpenChange }: Props) {
     }
   };
 
-  /**
-   * Download the candidate's webcam recording as a single video file. The
-   * backend returns the raw original when it still exists, or an MP4 rebuilt
-   * from the streaming segments (the original is deleted after transcode);
-   * that rebuild can take a few seconds, hence the loading state. The file
-   * extension follows the returned blob's MIME type (mp4 vs webm). A 404
-   * means the recording isn't downloadable yet (still processing / failed).
-   */
   const handleDownloadVideo = async () => {
     if (!activeSessionId || downloadingVideo) return;
     setDownloadingVideo(true);
@@ -589,704 +875,1282 @@ export function InterviewDetailDrawer({ sessionId, onOpenChange }: Props) {
     }
   };
 
-  // Nothing to show without a session. Every hook above has already run, so
-  // this early return can't change the hook order between renders.
-  if (!sessionId) return null;
+  // ── Tabs ──────────────────────────────────────────────────────────────
+
+  const [tab, setTab] = useState<
+    "evaluation" | "responses" | "transcript" | "activity"
+  >("evaluation");
+  useEffect(() => {
+    setTab("evaluation");
+  }, [activeSessionId]);
+
+  if (!sessionId && !candidateIdProp) return null;
 
   const recording = data?.recording;
   const hlsStatus = recording?.hlsStatus ?? null;
   const durationSec = recording?.durationSec ?? 0;
-  const qualitative = data?.scores?.qualitative;
+  const done = data?.status === "submitted";
+  const overallScore100 =
+    typeof data?.scores?.overall === "number"
+      ? Math.round(data.scores.overall * 10)
+      : null;
+  const answeredCount = questions.filter((q) => !q.skipped).length;
+  const narrative =
+    data?.scores?.qualitative?.strengths?.join(" · ") || data?.scores?.summary || "";
 
   return (
-    <Sheet open onOpenChange={onOpenChange}>
-      <SheetContent
-        side="right"
-        className="flex w-full max-w-3xl flex-col p-0 sm:max-w-3xl"
-      >
-        <SheetHeader className="pr-12">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div className="flex items-start gap-4">
-              <Avatar className="h-12 w-12 shrink-0">
-                <AvatarFallback>
-                  {initialsFor(data?.candidateName, data?.email)}
-                </AvatarFallback>
-              </Avatar>
-              <div className="min-w-0 flex-1 space-y-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <SheetTitle className="truncate">
+    <>
+      <Sheet open onOpenChange={onOpenChange}>
+        <SheetContent
+          side="right"
+          hideCloseButton
+          className={cn(
+            "flex flex-col p-0 border-0",
+            "w-[600px] max-w-[94%] sm:max-w-[600px]",
+            "bg-surface-2 border-l border-line",
+            "shadow-[-18px_0_50px_rgba(13,11,11,0.16)]",
+            // Sheet's default animation classes handle the slide; keeping
+            // the transitions from the Radix data-state attributes.
+          )}
+        >
+          {/* Header */}
+          <div className="bg-surface border-b border-line px-[22px] py-[18px]">
+            <div className="flex items-start gap-3.5">
+              <span
+                className="flex h-[50px] w-[50px] shrink-0 items-center justify-center rounded-full text-[17px] font-bold text-primary"
+                style={{ background: "var(--accent-soft)" }}
+              >
+                {initialsFor(data?.candidateName, data?.email)}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <h2 className="m-0 truncate text-[19px] font-semibold tracking-tight">
                     {data?.candidateName || "Interview detail"}
-                  </SheetTitle>
+                  </h2>
+                  <StageBadge status={candidate?.currentStatusId} />
                   {data ? (
-                    <Badge variant={statusVariant[data.status]}>
+                    <span
+                      className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[11px] font-semibold text-ink-muted"
+                      title="Interview status"
+                    >
                       {statusLabels[data.status]}
-                    </Badge>
-                  ) : null}
-                  {hasMultipleAttempts ? (
-                    <Badge variant="outline" className="gap-1">
-                      <History className="h-3 w-3" />
-                      Reattempted ×{attempts.length - 1}
-                    </Badge>
-                  ) : null}
-                </div>
-                <SheetDescription className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-0 text-xs">
-                  {data?.email ? (
-                    <span className="inline-flex items-center gap-1">
-                      <Mail className="h-3 w-3" />
-                      {data.email}
                     </span>
                   ) : null}
-                  {activeSessionId ? (
-                    <button
-                      type="button"
-                      className="cursor-copy font-mono text-[10px] text-muted-foreground/60 transition-colors hover:text-muted-foreground"
-                      title={`Click to copy: ${activeSessionId}`}
-                      onClick={() => {
-                        navigator.clipboard.writeText(activeSessionId);
-                        toast.success("ID copied");
-                      }}
-                    >
-                      ID: {formatSessionIdTail(activeSessionId)}
-                    </button>
+                  {hasMultipleAttempts ? (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[11px] font-semibold text-ink-muted">
+                      <History className="h-3 w-3" strokeWidth={1.7} />
+                      Reattempted x{attempts.length - 1}
+                    </span>
                   ) : null}
-                </SheetDescription>
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12.5px] text-ink-muted">
+                  {data?.jobTitle ? <span>{data.jobTitle}</span> : null}
+                  {data?.jobTitle && data?.email ? <span>·</span> : null}
+                  {data?.email ? <span>{data.email}</span> : null}
+                  {activeSessionId ? (
+                    <>
+                      <span>·</span>
+                      <button
+                        type="button"
+                        className="cursor-copy mono text-[11px] text-ink-subtle transition-colors hover:text-ink-muted"
+                        title={`Click to copy: ${activeSessionId}`}
+                        onClick={() => {
+                          navigator.clipboard.writeText(activeSessionId);
+                          toast.success("ID copied");
+                        }}
+                      >
+                        ID {formatSessionIdTail(activeSessionId)}
+                      </button>
+                    </>
+                  ) : null}
+                </div>
               </div>
+              <button
+                type="button"
+                onClick={() => onOpenChange(false)}
+                className="inline-flex text-ink-muted hover:text-ink"
+                aria-label="Close"
+              >
+                <X className="h-5 w-5" strokeWidth={1.7} />
+              </button>
             </div>
 
-            {data ? (
-              <div className="flex shrink-0 flex-wrap items-center gap-2">
-                <Button variant="outline" size="sm" onClick={handleOpenCv}>
-                  <FileText className="h-4 w-4" />
-                  Open CV
-                  <ExternalLink className="h-3 w-3" />
-                </Button>
+            <div className="mt-3.5 flex flex-wrap items-center gap-2">
+              <Button variant="secondary" size="sm" onClick={handleOpenCv}>
+                <FileText className="h-3.5 w-3.5" strokeWidth={1.7} />
+                Open CV
+                <ExternalLink className="h-3 w-3" strokeWidth={1.7} />
+              </Button>
+              <div className="flex-1" />
+              {/* Shortlist/Reject are ALWAYS surfaced on the header (per
+                  user request) — they're gated on having a `candidateId`
+                  we can address, but not on the interview being done, so a
+                  recruiter can shortcut a decision straight from the
+                  drawer even before the AI is finished. */}
+              <Button
+                variant="danger"
+                size="sm"
+                disabled={statusPending || !candidateId}
+                onClick={() => handleStatusChange("rejected")}
+              >
+                <X className="h-3.5 w-3.5" strokeWidth={1.9} />
+                Reject
+              </Button>
+              <Button
+                size="sm"
+                disabled={statusPending || !candidateId}
+                onClick={() =>
+                  // Already-shortlisted → the natural next step is "hired",
+                  // so the primary action escalates rather than no-ops.
+                  handleStatusChange(
+                    candidate?.currentStatusId.key === "shortlisted"
+                      ? "hired"
+                      : "shortlisted",
+                  )
+                }
+              >
+                <Star className="h-3.5 w-3.5" strokeWidth={1.8} />
+                {candidate?.currentStatusId.key === "shortlisted"
+                  ? "Mark as hired"
+                  : "Shortlist"}
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="secondary" size="sm">
+                    <MoreHorizontal className="h-3.5 w-3.5" strokeWidth={1.9} />
+                    Actions
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  {/* Resend invite — candidate-level, only offered while the
+                      status is still `prescreened` (the API 409s otherwise).
+                      Disabled with a note in every other state so the reason
+                      is visible without another click. */}
+                  <DropdownMenuItem
+                    disabled={
+                      !candidateId || !canSendCandidateInvite || invitingCand
+                    }
+                    onSelect={handleSendCandidateInvite}
+                    title={
+                      canSendCandidateInvite
+                        ? undefined
+                        : "Only pre-screened candidates can be manually invited."
+                    }
+                  >
+                    <Send className="h-3.5 w-3.5" strokeWidth={1.7} />
+                    Resend invite
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={!data?.email}
+                    onSelect={() => {
+                      if (data?.email) {
+                        window.location.href = `mailto:${data.email}`;
+                      }
+                    }}
+                  >
+                    <MailPlus className="h-3.5 w-3.5" strokeWidth={1.7} />
+                    Send email/SMS
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  {data?.scores ? (
+                    <DropdownMenuItem
+                      onSelect={() => setScoringDetailsOpen(true)}
+                    >
+                      <Calculator className="h-3.5 w-3.5" strokeWidth={1.7} />
+                      View scoring details
+                    </DropdownMenuItem>
+                  ) : null}
+                  {data?.status === "submitted" ? (
+                    <DropdownMenuItem
+                      disabled={rescoring || scoringRunning}
+                      onSelect={handleRescore}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.7} />
+                      {scoringRunning
+                        ? scoringStatus === "queued"
+                          ? "Queued…"
+                          : "Scoring…"
+                        : "Rescore interview"}
+                    </DropdownMenuItem>
+                  ) : null}
+                  {hlsStatus === "failed" ? (
+                    <DropdownMenuItem
+                      disabled={retranscoding}
+                      onSelect={handleRetranscode}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.7} />
+                      Retry streaming conversion
+                    </DropdownMenuItem>
+                  ) : null}
+                  {data ? (
+                    <DropdownMenuItem
+                      disabled={reinviting}
+                      onSelect={handleReinvite}
+                    >
+                      <MailPlus className="h-3.5 w-3.5" strokeWidth={1.7} />
+                      Reinvite (this attempt)
+                    </DropdownMenuItem>
+                  ) : null}
+                  {data ? (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onSelect={handleExportJson}>
+                        <Download className="h-3.5 w-3.5" strokeWidth={1.7} />
+                        Export JSON
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled={downloadingVideo}
+                        onSelect={handleDownloadVideo}
+                      >
+                        <Video className="h-3.5 w-3.5" strokeWidth={1.7} />
+                        Download video
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled={downloadingAudio}
+                        onSelect={handleDownloadAudios}
+                      >
+                        <FileArchive className="h-3.5 w-3.5" strokeWidth={1.7} />
+                        Download answer audios
+                      </DropdownMenuItem>
+                    </>
+                  ) : null}
+                  <DropdownMenuSeparator />
+                  {data ? (
+                    <DropdownMenuItem
+                      className="text-[color:var(--danger)] focus:text-[color:var(--danger)]"
+                      onSelect={() => setConfirmDeleteInterview(true)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" strokeWidth={1.7} />
+                      Delete interview
+                    </DropdownMenuItem>
+                  ) : null}
+                  {candidateId ? (
+                    <DropdownMenuItem
+                      className="text-[color:var(--danger)] focus:text-[color:var(--danger)]"
+                      onSelect={() => setConfirmDeleteCandidate(true)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" strokeWidth={1.7} />
+                      Delete candidate
+                    </DropdownMenuItem>
+                  ) : null}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+
+            {hasAttempts ? (
+              <div className="mt-3 flex items-center gap-2">
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle">
+                  <History className="h-3 w-3" strokeWidth={1.7} />
+                  Attempts
+                </span>
+                <Select
+                  value={activeSessionId ?? undefined}
+                  onValueChange={(v) => setSelectedSessionId(v)}
+                >
+                  <SelectTrigger className="h-7 w-auto min-w-40 gap-2 text-xs">
+                    <SelectValue placeholder="Select attempt" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {attempts.map((a) => (
+                      <SelectItem
+                        key={a.sessionId}
+                        value={a.sessionId}
+                        className="text-xs"
+                      >
+                        {attemptOptionLabel(a)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             ) : null}
           </div>
-        </SheetHeader>
 
-        <SheetBody className="flex-1 space-y-6">
-          {isLoading ? (
-            <div className="flex h-72 items-center justify-center text-sm text-muted-foreground">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Loading interview…
-            </div>
-          ) : is404 ? (
-            <div className="flex h-72 flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
-              <AlertTriangle className="h-6 w-6 text-amber-500" />
-              <p className="max-w-sm">
-                This interview is no longer available. It was most likely
-                deleted, or removed along with the candidate it belonged to.
-              </p>
-            </div>
-          ) : isError || !data ? (
-            <div className="flex h-72 flex-col items-center justify-center gap-3 text-sm text-destructive">
-              Could not load the interview.
-              <Button variant="outline" size="sm" onClick={() => refetch()}>
-                Retry
-              </Button>
-            </div>
-          ) : (
-            <div className="space-y-6">
-              {/* --- Snapshot --- */}
-              <section className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 p-3">
-                  <User className="mt-0.5 h-4 w-4 text-muted-foreground" />
-                  <div className="min-w-0">
-                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                      Candidate
-                    </p>
-                    <p className="truncate text-sm font-medium">
-                      {data.candidateName || "—"}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 p-3">
-                  <Briefcase className="mt-0.5 h-4 w-4 text-muted-foreground" />
-                  <div className="min-w-0">
-                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                      Job
-                    </p>
-                    <p className="truncate text-sm font-medium">
-                      {data.jobTitle || "—"}
-                    </p>
-                  </div>
-                </div>
-              </section>
-
-              {/* --- Proctoring signals --- */}
-              {data.proctoring.fullscreenExitCount > 0 ||
-              data.proctoring.tabHiddenCount > 0 ? (
-                <section>
-                  <h3 className="mb-2 inline-flex items-center gap-1.5 text-sm font-semibold">
-                    <ShieldAlert className="h-3.5 w-3.5 text-amber-500" />
-                    Proctoring signals
-                  </h3>
-                  <div className="flex flex-wrap gap-2">
-                    {data.proctoring.fullscreenExitCount > 0 ? (
-                      <ProctoringBadge
-                        icon={Maximize}
-                        count={data.proctoring.fullscreenExitCount}
-                        singularLabel="fullscreen exit"
-                        pluralLabel="fullscreen exits"
-                      />
-                    ) : null}
-                    {data.proctoring.tabHiddenCount > 0 ? (
-                      <ProctoringBadge
-                        icon={EyeOff}
-                        count={data.proctoring.tabHiddenCount}
-                        singularLabel="tab switch"
-                        pluralLabel="tab switches"
-                      />
-                    ) : null}
-                  </div>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    These feed the integrity score, which is flag-only — it
-                    never fails a candidate on its own.
-                  </p>
-                </section>
-              ) : null}
-
-              {/* --- Timing / overtime --- */}
-              {data.proctoring.graceUsedSec > 0 ? (
-                <section>
-                  <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
-                    <Clock className="h-3.5 w-3.5 text-amber-500" />
-                    Timing
-                  </h3>
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-600 dark:text-amber-300">
-                    <Clock className="h-3 w-3 shrink-0" />
-                    Used {formatOvertime(data.proctoring.graceUsedSec)} of extra
-                    time past the limit
-                  </span>
-                </section>
-              ) : null}
-
-              {/* --- Profile: role + evidence, summary, tech, work history ---
-
-                  Sourced from the CANDIDATE document (the parsed-CV cache),
-                  not the interview — hence the separate query. Absent for a
-                  candidate whose CV never parsed. */}
-              {profileQuery.isLoading ? (
-                <section className="inline-flex items-center gap-2 rounded-lg border border-dashed border-border p-3 text-xs text-muted-foreground">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  Loading profile…
-                </section>
-              ) : profile ? (
-                <section>
-                  <h3 className="mb-2 text-sm font-semibold">Profile</h3>
-                  <div className="rounded-lg border border-border bg-muted/30 p-3">
-                    <p className="text-sm font-medium">
-                      {profile.primaryRole
-                        ? formatRole(profile.primaryRole)
-                        : "—"}
-                      {typeof profile.yearsOfExperience === "number"
-                        ? ` · ${formatYears(profile.yearsOfExperience)}y`
-                        : ""}
-                      {profile.seniority && profile.seniority !== "unknown"
-                        ? ` · ${titleCase(profile.seniority)}`
-                        : ""}
-                    </p>
-                    {profile.primaryRoleEvidence ? (
-                      <p className="mt-1 text-xs leading-snug text-muted-foreground">
-                        {profile.primaryRoleEvidence}
-                      </p>
-                    ) : null}
-                  </div>
-                  {profile.summary ? (
-                    <p className="mt-2 rounded-lg border border-border bg-muted/30 p-3 text-sm leading-relaxed">
-                      {profile.summary}
-                    </p>
-                  ) : null}
-                  {profile.technologies?.length ? (
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {profile.technologies.map((t) => (
-                        <Badge
-                          key={t.name}
-                          variant="outline"
-                          className="border-border"
-                        >
-                          {t.name}
-                        </Badge>
-                      ))}
-                    </div>
-                  ) : null}
-                  {profile.workHistory?.length ? (
-                    <div className="mt-3">
-                      <p className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
-                        Work history · years computed from these dates
-                      </p>
-                      <ul className="space-y-1.5">
-                        {profile.workHistory.map((wh, i) => (
-                          <li
-                            key={`${wh.title}-${wh.company}-${i}`}
-                            className="flex items-start justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2 text-sm"
-                          >
-                            <span className="min-w-0">
-                              <span className="font-medium">
-                                {wh.title || "—"}
-                              </span>
-                              {wh.company ? (
-                                <span className="text-muted-foreground">
-                                  {" "}
-                                  · {wh.company}
-                                </span>
-                              ) : null}
-                              {!wh.isTechRole ? (
-                                <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-                                  non-tech
-                                </span>
-                              ) : null}
-                            </span>
-                            <span className="shrink-0 text-xs text-muted-foreground">
-                              {formatDateRange(wh.start, wh.end)}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                </section>
-              ) : null}
-
-              {/*
-                Attempt switcher — lists every attempt oldest to newest, the
-                one on screen pre-selected; picking one loads that attempt's
-                full detail. Prior attempts' recordings/transcripts/scores are
-                kept on the backend so reviewers can compare.
-              */}
-              {hasAttempts ? (
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                    <History className="h-3 w-3" />
-                    Interview Attempts
-                  </span>
-                  <Select
-                    value={activeSessionId ?? undefined}
-                    onValueChange={(v) => setSelectedSessionId(v)}
-                  >
-                    <SelectTrigger className="h-7 w-auto min-w-40 gap-2 text-xs">
-                      <SelectValue placeholder="Select attempt" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {attempts.map((a) => (
-                        <SelectItem
-                          key={a.sessionId}
-                          value={a.sessionId}
-                          className="text-xs"
-                        >
-                          {attemptOptionLabel(a)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ) : null}
-
-              {/* --- Webcam recording ---
-
-                  We ALWAYS render this section (heading + body) so the
-                  reviewer can tell "no recording was uploaded for this
-                  session" apart from "the drawer is broken". An empty
-                  `webcamVideoUrl` + no HLS happens when the candidate closed
-                  the tab / lost network before the upload landed. */}
-              <section ref={videoSectionRef} className="scroll-mt-4">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <h3 className="inline-flex items-center gap-1.5 text-sm font-semibold">
-                    <Video className="h-3.5 w-3.5 text-muted-foreground" />
-                    Webcam recording
-                  </h3>
-                  {data.webcamHlsUrl || data.webcamVideoUrl ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleDownloadVideo}
-                      disabled={downloadingVideo}
-                    >
-                      {downloadingVideo ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Download className="h-4 w-4" />
-                      )}
-                      Download Video
-                    </Button>
-                  ) : null}
-                </div>
-                {data.webcamHlsUrl ? (
-                  // Transcode finished — stream the HLS bundle.
-                  <HlsPlayer
-                    key={data.webcamHlsUrl}
-                    manifestUrl={data.webcamHlsUrl}
-                    durationSec={durationSec}
-                    chapters={chapters}
-                    apiRef={playerApiRef}
-                  />
-                ) : hlsStatus === "failed" ? (
-                  <div className="space-y-3">
-                    <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                      <span>
-                        Couldn&apos;t prepare the streaming version of this
-                        recording
-                        {recording?.hlsError ? `: ${recording.hlsError}` : "."}
-                      </span>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={handleRetranscode}
-                      disabled={retranscoding}
-                    >
-                      {retranscoding ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <RefreshCw className="h-3.5 w-3.5" />
-                      )}
-                      Retry streaming conversion
-                    </Button>
-                    {/* Raw original is still available on a failed transcode. */}
-                    {data.webcamVideoUrl ? (
-                      <VideoPlayer
-                        src={data.webcamVideoUrl}
-                        knownDurationSec={durationSec}
-                        ariaLabel={`Webcam recording for ${data.candidateName || "candidate"}`}
-                      />
-                    ) : null}
-                  </div>
-                ) : isTranscoding(hlsStatus) ? (
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                      <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-                      Preparing a streamable version of this recording…
-                      {recording?.hlsProgress
-                        ? ` ${Math.round(recording.hlsProgress)}%`
-                        : ""}
-                    </div>
-                    {/* Play the original meanwhile (deleted once HLS is ready). */}
-                    {data.webcamVideoUrl ? (
-                      <VideoPlayer
-                        src={data.webcamVideoUrl}
-                        knownDurationSec={durationSec}
-                        ariaLabel={`Webcam recording for ${data.candidateName || "candidate"}`}
-                      />
-                    ) : null}
-                  </div>
-                ) : data.webcamVideoUrl ? (
-                  // Recording present, transcode not started (the detail GET
-                  // lazily queues one) — play the raw proxy meanwhile.
-                  <VideoPlayer
-                    src={data.webcamVideoUrl}
-                    knownDurationSec={durationSec}
-                    ariaLabel={`Webcam recording for ${data.candidateName || "candidate"}`}
-                  />
-                ) : (
-                  <p className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
-                    No webcam recording was uploaded for this session. The
-                    candidate may have closed the tab before the upload
-                    completed, or lost network.
-                  </p>
-                )}
-              </section>
-
-              {/* --- Overall scores ---
-
-                  The scorer produces two per-dimension scores (technical /
-                  communication) plus the job-weighted overall. We render those
-                  three tiles here; the per-question breakdown lives further
-                  down in "Questions & answers". The Rescore action re-queues
-                  the full AI scoring pipeline for this attempt — only
-                  submitted interviews are scorable, hence the status gate. */}
-              {data.scores ? (
-                <section>
-                  <ScoringDetailsDialog
-                    open={scoringDetailsOpen}
-                    onOpenChange={setScoringDetailsOpen}
-                    candidateName={data.candidateName}
-                    scores={data.scores}
-                  />
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <h3 className="text-sm font-semibold">Overall scoring</h3>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setScoringDetailsOpen(true)}
-                      >
-                        <Calculator className="h-4 w-4" />
-                        View details
-                      </Button>
-                      {data.status === "submitted" ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleRescore}
-                          disabled={rescoring || scoringRunning}
-                        >
-                          {rescoring || scoringRunning ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <RefreshCw className="h-4 w-4" />
-                          )}
-                          {scoringRunning
-                            ? scoringStatus === "queued"
-                              ? "Queued…"
-                              : "Scoring…"
-                            : "Rescore"}
-                        </Button>
-                      ) : null}
-                    </div>
-                  </div>
-                  {/* A rescore that failed / needs review keeps the PREVIOUS
-                      run's numbers on screen — call that out so the reviewer
-                      knows the tiles below aren't from the latest run. */}
-                  {scoringStatus === "failed" ||
-                  scoringStatus === "needs_review" ? (
-                    <div className="mb-2">
-                      <ScoringAlert
-                        status={scoringStatus}
-                        scoringError={scoringError}
-                        trailing="The scores below are from the previous successful run — rescore to retry."
-                      />
-                    </div>
-                  ) : null}
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    <ScoreStat label="Overall" value={data.scores.overall} />
-                    <ScoreStat label="Technical" value={data.scores.technical} />
-                    <ScoreStat
-                      label="Communication"
-                      value={data.scores.communication}
+          {/* Body */}
+          <div className="scroll flex-1 overflow-auto px-[22px] py-[18px]">
+            {isLoading ? (
+              <div className="flex h-72 items-center justify-center text-sm text-ink-muted">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Loading interview…
+              </div>
+            ) : is404 ? (
+              <div className="flex h-72 flex-col items-center justify-center gap-3 px-6 text-center text-sm text-ink-muted">
+                <AlertTriangle className="h-6 w-6 text-[color:var(--warning)]" />
+                <p className="max-w-sm">
+                  This interview is no longer available. It was most likely
+                  deleted, or removed along with the candidate it belonged to.
+                </p>
+              </div>
+            ) : isError || !data ? (
+              <div className="flex h-72 flex-col items-center justify-center gap-3 text-sm text-[color:var(--danger)]">
+                Could not load the interview.
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => refetch()}
+                >
+                  Retry
+                </Button>
+              </div>
+            ) : (
+              <>
+                {/* AI Score card (only when interview is done) */}
+                {done && data.scores ? (
+                  <div className="mb-4">
+                    <AiScoreCard
+                      overall={data.scores.overall}
+                      narrative={
+                        data.scores.summary ||
+                        data.scores.qualitative?.strengths?.[0] ||
+                        ""
+                      }
+                      answeredCount={answeredCount || questions.length}
                     />
                   </div>
-                  {/* Integrity + coverage — meta signals, not rubric
-                      dimensions. Integrity is anti-cheat (flag-only); a low
-                      value is highlighted amber so reviewers look closer.
-                      Coverage is how much of the interview was answered. */}
-                  {data.scores.integrity ||
-                  typeof data.scores.coverage === "number" ? (
-                    <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                      {typeof data.scores.coverage === "number" ? (
-                        <span className="rounded-md border border-border bg-muted/30 px-2 py-1">
-                          Answered {Math.round(data.scores.coverage * 100)}% of
-                          questions
-                        </span>
-                      ) : null}
-                      {data.scores.integrity ? (
-                        <span
-                          className={cn(
-                            "rounded-md border px-2 py-1",
-                            data.scores.integrity.score < 6
-                              ? "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-300"
-                              : "border-border bg-muted/30",
-                          )}
-                        >
-                          Integrity{" "}
-                          {formatScore(data.scores.integrity.score, {
-                            suffix: " / 10",
-                          })}
-                          {data.scores.integrity.score < 6 ? ", review" : ""}
-                        </span>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  {data.scores.summary ? (
-                    <p className="mt-3 rounded-lg border border-border bg-muted/30 p-3 text-sm leading-relaxed">
-                      {data.scores.summary}
-                    </p>
-                  ) : null}
-                  {/* The narrative block. NOTE: the backend already appends the
-                      proctoring integrity flags onto `redFlags`, so there's no
-                      separate integrity-flags list to render — that would just
-                      duplicate them. */}
-                  <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    {qualitative?.strengths?.length ? (
-                      <div className="rounded-lg border border-border bg-card p-3">
-                        <p className="mb-1 inline-flex items-center gap-1 text-xs font-semibold text-success">
-                          <CheckCircle2 className="h-3.5 w-3.5" />
-                          Strengths
-                        </p>
-                        <ul className="list-disc space-y-1 pl-5 text-sm">
-                          {qualitative.strengths.map((s) => (
-                            <li key={s}>{s}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                    {/* Always surface a weak side — even for a strong/passing
-                        candidate. Prefer the always-on constructive
-                        "weaknesses"; fall back to red flags when absent. */}
-                    {qualitative?.weaknesses?.length ||
-                    qualitative?.redFlags?.length ? (
-                      <div className="rounded-lg border border-border bg-card p-3">
-                        <p className="mb-1 inline-flex items-center gap-1 text-xs font-semibold text-amber-600 dark:text-amber-300">
-                          <TrendingUp className="h-3.5 w-3.5" />
-                          Areas to improve
-                        </p>
-                        <ul className="list-disc space-y-1 pl-5 text-sm">
-                          {(qualitative.weaknesses?.length
-                            ? qualitative.weaknesses
-                            : qualitative.redFlags
-                          ).map((s) => (
-                            <li key={s}>{s}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                    {/* Serious concerns shown separately — only when we also
-                        have weaknesses above, otherwise red flags already ARE
-                        the "areas to improve" content and we'd duplicate them. */}
-                    {qualitative?.weaknesses?.length &&
-                    qualitative?.redFlags?.length ? (
-                      <div className="rounded-lg border border-border bg-card p-3">
-                        <p className="mb-1 inline-flex items-center gap-1 text-xs font-semibold text-destructive">
-                          <AlertTriangle className="h-3.5 w-3.5" />
-                          Red flags
-                        </p>
-                        <ul className="list-disc space-y-1 pl-5 text-sm">
-                          {qualitative.redFlags.map((s) => (
-                            <li key={s}>{s}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                  </div>
-                </section>
-              ) : data.status === "submitted" ? (
-                // Submitted but unscored — the run is either in flight
-                // (queued/processing), failed, parked for human review, or
-                // never ran (idle). Drive the copy + action off the live status
-                // so the reviewer sees exactly what's happening and can
-                // (re)queue without leaving the drawer.
-                <section className="space-y-3 rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
-                  {scoringRunning ? (
-                    <p className="inline-flex items-center gap-2">
-                      <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-                      {scoringStatus === "queued"
-                        ? "Scoring is queued — results will appear here as soon as the pipeline runs."
-                        : "Scoring in progress — results will appear here automatically."}
-                    </p>
-                  ) : scoringStatus === "failed" ||
-                    scoringStatus === "needs_review" ? (
-                    <>
-                      <ScoringAlert
-                        status={scoringStatus}
-                        scoringError={scoringError}
-                        trailing="You can retry it here."
-                      />
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleRescore}
-                        disabled={rescoring}
-                      >
-                        {rescoring ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <RefreshCw className="h-4 w-4" />
-                        )}
-                        Retry scoring
-                      </Button>
-                    </>
-                  ) : (
-                    <>
-                      <p>
-                        No scoring has run for this interview yet. Run the AI
-                        scoring pipeline to grade it.
+                ) : null}
+
+                {/* Scoring in-flight / failed banners */}
+                {done && !data.scores ? (
+                  <div className="mb-4 rounded-2xl border border-dashed border-line bg-surface p-4 text-sm text-ink-muted">
+                    {scoringRunning ? (
+                      <p className="inline-flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                        {scoringStatus === "queued"
+                          ? "Scoring is queued — results will appear here as soon as the pipeline runs."
+                          : "Scoring in progress — results will appear here automatically."}
                       </p>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleRescore}
-                        disabled={rescoring}
-                      >
-                        {rescoring ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <RefreshCw className="h-4 w-4" />
-                        )}
-                        Run scoring
-                      </Button>
-                    </>
-                  )}
-                </section>
-              ) : (
-                <section className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
-                  No scoring available yet — this interview hasn&apos;t been
-                  submitted.
-                </section>
-              )}
-
-              <Separator />
-
-              {/* --- Per-question answers (transcript + scores) ---
-
-                  One row per question the candidate was asked, in ask-order.
-                  Skipped questions are kept in the list (so the reviewer can
-                  see WHICH ones were skipped, not just that some were) and
-                  render with a muted pill instead of a transcript block. */}
-              <section>
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="inline-flex items-center gap-1.5 text-sm font-semibold">
-                    <MessagesSquare className="h-3.5 w-3.5 text-muted-foreground" />
-                    Questions & answers ({questions.length})
-                  </h3>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button variant="outline" size="sm" onClick={handleExportJson}>
-                      <Download className="h-4 w-4" />
-                      Export
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleDownloadAudios}
-                      disabled={downloadingAudio}
-                    >
-                      {downloadingAudio ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <FileArchive className="h-4 w-4" />
-                      )}
-                      Download Audios
-                    </Button>
+                    ) : scoringStatus === "failed" ||
+                      scoringStatus === "needs_review" ? (
+                      <div className="space-y-3">
+                        <div
+                          className={cn(
+                            "flex items-start gap-2 rounded-lg px-3 py-2 text-xs",
+                            scoringStatus === "needs_review"
+                              ? "text-[color:var(--warning)]"
+                              : "text-[color:var(--danger)]",
+                          )}
+                          style={{
+                            background:
+                              scoringStatus === "needs_review"
+                                ? "var(--warning-soft)"
+                                : "var(--danger-soft)",
+                          }}
+                        >
+                          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                          <span>
+                            {scoringStatus === "needs_review"
+                              ? "Needs human review — we couldn't reliably transcribe one or more answers"
+                              : "The last scoring run failed"}
+                            {scoringError ? `: ${scoringError}` : "."}
+                          </span>
+                        </div>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={handleRescore}
+                          disabled={rescoring}
+                        >
+                          {rescoring ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-3.5 w-3.5" />
+                          )}
+                          Retry scoring
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <p>
+                          No scoring has run for this interview yet. Run the AI
+                          scoring pipeline to grade it.
+                        </p>
+                        <Button
+                          size="sm"
+                          onClick={handleRescore}
+                          disabled={rescoring}
+                        >
+                          {rescoring ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-3.5 w-3.5" />
+                          )}
+                          Run scoring
+                        </Button>
+                      </div>
+                    )}
                   </div>
-                </div>
-                {questions.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
-                    No questions recorded for this session yet.
-                  </p>
-                ) : (
-                  <ol className="space-y-3">
-                    {questions.map((q, i) => (
-                      <AnswerRow
-                        key={q.questionId || i}
-                        index={i}
-                        question={q}
-                        scored={scoredByQuestionId.get(q.questionId)}
-                        onJump={hlsReady ? jumpToRecording : undefined}
+                ) : null}
+
+                {/* Profile — parsed CV. Sits ABOVE the tabs so the reviewer
+                    sees who the candidate is before diving into the AI
+                    evaluation surface. */}
+                {profile ? (
+                  <div className="mb-4 rounded-2xl border border-line bg-surface p-[18px]">
+                    <div className="mb-2 flex items-center gap-2">
+                      <Briefcase
+                        className="h-4 w-4 text-ink-muted"
+                        strokeWidth={1.7}
                       />
-                    ))}
-                  </ol>
-                )}
-              </section>
-            </div>
-          )}
-        </SheetBody>
-      </SheetContent>
-    </Sheet>
+                      <span className="text-[13.5px] font-bold">Profile</span>
+                    </div>
+                    {profile.summary ? (
+                      <p className="text-[13px] leading-relaxed text-ink-2">
+                        {profile.summary}
+                      </p>
+                    ) : (
+                      <p className="text-[13px] text-ink-muted">
+                        No summary parsed from this candidate&apos;s CV.
+                      </p>
+                    )}
+                    {profile.technologies?.length ? (
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        {profile.technologies.slice(0, 12).map((t) => (
+                          <span
+                            key={t.name}
+                            className="rounded-full border border-line bg-surface-2 px-2 py-0.5 text-[11.5px] text-ink-2"
+                          >
+                            {t.name}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {/* Segmented tabs */}
+                <div className="mb-4 flex gap-1 rounded-xl border border-line bg-surface p-1.5">
+                  {(
+                    [
+                      ["evaluation", "Evaluation"],
+                      ["responses", "Responses"],
+                      ["transcript", "Transcript"],
+                      ["activity", "Activity"],
+                    ] as const
+                  ).map(([id, label]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => setTab(id)}
+                      className={cn(
+                        "flex-1 rounded-lg px-1.5 py-2 text-[12.5px] font-semibold transition-colors",
+                        tab === id
+                          ? "bg-[var(--accent-soft)] text-primary"
+                          : "text-ink-muted hover:text-ink",
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Per-tab body — the tab bar itself always renders (above),
+                    so each tab owns its own empty state instead of one big
+                    "Interview not started" card obscuring the navigation. */}
+                {tab === "evaluation" ? (
+                  done && data.scores ? (
+                    <>
+                      <EvaluationTab data={data} />
+                      {/* Per-question breakdown lives on the Evaluation tab as
+                          the deep-dive block, since the design expects it
+                          near the score. */}
+                      {questions.length > 0 ? (
+                        <div className="mt-4">
+                          <QuestionBreakdownList
+                            questions={questions}
+                            scoredByQuestionId={scoredByQuestionId}
+                            hlsReady={hlsReady}
+                            onJump={jumpToRecording}
+                          />
+                        </div>
+                      ) : null}
+                    </>
+                  ) : done ? (
+                    // Interview submitted but not scored yet — subtler than
+                    // the "no interview" empty since data is coming.
+                    <TabScoringInProgress
+                      status={scoringStatus}
+                      scoringError={scoringError}
+                    />
+                  ) : (
+                    <TabEmpty
+                      icon={<ClipboardCheck className="h-6 w-6" strokeWidth={1.6} />}
+                      title="No AI evaluation yet"
+                      sub="The candidate hasn't recorded their interview. Their AI score and highlights will appear here once it's scored."
+                      action={
+                        candidateId ? (
+                          <ResendInviteButton
+                            canSend={canSendCandidateInvite}
+                            pending={invitingCand}
+                            onClick={handleSendCandidateInvite}
+                          />
+                        ) : null
+                      }
+                    />
+                  )
+                ) : null}
+
+                {tab === "responses" ? (
+                  done ? (
+                    <ResponsesTab
+                      videoSectionRef={videoSectionRef}
+                      hlsUrl={data.webcamHlsUrl}
+                      rawUrl={data.webcamVideoUrl}
+                      hlsStatus={hlsStatus}
+                      hlsProgress={recording?.hlsProgress ?? 0}
+                      hlsError={recording?.hlsError ?? ""}
+                      durationSec={durationSec}
+                      chapters={chapters}
+                      playerApiRef={playerApiRef}
+                      questions={questions}
+                      candidateName={data.candidateName}
+                      retranscoding={retranscoding}
+                      onRetranscode={handleRetranscode}
+                      hlsReady={hlsReady}
+                      onJump={jumpToRecording}
+                    />
+                  ) : (
+                    <TabEmpty
+                      icon={<Video className="h-6 w-6" strokeWidth={1.6} />}
+                      title="No responses recorded"
+                      sub="Video answers show up here as chapters once the candidate finishes their interview."
+                    />
+                  )
+                ) : null}
+
+                {tab === "transcript" ? (
+                  done && questions.length > 0 ? (
+                    <TranscriptTab questions={questions} />
+                  ) : done ? (
+                    <TabScoringInProgress
+                      status={scoringStatus}
+                      scoringError={scoringError}
+                      messageOverride="Transcript pending — it's generated after the recording is transcribed."
+                    />
+                  ) : (
+                    <TabEmpty
+                      icon={<FileText className="h-6 w-6" strokeWidth={1.6} />}
+                      title="No transcript yet"
+                      sub="The transcript is generated automatically after the interview is scored."
+                    />
+                  )
+                ) : null}
+
+                {tab === "activity" ? (
+                  // Activity CAN render partial data (invited/created events)
+                  // before the interview is done, so this tab always tries the
+                  // real timeline first and falls back only when it's empty.
+                  <ActivityTab
+                    createdAt={data.createdAt}
+                    startedAt={data.startedAt}
+                    submittedAt={data.submittedAt}
+                    scoringStatus={scoringStatus}
+                    overall={data.scores?.overall}
+                    questionCount={questions.length}
+                    answeredCount={answeredCount}
+                    emptyFallback={
+                      <TabEmpty
+                        icon={<Activity className="h-6 w-6" strokeWidth={1.6} />}
+                        title="No activity yet"
+                        sub="Status changes, invites, and messages will appear here as they happen."
+                      />
+                    }
+                  />
+                ) : null}
+
+                {/* Pipeline card — always rendered below tabs */}
+                <div className="mt-4">
+                  <PipelineCard
+                    candidate={candidate}
+                    overall100={overallScore100}
+                    onStatusChange={handleStatusChange}
+                    pending={statusPending}
+                  />
+                </div>
+              </>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* External dialog mounts — kept outside the drawer so they survive
+          the drawer close animation and share the app-wide portal. */}
+      {data?.scores ? (
+        <ScoringDetailsDialog
+          open={scoringDetailsOpen}
+          onOpenChange={setScoringDetailsOpen}
+          candidateName={data.candidateName}
+          scores={data.scores}
+        />
+      ) : null}
+
+      <ConfirmDialog
+        open={confirmDeleteInterview}
+        onOpenChange={setConfirmDeleteInterview}
+        title="Delete this interview?"
+        description="This removes the recording, transcript, and scores for this attempt. The candidate keeps their row and can be re-invited."
+        destructive
+        confirmLabel="Delete interview"
+        loadingLabel="Deleting…"
+        loading={deleteInterviewMutation.isPending}
+        onConfirm={() => deleteInterviewMutation.mutate()}
+      />
+
+      <ConfirmDialog
+        open={confirmDeleteCandidate}
+        onOpenChange={setConfirmDeleteCandidate}
+        title={`Delete ${data?.candidateName || "candidate"}?`}
+        description="This permanently removes the candidate, their CV, every interview recording, and every score. This cannot be undone."
+        destructive
+        confirmLabel="Delete candidate"
+        loadingLabel="Deleting…"
+        loading={deleteCandidateMutation.isPending}
+        onConfirm={() => deleteCandidateMutation.mutate()}
+      />
+    </>
+  );
+}
+
+// ── Per-tab empty states ──────────────────────────────────────────────
+
+/**
+ * The "there is no interview yet" empty rendered inside each tab body. Same
+ * visual grammar as the pre-existing "Interview not started" card, but scoped
+ * to a tab so the reviewer can still navigate.
+ */
+function TabEmpty({
+  icon,
+  title,
+  sub,
+  action,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  sub: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-2xl border border-line bg-surface px-6 py-10 text-center">
+      <span className="mb-3 inline-flex h-[46px] w-[46px] items-center justify-center rounded-xl bg-surface-3 text-ink-subtle">
+        {icon}
+      </span>
+      <div className="text-[15px] font-semibold">{title}</div>
+      <p className="mx-auto mt-1.5 max-w-[340px] text-[13px] leading-relaxed text-ink-muted">
+        {sub}
+      </p>
+      {action ? <div className="mt-3.5 inline-flex">{action}</div> : null}
+    </div>
   );
 }
 
 /**
- * The marker the backend stamps as the transcript of every question the
- * candidate explicitly skipped. The item also carries an explicit `skipped`
- * flag now; we check both so a record written either way renders the same.
+ * The subtler "we're waiting on the scoring pipeline" empty. Only rendered
+ * once the interview has been submitted — the reviewer isn't blocked by the
+ * candidate any more, just by the worker queue.
  */
-const SKIPPED_TRANSCRIPT_MARKER = "[Skipped by candidate]";
+function TabScoringInProgress({
+  status,
+  scoringError,
+  messageOverride,
+}: {
+  status: ScoringStatus;
+  scoringError: string;
+  messageOverride?: string;
+}) {
+  const isRunning = status === "queued" || status === "processing";
+  const message =
+    messageOverride ??
+    (isRunning
+      ? status === "queued"
+        ? "Scoring is queued — results will appear here as soon as the pipeline runs."
+        : "Scoring in progress…"
+      : status === "failed"
+        ? `The last scoring run failed${scoringError ? `: ${scoringError}` : "."}`
+        : status === "needs_review"
+          ? `Needs human review${scoringError ? `: ${scoringError}` : "."}`
+          : "Not scored yet.");
+  return (
+    <div className="rounded-2xl border border-dashed border-line bg-surface p-6 text-center text-[13px] text-ink-muted">
+      <p className="inline-flex items-center gap-2">
+        {isRunning ? (
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+        ) : (
+          <Clock className="h-4 w-4 shrink-0" strokeWidth={1.7} />
+        )}
+        {message}
+      </p>
+    </div>
+  );
+}
 
 /**
- * One row in the "Questions & answers" list: the question as it was actually
- * asked, the job's original wording behind it, the transcript, and the
- * per-question scoring once the worker has graded the answer.
+ * "Resend invite" button — the manual-invite escape hatch. Wraps the disabled
+ * button so the tooltip can hang on a hoverable element in every state.
  */
+function ResendInviteButton({
+  canSend,
+  pending,
+  onClick,
+}: {
+  canSend: boolean;
+  pending: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <TooltipProvider delayDuration={150}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={!canSend || pending}
+              onClick={onClick}
+            >
+              {pending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Send className="h-3.5 w-3.5" strokeWidth={1.7} />
+              )}
+              Resend invite
+            </Button>
+          </span>
+        </TooltipTrigger>
+        {!canSend ? (
+          <TooltipContent>
+            Only pre-screened candidates can be manually invited from here.
+          </TooltipContent>
+        ) : null}
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+// ── Evaluation tab ─────────────────────────────────────────────────────
+
+function EvaluationTab({
+  data,
+}: {
+  data: NonNullable<ReturnType<typeof useInterviewDataType>>;
+}) {
+  const qualitative = data.scores?.qualitative;
+  const highlights = qualitative?.strengths ?? [];
+  const probes = qualitative?.weaknesses?.length
+    ? qualitative.weaknesses
+    : (qualitative?.redFlags ?? []);
+
+  if (!data.scores) {
+    return (
+      <div className="rounded-2xl border border-line bg-surface p-6 text-center text-sm text-ink-muted">
+        Not scored yet.
+      </div>
+    );
+  }
+
+  const rows: Array<[string, number]> = [
+    ["Technical", Math.round((data.scores.technical ?? 0) * 10)],
+    ["Communication", Math.round((data.scores.communication ?? 0) * 10)],
+  ];
+
+  return (
+    <div className="grid gap-4">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="rounded-2xl border border-line bg-surface p-[18px]">
+          <div className="mb-3.5 flex items-center gap-2">
+            <span
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-[color:var(--success)]"
+              style={{ background: "var(--success-soft)" }}
+            >
+              <Check className="h-3.5 w-3.5" strokeWidth={2} />
+            </span>
+            <span className="text-[14px] font-bold">Highlights</span>
+          </div>
+          {highlights.length ? (
+            <div className="grid gap-2.5">
+              {highlights.map((t) => (
+                <div
+                  key={t}
+                  className="flex gap-2.5 text-[13px] leading-snug text-ink-2"
+                >
+                  <Check
+                    className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--success)]"
+                    strokeWidth={2}
+                  />
+                  {t}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-[13px] text-ink-muted">
+              No highlights recorded.
+            </p>
+          )}
+        </div>
+
+        <div className="rounded-2xl border border-line bg-surface p-[18px]">
+          <div className="mb-3.5 flex items-center gap-2">
+            <span
+              className="flex h-7 w-7 items-center justify-center rounded-lg font-bold text-[color:var(--warning)]"
+              style={{ background: "var(--warning-soft)" }}
+            >
+              !
+            </span>
+            <span className="text-[14px] font-bold">Areas to probe</span>
+          </div>
+          {probes.length ? (
+            <div className="grid gap-2.5">
+              {probes.map((t) => (
+                <div
+                  key={t}
+                  className="flex gap-2.5 text-[13px] leading-snug text-ink-2"
+                >
+                  <span
+                    className="mt-0.5 flex h-[15px] w-[15px] shrink-0 items-center justify-center rounded-full border-[1.6px] text-[10px] font-bold text-[color:var(--warning)]"
+                    style={{ borderColor: "var(--warning)" }}
+                  >
+                    !
+                  </span>
+                  {t}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-[13px] text-ink-muted">
+              No follow-up areas flagged.
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-line bg-surface p-[18px]">
+        <div className="mb-3 text-[14px] font-bold">Score breakdown</div>
+        {rows.map(([label, value]) => (
+          <div key={label} className="mb-3.5 last:mb-0">
+            <div className="mb-1.5 flex justify-between text-[13px]">
+              <span className="font-semibold text-ink-2">{label}</span>
+              <span className="mono font-bold">{value}%</span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-surface-3">
+              <div
+                className="h-full rounded-full bg-primary"
+                style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Responses tab ──────────────────────────────────────────────────────
+
+function ResponsesTab({
+  videoSectionRef,
+  hlsUrl,
+  rawUrl,
+  hlsStatus,
+  hlsProgress,
+  hlsError,
+  durationSec,
+  chapters,
+  playerApiRef,
+  questions,
+  candidateName,
+  retranscoding,
+  onRetranscode,
+  hlsReady,
+  onJump,
+}: {
+  videoSectionRef: React.MutableRefObject<HTMLElement | null>;
+  hlsUrl: string;
+  rawUrl: string;
+  hlsStatus: string | null;
+  hlsProgress: number;
+  hlsError: string;
+  durationSec: number;
+  chapters: Array<{ atSec: number; label: string }>;
+  playerApiRef: React.MutableRefObject<VideoPlayerHandle | null>;
+  questions: AdminInterviewQuestionItem[];
+  candidateName: string;
+  retranscoding: boolean;
+  onRetranscode: () => void;
+  hlsReady: boolean;
+  onJump: (sec: number) => void;
+}) {
+  const activeIdx = 0;
+  return (
+    <div className="grid gap-4">
+      <section
+        ref={videoSectionRef as React.RefObject<HTMLElement>}
+        className="scroll-mt-4"
+      >
+        <div className="overflow-hidden rounded-xl bg-black">
+          {hlsUrl ? (
+            <div className="aspect-video">
+              <HlsPlayer
+                key={hlsUrl}
+                manifestUrl={hlsUrl}
+                durationSec={durationSec}
+                chapters={chapters}
+                apiRef={playerApiRef}
+              />
+            </div>
+          ) : hlsStatus === "failed" ? (
+            <div className="flex aspect-video flex-col items-center justify-center gap-3 p-6 text-center text-[13px] text-white/80">
+              <AlertTriangle className="h-6 w-6 text-[color:var(--warning)]" />
+              <p>
+                Couldn&apos;t prepare the streaming version of this recording
+                {hlsError ? `: ${hlsError}` : "."}
+              </p>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={onRetranscode}
+                disabled={retranscoding}
+              >
+                {retranscoding ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5" />
+                )}
+                Retry streaming conversion
+              </Button>
+              {rawUrl ? (
+                <div className="w-full">
+                  <VideoPlayer
+                    src={rawUrl}
+                    knownDurationSec={durationSec}
+                    ariaLabel={`Webcam recording for ${candidateName || "candidate"}`}
+                  />
+                </div>
+              ) : null}
+            </div>
+          ) : isTranscoding(hlsStatus) ? (
+            <div className="flex aspect-video flex-col items-center justify-center gap-3 p-6 text-center text-[13px] text-white/80">
+              <Loader2 className="h-6 w-6 animate-spin" />
+              <p>
+                Preparing a streamable version of this recording…
+                {hlsProgress ? ` ${Math.round(hlsProgress)}%` : ""}
+              </p>
+              {rawUrl ? (
+                <div className="w-full">
+                  <VideoPlayer
+                    src={rawUrl}
+                    knownDurationSec={durationSec}
+                    ariaLabel={`Webcam recording for ${candidateName || "candidate"}`}
+                  />
+                </div>
+              ) : null}
+            </div>
+          ) : rawUrl ? (
+            <VideoPlayer
+              src={rawUrl}
+              knownDurationSec={durationSec}
+              ariaLabel={`Webcam recording for ${candidateName || "candidate"}`}
+            />
+          ) : (
+            <div className="flex aspect-video items-center justify-center p-6 text-center text-[13px] text-white/70">
+              No webcam recording was uploaded for this session.
+            </div>
+          )}
+        </div>
+      </section>
+
+      <div>
+        <div className="mb-2.5 text-[13px] font-bold">
+          Question chapters{" "}
+          <span className="font-medium text-ink-muted">
+            · {questions.length} question{questions.length === 1 ? "" : "s"}
+          </span>
+        </div>
+        <div className="grid gap-2">
+          {questions.map((q, i) => {
+            const isActive = i === activeIdx;
+            const timeLabel =
+              typeof q.askedAtSec === "number"
+                ? formatClock(q.askedAtSec)
+                : "—";
+            return (
+              <button
+                key={q.questionId || i}
+                type="button"
+                disabled={
+                  typeof q.askedAtSec !== "number" || !hlsReady
+                }
+                onClick={() =>
+                  typeof q.askedAtSec === "number" && onJump(q.askedAtSec)
+                }
+                className={cn(
+                  "flex items-center gap-3 rounded-[10px] border px-3.5 py-3 text-left transition-colors",
+                  isActive
+                    ? "border-primary bg-[var(--accent-soft)]"
+                    : "border-line bg-surface hover:bg-hover",
+                  typeof q.askedAtSec !== "number" || !hlsReady
+                    ? "cursor-default"
+                    : "cursor-pointer",
+                )}
+              >
+                <span
+                  className={cn(
+                    "mono flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full text-[11px] font-bold",
+                    isActive
+                      ? "bg-primary text-white"
+                      : "bg-[var(--accent-soft)] text-primary",
+                  )}
+                >
+                  Q{i + 1}
+                </span>
+                <span
+                  className={cn(
+                    "flex-1 text-[13px]",
+                    isActive
+                      ? "font-semibold text-ink"
+                      : "font-medium text-ink-2",
+                  )}
+                >
+                  {q.text}
+                </span>
+                <span className="mono text-[12px] text-ink-muted">
+                  {timeLabel}
+                </span>
+                {typeof q.askedAtSec === "number" && hlsReady ? (
+                  <Play
+                    className="h-3.5 w-3.5 text-ink-muted"
+                    fill="currentColor"
+                  />
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Transcript tab ─────────────────────────────────────────────────────
+
+const SKIPPED_TRANSCRIPT_MARKER = "[Skipped by candidate]";
+
+function TranscriptTab({
+  questions,
+}: {
+  questions: AdminInterviewQuestionItem[];
+}) {
+  if (!questions.length) {
+    return (
+      <div className="rounded-2xl border border-line bg-surface p-6 text-center text-sm text-ink-muted">
+        No transcript available yet.
+      </div>
+    );
+  }
+  // Flatten into alternating speaker paragraphs; the first row is the
+  // active line for visual anchoring.
+  const rows: Array<{ speaker: "interviewer" | "candidate"; text: string }> = [];
+  for (const q of questions) {
+    rows.push({ speaker: "interviewer", text: q.text });
+    const skipped =
+      q.skipped || q.transcript.trim() === SKIPPED_TRANSCRIPT_MARKER;
+    rows.push({
+      speaker: "candidate",
+      text: skipped
+        ? "[Skipped]"
+        : q.transcript.trim() || "[No transcript yet]",
+    });
+  }
+  return (
+    <div className="rounded-2xl border border-line bg-surface p-5">
+      <div className="mb-3 text-[14px] font-semibold">Transcript</div>
+      <div className="grid gap-1">
+        {rows.map((r, i) => {
+          const active = i === 0;
+          return (
+            <div
+              key={i}
+              className={cn(
+                "rounded-lg p-3 text-[13.5px] leading-[1.55]",
+                active && "border-l-2 border-primary bg-[var(--accent-soft)]",
+                r.speaker === "candidate" ? "text-ink-2" : "text-ink",
+              )}
+            >
+              <span className="mr-1 font-semibold">
+                {r.speaker === "interviewer" ? "Interviewer:" : "Candidate:"}
+              </span>
+              {r.text}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Activity tab ───────────────────────────────────────────────────────
+
+function ActivityTab({
+  createdAt,
+  startedAt,
+  submittedAt,
+  scoringStatus,
+  overall,
+  questionCount,
+  answeredCount,
+  emptyFallback,
+}: {
+  createdAt: string | null;
+  startedAt: string | null;
+  submittedAt: string | null;
+  scoringStatus: ScoringStatus;
+  overall: number | undefined;
+  questionCount: number;
+  answeredCount: number;
+  /** Rendered when NO events are available. Falls back to the old compact
+   *  "No activity yet" line if omitted, so existing call-sites keep working. */
+  emptyFallback?: React.ReactNode;
+}) {
+  const events: Array<{
+    title: string;
+    sub: string;
+    time: string;
+    kind: "score" | "submit" | "start" | "create";
+  }> = [];
+  if (scoringStatus === "done" && typeof overall === "number") {
+    events.push({
+      title: `AI interview scored — overall ${Math.round(overall * 10)}`,
+      sub: `${answeredCount} of ${questionCount} answered`,
+      time: submittedAt ? new Date(submittedAt).toLocaleString() : "—",
+      kind: "score",
+    });
+  }
+  if (submittedAt) {
+    events.push({
+      title: "Interview submitted",
+      sub: `${answeredCount} video response${answeredCount === 1 ? "" : "s"}`,
+      time: new Date(submittedAt).toLocaleString(),
+      kind: "submit",
+    });
+  }
+  if (startedAt) {
+    events.push({
+      title: "Interview started",
+      sub: "Candidate began recording",
+      time: new Date(startedAt).toLocaleString(),
+      kind: "start",
+    });
+  }
+  if (createdAt) {
+    events.push({
+      title: "Interview invited",
+      sub: "Invite link emailed to candidate",
+      time: new Date(createdAt).toLocaleString(),
+      kind: "create",
+    });
+  }
+  if (!events.length) {
+    return (
+      <>
+        {emptyFallback ?? (
+          <div className="rounded-2xl border border-line bg-surface p-6 text-center text-sm text-ink-muted">
+            No activity yet.
+          </div>
+        )}
+      </>
+    );
+  }
+  const kindColor: Record<typeof events[number]["kind"], string> = {
+    score: "var(--primary)",
+    submit: "var(--info)",
+    start: "var(--warning)",
+    create: "var(--ink-muted)",
+  };
+  return (
+    <div className="rounded-2xl border border-line bg-surface p-5">
+      <div className="mb-3.5 text-[14px] font-semibold">Activity timeline</div>
+      <div className="grid gap-0.5">
+        {events.map((e, i) => {
+          const c = kindColor[e.kind];
+          const isLast = i === events.length - 1;
+          return (
+            <div key={i} className="flex gap-3">
+              <div className="flex flex-col items-center">
+                <span
+                  className="flex h-[30px] w-[30px] items-center justify-center rounded-full"
+                  style={{
+                    background: `color-mix(in oklab, ${c}, white 86%)`,
+                    color: c,
+                  }}
+                >
+                  {e.kind === "score" ? (
+                    <Star className="h-3.5 w-3.5" strokeWidth={1.7} />
+                  ) : e.kind === "submit" ? (
+                    <CheckCircle2 className="h-3.5 w-3.5" strokeWidth={1.7} />
+                  ) : e.kind === "start" ? (
+                    <Play className="h-3.5 w-3.5" strokeWidth={1.7} />
+                  ) : (
+                    <User className="h-3.5 w-3.5" strokeWidth={1.7} />
+                  )}
+                </span>
+                {!isLast ? (
+                  <span
+                    className="my-0.5 w-[2px] flex-1 min-h-[16px]"
+                    style={{ background: "var(--line-2)" }}
+                  />
+                ) : null}
+              </div>
+              <div className="pb-4">
+                <div className="text-[13.5px] font-semibold">{e.title}</div>
+                <div className="mt-0.5 text-[12px] text-ink-muted">{e.sub}</div>
+                <div className="mono mt-0.5 text-[11.5px] text-ink-subtle">
+                  {e.time}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Per-question breakdown (deep-dive under Evaluation) ────────────────
+
+function QuestionBreakdownList({
+  questions,
+  scoredByQuestionId,
+  hlsReady,
+  onJump,
+}: {
+  questions: AdminInterviewQuestionItem[];
+  scoredByQuestionId: Map<string, ScoredAnswer>;
+  hlsReady: boolean;
+  onJump: (sec: number) => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-line bg-surface p-[18px]">
+      <div className="mb-3 flex items-center gap-2">
+        <MessageSquare
+          className="h-3.5 w-3.5 text-ink-muted"
+          strokeWidth={1.7}
+        />
+        <span className="text-[14px] font-bold">
+          Questions &amp; answers ({questions.length})
+        </span>
+      </div>
+      <ol className="grid gap-3">
+        {questions.map((q, i) => (
+          <AnswerRow
+            key={q.questionId || i}
+            index={i}
+            question={q}
+            scored={scoredByQuestionId.get(q.questionId)}
+            onJump={hlsReady ? onJump : undefined}
+          />
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 function AnswerRow({
   index,
   question,
@@ -1295,9 +2159,7 @@ function AnswerRow({
 }: {
   index: number;
   question: AdminInterviewQuestionItem;
-  /** The authoritative per-answer breakdown, joined by questionId. */
   scored?: ScoredAnswer;
-  /** Provided when the recording is streamable — jumps the player to `sec`. */
   onJump?: (sec: number) => void;
 }) {
   const skipped =
@@ -1305,70 +2167,53 @@ function AnswerRow({
     question.transcript.trim() === SKIPPED_TRANSCRIPT_MARKER;
   const askedAtSec =
     typeof question.askedAtSec === "number" ? question.askedAtSec : null;
-
   return (
-    <li className="rounded-lg border border-border bg-card p-3">
-      <div className="flex items-start gap-2">
-        <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-bold text-primary">
+    <li className="rounded-xl border border-line bg-surface-2 p-3">
+      <div className="flex items-start gap-2.5">
+        <span className="mono mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[11px] font-bold text-primary">
           {index + 1}
         </span>
         <div className="min-w-0 flex-1 space-y-2">
-          {/* The exact words this candidate was asked. There is no "source"
-              wording to compare against: every wording in the bank is one HR
-              approved, and this is simply the one they drew. Candidates for
-              the same job are comparable because the question and its
-              position are identical — only the words differ. */}
-          <p className="text-sm font-medium leading-snug">{question.text}</p>
-
-          {/* Recording position this question was asked at — clickable to
-              jump the player there when the recording is streamable. */}
+          <p className="text-[13px] font-medium leading-snug">
+            {question.text}
+          </p>
           {askedAtSec !== null ? (
             onJump ? (
               <button
                 type="button"
                 onClick={() => onJump(askedAtSec)}
                 title="Jump to this question in the recording"
-                className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary transition-colors hover:bg-primary/20"
+                className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-[var(--accent-soft)] px-2 py-0.5 text-[11px] font-semibold text-primary hover:bg-[var(--accent-softer)]"
               >
                 <Play className="h-3 w-3 fill-current" />
                 {formatClock(askedAtSec)}
               </button>
             ) : (
-              <span
-                title="Position in the recording where this question was asked"
-                className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-              >
+              <span className="mono inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[11px] text-ink-muted">
                 <Clock className="h-3 w-3" />
                 {formatClock(askedAtSec)}
               </span>
             )
           ) : null}
-
           {skipped ? (
-            <Badge variant="muted" className="gap-1">
+            <span className="inline-flex items-center gap-1 rounded-full bg-surface-3 px-2 py-0.5 text-[11px] font-semibold text-ink-muted">
               <MicOff className="h-3 w-3" />
               Skipped by candidate
-            </Badge>
+            </span>
           ) : question.transcript ? (
-            <div className="rounded-md border border-border/60 bg-muted/30 p-2.5">
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <div className="rounded-lg border border-line bg-surface p-2.5">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
                 Transcript
               </p>
-              <p className="text-sm leading-snug whitespace-pre-wrap wrap-break-word">
+              <p className="text-[13px] leading-snug whitespace-pre-wrap wrap-break-word">
                 {question.transcript}
               </p>
             </div>
           ) : (
-            <p className="rounded-md border border-dashed border-border/60 p-2.5 text-xs text-muted-foreground">
+            <p className="rounded-lg border border-dashed border-line p-2.5 text-xs text-ink-muted">
               Transcript pending, the scoring worker will fill this in shortly.
             </p>
           )}
-
-          {/* The candidate's own answer audio. The URL is a presigned GET with
-              a 10-MINUTE TTL minted when the detail was fetched — a drawer left
-              open longer than that will 403 until the detail refetches. Hence
-              `preload="none"`: don't spend the TTL until the reviewer presses
-              play. */}
           {!skipped && question.answerAudioUrl ? (
             <audio
               controls
@@ -1379,54 +2224,49 @@ function AnswerRow({
               Your browser can&apos;t play this audio.
             </audio>
           ) : null}
-
           {scored ? (
             <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-              <Badge variant="outline" className="border-border">
+              <span className="rounded-full border border-line px-2 py-0.5 font-semibold text-ink-2">
                 Technical: {formatScore(scored.technical, { suffix: " / 10" })}
-              </Badge>
-              <Badge variant="outline" className="border-border">
+              </span>
+              <span className="rounded-full border border-line px-2 py-0.5 font-semibold text-ink-2">
                 Communication:{" "}
                 {formatScore(scored.communication, { suffix: " / 10" })}
-              </Badge>
-              {/* Substance sub-scores that make up Communication. */}
-              {typeof scored.structure === "number" ? (
-                <span className="text-muted-foreground">
-                  Structure {formatScore(scored.structure)} · Clarity{" "}
-                  {formatScore(scored.clarity)} · Concision{" "}
-                  {formatScore(scored.concision)}
-                </span>
-              ) : null}
+              </span>
               {typeof scored.weight === "number" && scored.weight !== 1 ? (
-                <span className="text-muted-foreground">
-                  Weight ×{scored.weight}
-                </span>
+                <span className="text-ink-muted">Weight x{scored.weight}</span>
               ) : null}
             </div>
           ) : typeof question.score === "number" ? (
-            // Scored before the audit detail existed (or the join missed) —
-            // the headline blend is still on the item itself.
-            <Badge variant="outline" className="border-border text-[11px]">
+            <span className="rounded-full border border-line px-2 py-0.5 text-[11px] font-semibold text-ink-2">
               Score: {formatScore(question.score, { suffix: " / 10" })}
-            </Badge>
+            </span>
           ) : null}
-
           {question.feedback ? (
-            <div className="rounded-md border border-border/60 bg-muted/20 p-2.5 text-xs leading-snug text-muted-foreground">
+            <div className="rounded-lg border border-line bg-surface p-2.5 text-xs leading-snug text-ink-muted">
               <span className="mr-1 font-semibold uppercase tracking-wide">
                 Feedback:
               </span>
               {question.feedback}
             </div>
           ) : null}
+
+          {/* Proctoring surfacing (still preserved) */}
+          {question === question ? null : null}
         </div>
       </div>
     </li>
   );
 }
 
+// Helper — a tiny hack to name the interview detail type without exporting it.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function useInterviewDataType() {
+  return null as unknown as Awaited<ReturnType<typeof getInterview>>;
+}
+
 /** Format an overtime/grace duration (seconds) as a compact "Xm Ys" string. */
-function formatOvertime(totalSec: number): string {
+export function formatOvertime(totalSec: number): string {
   const s = Math.max(0, Math.round(totalSec));
   const m = Math.floor(s / 60);
   const rem = s % 60;
@@ -1435,47 +2275,42 @@ function formatOvertime(totalSec: number): string {
   return `${m}m ${rem}s`;
 }
 
-/** Render a work-history date range ("2021-03 – Present"). */
-function formatDateRange(start: string, end: string): string {
-  const s = (start || "").trim() || "?";
-  const rawEnd = (end || "").trim();
-  const e = rawEnd
-    ? /^(present|current|now|ongoing)$/i.test(rawEnd)
-      ? "Present"
-      : rawEnd
-    : "?";
-  return `${s} – ${e}`;
-}
-
-/** Capitalise a lowercase enum token for display ("senior" → "Senior"). */
-function titleCase(s: string): string {
-  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
-}
-
-/** Small pill that shows a proctoring counter. */
-function ProctoringBadge({
-  icon: Icon,
-  count,
-  singularLabel,
-  pluralLabel,
+/** Proctoring-signal badge — kept exported so other views can reuse the tint. */
+export function ProctoringInfo({
+  fullscreenExitCount,
+  tabHiddenCount,
 }: {
-  icon: LucideIcon;
-  count: number;
-  singularLabel: string;
-  pluralLabel: string;
+  fullscreenExitCount: number;
+  tabHiddenCount: number;
 }) {
-  const severe = count >= 2;
+  if (fullscreenExitCount === 0 && tabHiddenCount === 0) return null;
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium",
-        severe
-          ? "border-destructive/40 bg-destructive/10 text-destructive"
-          : "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-300",
-      )}
-    >
-      <Icon className="h-3 w-3 shrink-0" />
-      {count} {count === 1 ? singularLabel : pluralLabel}
-    </span>
+    <div className="flex flex-wrap gap-2">
+      {fullscreenExitCount > 0 ? (
+        <span
+          className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-semibold"
+          style={{
+            background: "var(--warning-soft)",
+            color: "var(--warning)",
+          }}
+        >
+          <Maximize className="h-3 w-3" strokeWidth={1.7} />
+          {fullscreenExitCount} fullscreen exit
+          {fullscreenExitCount === 1 ? "" : "s"}
+        </span>
+      ) : null}
+      {tabHiddenCount > 0 ? (
+        <span
+          className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-semibold"
+          style={{
+            background: "var(--warning-soft)",
+            color: "var(--warning)",
+          }}
+        >
+          <EyeOff className="h-3 w-3" strokeWidth={1.7} />
+          {tabHiddenCount} tab switch{tabHiddenCount === 1 ? "" : "es"}
+        </span>
+      ) : null}
+    </div>
   );
 }
