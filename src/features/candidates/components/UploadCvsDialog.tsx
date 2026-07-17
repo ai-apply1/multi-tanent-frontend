@@ -281,11 +281,24 @@ export function UploadCvsDialog({
   const nameError = (row: UploadRow): string | null =>
     row.fullName.trim() ? null : "Name is required."
 
+  const phoneError = (row: UploadRow): string | null =>
+    row.phone.trim() ? null : "Phone is required — the CV didn't have one."
+
+  /**
+   * City is required because the job's city gate compares against it. A CV
+   * that doesn't say where someone lives can't be gated, so the import
+   * stops here rather than guessing.
+   */
+  const cityError = (row: UploadRow): string | null =>
+    row.city.trim() ? null : "City is required — the CV didn't have one."
+
+  const rowIncomplete = (row: UploadRow): boolean =>
+    Boolean(emailError(row) || nameError(row) || phoneError(row) || cityError(row))
+
   /** Only uploaded rows can become candidates — a failed PUT has no key. */
   const importable = rows.filter((r) => r.status === "uploaded" && r.cvKey)
-  const needsAttention = importable.filter((r) => emailError(r) || nameError(r))
-  const canImport =
-    importable.length > 0 && needsAttention.length === 0
+  const needsAttention = importable.filter(rowIncomplete)
+  const canImport = importable.length > 0 && needsAttention.length === 0
 
   /** Phase 1: upload every file, then read them all. */
   const readMutation = useMutation({
@@ -388,11 +401,13 @@ export function UploadCvsDialog({
     mutationFn: async (): Promise<BulkConfirmResult> =>
       bulkConfirmCvs(
         jobId,
+        // phone/city are unconditional now — they're required server-side,
+        // and `canImport` already blocked the empty ones.
         importable.map((row) => ({
           fullName: row.fullName.trim(),
           email: row.email.trim(),
-          ...(row.phone.trim() ? { phone: row.phone.trim() } : {}),
-          ...(row.city.trim() ? { city: row.city.trim() } : {}),
+          phone: row.phone.trim(),
+          city: row.city.trim(),
           cvKey: row.cvKey as string,
         }))
       ),
@@ -522,19 +537,20 @@ export function UploadCvsDialog({
                     {/* Rows needing a human float to the top — with 50 CVs, a
                         missing email 40 rows down is invisible otherwise. */}
                     {[...importable]
-                      .sort((a, b) => {
-                        const aBad = emailError(a) || nameError(a) ? 0 : 1
-                        const bBad = emailError(b) || nameError(b) ? 0 : 1
-                        return aBad - bBad
-                      })
+                      .sort(
+                        (a, b) =>
+                          Number(rowIncomplete(b)) - Number(rowIncomplete(a))
+                      )
                       .map((row) => (
                         <ReviewRow
                           key={row.id}
                           row={row}
                           busy={busy}
-                          touched={touched.has(row.id)}
+                          incomplete={rowIncomplete(row)}
                           emailMsg={touched.has(row.id) ? emailError(row) : null}
                           nameMsg={touched.has(row.id) ? nameError(row) : null}
+                          phoneMsg={touched.has(row.id) ? phoneError(row) : null}
+                          cityMsg={touched.has(row.id) ? cityError(row) : null}
                           onPatch={(patch) => patchRow(row.id, patch)}
                           onTouch={() => setTouched((prev) => new Set(prev).add(row.id))}
                           onRemove={() => removeRow(row.id)}
@@ -701,22 +717,26 @@ function SelectList({
 function ReviewRow({
   row,
   busy,
+  incomplete,
   emailMsg,
   nameMsg,
+  phoneMsg,
+  cityMsg,
   onPatch,
   onTouch,
   onRemove,
 }: {
   row: UploadRow
   busy: boolean
-  touched: boolean
+  incomplete: boolean
   emailMsg: string | null
   nameMsg: string | null
+  phoneMsg: string | null
+  cityMsg: string | null
   onPatch: (patch: Partial<UploadRow>) => void
   onTouch: () => void
   onRemove: () => void
 }) {
-  const incomplete = !row.email.trim() || !row.fullName.trim()
   return (
     <div
       className={cn(
@@ -786,28 +806,35 @@ function ReviewRow({
         </div>
         <div className="space-y-1.5">
           <Label htmlFor={`phone-${row.id}`} className="text-xs">
-            Phone <span className="text-muted-foreground">(optional)</span>
+            Phone
           </Label>
           <Input
             id={`phone-${row.id}`}
             value={row.phone}
             disabled={busy}
+            aria-invalid={Boolean(phoneMsg)}
             maxLength={40}
-            placeholder="+92…"
+            placeholder="Not found — type it"
             onChange={(e) => onPatch({ phone: e.target.value })}
+            onBlur={onTouch}
           />
+          {phoneMsg ? <p className="text-xs text-destructive">{phoneMsg}</p> : null}
         </div>
         <div className="space-y-1.5">
           <Label htmlFor={`city-${row.id}`} className="text-xs">
-            City <span className="text-muted-foreground">(optional)</span>
+            City
           </Label>
           <Input
             id={`city-${row.id}`}
             value={row.city}
             disabled={busy}
+            aria-invalid={Boolean(cityMsg)}
             maxLength={120}
+            placeholder="Not found — type it"
             onChange={(e) => onPatch({ city: e.target.value })}
+            onBlur={onTouch}
           />
+          {cityMsg ? <p className="text-xs text-destructive">{cityMsg}</p> : null}
         </div>
       </div>
     </div>

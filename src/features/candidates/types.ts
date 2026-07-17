@@ -101,8 +101,10 @@ export interface CandidateBase {
   jobId: string
   fullName: string
   email: string
-  phone: string | null
-  city: string | null
+  /** Required at every write path — never empty on a row created since. */
+  phone: string
+  /** Required at every write path. Stored lowercased; re-case for display. */
+  city: string
   /** S3 key, never a URL. `null` ⇒ no CV on file ⇒ the Open-CV action is hidden. */
   cvKey: string | null
   /** Computed from the parsed CV's work history; `null` until the parse lands. */
@@ -177,8 +179,10 @@ export interface KanbanCard {
   _id: string
   fullName: string
   email: string
-  phone: string | null
-  city: string | null
+  /** Required at every write path — never empty on a row created since. */
+  phone: string
+  /** Required at every write path. Stored lowercased; re-case for display. */
+  city: string
   yearsOfExperience: number | null
   attemptCount: number
   latestInterviewId: string | null
@@ -251,8 +255,10 @@ export interface PresignedCvUpload {
 export interface BulkConfirmRow {
   fullName: string
   email: string
-  phone?: string
-  city?: string
+  /** Required server-side (`@IsNotEmpty`) — an empty string is a 400. */
+  phone: string
+  /** Required server-side: the job's city gate compares against it. */
+  city: string
   cvKey: string
 }
 
