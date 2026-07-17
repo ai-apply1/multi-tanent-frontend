@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import {
   keepPreviousData,
@@ -10,35 +10,26 @@ import {
 import toast from "react-hot-toast";
 import {
   AlertTriangle,
+  ArrowLeft,
   ChevronLeft,
   ChevronRight,
-  Columns3,
+  Clock,
   Download,
   Eye,
   FileText,
   Inbox,
   Loader2,
-  MapPin,
+  Loader,
   MoreVertical,
   RefreshCw,
   Rows3,
   Search,
   Send,
   Trash2,
-  Upload,
-  UserX,
+  Users2,
   X,
 } from "lucide-react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -46,14 +37,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
@@ -65,17 +48,8 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { InterviewDetailDrawer } from "@/components/interviews/InterviewDetailDrawer";
-import { PhoneActions } from "@/components/PhoneActions";
-import { CandidateKanban } from "@/features/candidates/components/CandidateKanban";
-import { UploadCvsDialog } from "@/features/candidates/components/UploadCvsDialog";
 import {
   deleteCandidate,
   exportCandidatesCsv,
@@ -92,6 +66,7 @@ import {
   type CandidateStatus,
 } from "@/features/candidates/types";
 import { JOB_OPTIONS_QUERY_KEY, listJobOptions } from "@/features/jobs/jobsApi";
+import { ROUTES, jobDetail } from "@/routes";
 import { formatDate } from "@/lib/date";
 import { errorMessage } from "@/lib/errors";
 import { cn } from "@/lib/utils";
@@ -102,21 +77,24 @@ const ALL = "all";
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 const DEFAULT_PAGE_SIZE = 25;
 
-/** Every column except the checkbox and Actions is content; drives the colSpan. */
-const COLUMN_COUNT = 9;
+/** DevExcel grid columns — Candidate / Role / Status / AI score / Manual / Date / kebab. */
+const ROW_GRID = "grid-cols-[1.7fr_1.3fr_auto_1.1fr_1fr_0.8fr_40px]";
 
 /**
- * Trigger styling for the Status filter, tinted to the SELECTED status's own
- * colour so the operator sees not just that a filter is applied but what it's
- * filtering to. The hue is org data (custom columns included), so it comes
- * from the catalog row rather than a theme token; `color-mix` keeps the fill a
- * wash that works on both the light and dark surface.
+ * Stage badge tint. The org owns the hue (custom columns included), so the
+ * fill/text pair is computed from the catalog's colour rather than a theme
+ * token — `color-mix` keeps the wash readable on both surface tones. Falls
+ * back to a neutral muted pair when the org cleared the colour.
  */
-function statusTintStyle(color: string | null | undefined) {
-  if (!color) return undefined;
+function stageBadgeStyle(color: string | null | undefined) {
+  if (!color) {
+    return {
+      backgroundColor: "var(--surface-3)",
+      color: "var(--ink-muted)",
+    };
+  }
   return {
-    borderColor: color,
-    backgroundColor: `color-mix(in oklch, ${color} 12%, transparent)`,
+    backgroundColor: `color-mix(in oklab, ${color}, white 88%)`,
     color,
   };
 }
@@ -144,22 +122,28 @@ function isProcessing(row: CandidateListItem): boolean {
   );
 }
 
+/** Two initials, uppercased. Empty string collapses to a single dash. */
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "—";
+  return parts
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? "")
+    .join("");
+}
+
 export function CandidatesPage() {
   const queryClient = useQueryClient();
   // This page serves two routes: the org-wide `/dashboard/candidates` and
   // `/dashboard/jobs/:jobId/candidates`, which Jobs links to as "View
   // candidates". On the latter the job is the whole point of the URL, so it
-  // seeds the filter and opens on the board — the per-job view that route
-  // exists for. Without this the job id in the URL would be ignored entirely.
+  // seeds the filter. Without this the job id in the URL would be ignored.
   const { jobId: routeJobId } = useParams<{ jobId: string }>();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [jobFilter, setJobFilter] = useState<string>(routeJobId ?? ALL);
   const [statusFilter, setStatusFilter] = useState<string>(ALL);
   const [search, setSearch] = useState("");
-  const [view, setView] = useState<"table" | "board">(
-    routeJobId ? "board" : "table",
-  );
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<CandidateListItem | null>(
     null,
@@ -168,7 +152,6 @@ export function CandidatesPage() {
   const [inviteTarget, setInviteTarget] = useState<CandidateListItem | null>(
     null,
   );
-  const [uploadOpen, setUploadOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   // The candidate whose interview the drawer should show. The drawer is keyed
   // by `publicSessionId`, which the LIST doesn't carry — resolving it costs a
@@ -176,6 +159,26 @@ export function CandidatesPage() {
   const [drawerCandidateId, setDrawerCandidateId] = useState<string | null>(
     null,
   );
+
+  // Deep-link support: the Command Palette navigates here with `?candidate=<id>`
+  // to auto-open the drawer for a specific row (or an unfiltered profile, when
+  // the row isn't on the current page). Kept as a one-shot — as soon as the
+  // drawer opens the param is stripped so a back/forward navigation can't
+  // re-fire the open on every history entry.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const target = searchParams.get("candidate");
+    if (!target) return;
+    setDrawerCandidateId(target);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("candidate");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [searchParams, setSearchParams]);
 
   const statusesQuery = useQuery({
     queryKey: ["candidateStatuses"],
@@ -202,11 +205,7 @@ export function CandidatesPage() {
     [jobsQuery.data],
   );
 
-  /** The board endpoint is per-job, so the toggle needs exactly one job. */
   const selectedJob = jobFilter === ALL ? null : (jobsById.get(jobFilter) ?? null);
-  const boardAvailable = jobFilter !== ALL;
-  // Uploading creates candidates on the job, which only an `open` job accepts.
-  const canUpload = selectedJob?.status === "open";
   // `selectedJob` is null for THREE different reasons — no job filter, a job
   // outside the options list's cap, or a list that simply hasn't arrived yet —
   // and anything that puts the selection into words has to tell them apart.
@@ -232,22 +231,15 @@ export function CandidatesPage() {
           ? "Loading…"
           : "Job not listed";
 
-  // Re-seed when the URL's job changes under a mounted page (job A's board →
-  // job B's). The `useState` initialisers above only cover the mount. Keyed on
+  // Re-seed when the URL's job changes under a mounted page (job A → job B).
+  // The `useState` initialisers above only cover the mount. Keyed on
   // `routeJobId` alone so it never fights the operator's own dropdown choice:
   // picking "All jobs" here leaves the param untouched and the effect idle.
   useEffect(() => {
     if (!routeJobId) return;
     setJobFilter(routeJobId);
-    setView("board");
     setPage(1);
   }, [routeJobId]);
-
-  // A job filter can't be board-less: falling back to the table keeps the
-  // toggle honest instead of showing an empty board for "All jobs".
-  useEffect(() => {
-    if (!boardAvailable && view === "board") setView("table");
-  }, [boardAvailable, view]);
 
   const listParams = {
     page,
@@ -261,15 +253,13 @@ export function CandidatesPage() {
     queryKey: ["candidates", listParams],
     queryFn: () => listCandidates(listParams),
     placeholderData: keepPreviousData,
-    // The board owns its own query; keep the table's off the wire while it's
-    // hidden so a drag doesn't race a list refetch.
-    enabled: view === "table",
     // Overrides the global 30s. These rows change WITHOUT anyone touching
     // this page — the cv-parse worker moves them from `applied` to
     // invited/rejected seconds after an import. Under the global staleTime,
     // navigating away and back inside 30s replays the cache, so the operator
     // "refreshes" and sees the same stale rows, which reads as a broken
-    // pipeline rather than a warm cache.
+    // pipeline rather than a warm cache. (Board view was removed with the
+    // design refresh — the table now owns this query unconditionally.)
     staleTime: 0,
   });
 
@@ -514,31 +504,71 @@ export function CandidatesPage() {
 
   const resetPage = () => setPage(1);
 
+  const headline = selectedJob
+    ? `Candidates · ${selectedJob.title}`
+    : "Candidates";
+  const subtitle = routeJobId
+    ? "Applicants for this job — CVs, pre-screen verdicts, interview results and funnel stage."
+    : "Every applicant across your jobs — CVs, pre-screen verdicts, interview results, and where each one sits in the funnel.";
+  const cardTitle = selectedJob ? "Applicants" : "All candidates";
+  const cardSubline =
+    total > 0
+      ? `Showing ${showingFrom}–${showingTo} of ${total}`
+      : "No candidates yet.";
+
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+    <div className="mx-auto max-w-[1240px] px-6 py-6 lg:px-8 lg:py-8">
+      {routeJobId ? (
+        <nav
+          aria-label="Breadcrumb"
+          className="mb-3.5 flex items-center gap-2 text-[13px] text-ink-muted"
+        >
+          <Link to={ROUTES.JOBS} className="font-medium hover:text-ink">
+            Jobs
+          </Link>
+          <span className="text-ink-subtle">/</span>
+          {selectedJob ? (
+            <Link
+              to={jobDetail(selectedJob._id)}
+              className="font-medium hover:text-ink"
+            >
+              {selectedJob.title}
+            </Link>
+          ) : (
+            <span className="font-medium">
+              {jobsLoading ? "Loading…" : "Job"}
+            </span>
+          )}
+          <span className="text-ink-subtle">/</span>
+          <span className="font-semibold text-ink">Candidates</span>
+        </nav>
+      ) : null}
+
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-            <Inbox className="h-6 w-6 text-primary" />
-            Candidates
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Every applicant across your jobs — CVs, pre-screen verdicts, interview
-            results, and where each one sits in the funnel.
+          <div className="flex items-center gap-2.5">
+            <span className="text-primary">
+              <Users2 className="h-[18px] w-[18px]" strokeWidth={1.7} />
+            </span>
+            <h1 className="text-[23px] font-semibold tracking-tight">
+              {headline}
+            </h1>
+          </div>
+          <p className="mt-1.5 max-w-[620px] text-[13.5px] text-ink-muted">
+            {subtitle}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex flex-wrap gap-2">
+          {routeJobId && selectedJob ? (
+            <Button variant="secondary" size="sm" asChild>
+              <Link to={jobDetail(selectedJob._id)}>
+                <ArrowLeft className="h-4 w-4" strokeWidth={1.7} />
+                Back to job
+              </Link>
+            </Button>
+          ) : null}
           <Button
-            variant="outline"
-            size="sm"
-            onClick={() => refetch()}
-            disabled={isFetching || view === "board"}
-          >
-            {isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            Refresh
-          </Button>
-          <Button
-            variant="outline"
+            variant="secondary"
             size="sm"
             onClick={() => void handleExport()}
             disabled={exporting}
@@ -546,128 +576,109 @@ export function CandidatesPage() {
             {exporting ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <Download className="h-4 w-4" />
+              <Download className="h-4 w-4" strokeWidth={1.7} />
             )}
             Export CSV
           </Button>
-          <ViewToggle
-            view={view}
-            onChange={setView}
-            boardAvailable={boardAvailable}
-          />
-          <UploadCta
-            canUpload={canUpload}
-            jobSelected={jobFilter !== ALL}
-            jobStatus={selectedJob?.status ?? null}
-            jobsLoading={jobsLoading}
-            onClick={() => setUploadOpen(true)}
-          />
         </div>
       </div>
 
-      <Card>
-        <CardHeader className="border-b border-border">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <CardTitle>{view === "board" ? "Board" : "All candidates"}</CardTitle>
-              <CardDescription>
-                {view === "board"
-                  ? `${selectedJob?.title ?? "This job"} — drag a card to move a candidate.`
-                  : total > 0
-                    ? `Showing ${showingFrom}–${showingTo} of ${total}`
-                    : "No candidates yet."}
-              </CardDescription>
-            </div>
-            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap">
-              <div className="relative w-full sm:w-72">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={search}
-                  onChange={(e) => {
-                    setSearch(e.target.value);
-                    resetPage();
-                  }}
-                  placeholder="Search name, email, phone…"
-                  className="pl-9"
-                  // The board has no search — it's the whole job, always.
-                  disabled={view === "board"}
-                />
-              </div>
-              <Select
-                value={jobFilter}
-                onValueChange={(v) => {
-                  setJobFilter(v);
-                  resetPage();
-                }}
-              >
-                <SelectTrigger
-                  className={cn(
-                    "w-full shrink-0 sm:w-[200px]",
-                    jobFilter !== ALL && "border-primary bg-primary/10 text-primary",
-                  )}
-                  aria-label="Job"
-                >
-                  <SelectValue>{jobFilterLabel}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL}>All jobs</SelectItem>
-                  {(jobsQuery.data ?? []).map((job) => (
-                    <SelectItem key={job._id} value={job._id}>
-                      {job.title}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select
-                value={statusFilter}
-                onValueChange={(v) => {
-                  setStatusFilter(v);
-                  resetPage();
-                }}
-                disabled={view === "board"}
-              >
-                <SelectTrigger
-                  className="w-full shrink-0 sm:w-[170px]"
-                  style={statusTintStyle(statusByKey.get(statusFilter)?.color)}
-                  aria-label="Status"
-                >
-                  <SelectValue placeholder="All statuses" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL}>All statuses</SelectItem>
-                  {statuses.map((status) => (
-                    <SelectItem key={status._id} value={status.key}>
-                      <span className="flex items-center gap-2">
-                        <span
-                          className="h-2 w-2 shrink-0 rounded-full"
-                          style={{
-                            backgroundColor: status.color ?? "var(--muted-foreground)",
-                          }}
-                        />
-                        {status.label}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+      <div className="rounded-2xl border border-line bg-surface">
+        {/* Toolbar */}
+        <div className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-4">
+          <div className="min-w-0">
+            <div className="text-[14px] font-semibold text-ink">{cardTitle}</div>
+            <div className="text-[12px] text-ink-muted">{cardSubline}</div>
           </div>
-        </CardHeader>
+          <div className="flex-1" />
+          <div className="relative w-full sm:w-72">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" />
+            <input
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                resetPage();
+              }}
+              placeholder="Search name, email, phone…"
+              className="h-9 w-full rounded-full border border-[var(--field-border)] bg-surface pl-9 pr-3 text-[13px] text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)] disabled:cursor-not-allowed disabled:opacity-60"
+            />
+          </div>
+          {!routeJobId ? (
+            <Select
+              value={jobFilter}
+              onValueChange={(v) => {
+                setJobFilter(v);
+                resetPage();
+              }}
+            >
+              <SelectTrigger
+                className={cn(
+                  "h-9 w-full shrink-0 rounded-full sm:w-[200px]",
+                  jobFilter !== ALL &&
+                    "border-primary bg-[var(--accent-soft)] text-primary",
+                )}
+                aria-label="Job"
+              >
+                <SelectValue>{jobFilterLabel}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>All jobs</SelectItem>
+                {(jobsQuery.data ?? []).map((job) => (
+                  <SelectItem key={job._id} value={job._id}>
+                    {job.title}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : null}
+          <Select
+            value={statusFilter}
+            onValueChange={(v) => {
+              setStatusFilter(v);
+              resetPage();
+            }}
+          >
+            <SelectTrigger
+              className="h-9 w-full shrink-0 rounded-full sm:w-[170px]"
+              style={
+                statusFilter !== ALL
+                  ? stageBadgeStyle(statusByKey.get(statusFilter)?.color)
+                  : undefined
+              }
+              aria-label="Status"
+            >
+              <SelectValue placeholder="All statuses" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>All statuses</SelectItem>
+              {statuses.map((status) => (
+                <SelectItem key={status._id} value={status.key}>
+                  <span className="flex items-center gap-2">
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{
+                        backgroundColor:
+                          status.color ?? "var(--ink-muted)",
+                      }}
+                    />
+                    {status.label}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
-        {view === "board" && jobFilter !== ALL ? (
-          <CardContent className="p-0">
-            <CandidateKanban jobId={jobFilter} onOpenCandidate={setDrawerCandidateId} />
-          </CardContent>
-        ) : (
-          <>
-            {selectedCount > 0 ? (
-              <div className="flex flex-col gap-2 border-b border-border bg-muted/40 px-6 py-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="font-medium">{selectedCount} selected</span>
+        {selectedCount > 0 ? (
+              <div className="flex flex-col gap-2 border-b border-line bg-[var(--accent-softer)] px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-3 text-[13px]">
+                  <span className="font-semibold text-ink">
+                    {selectedCount} selected
+                  </span>
                   <button
                     type="button"
                     onClick={() => setSelectedIds(new Set())}
-                    className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                    className="inline-flex items-center gap-1 text-[12px] text-ink-muted hover:text-ink"
                   >
                     <X className="h-3.5 w-3.5" />
                     Clear
@@ -675,16 +686,15 @@ export function CandidatesPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Button
-                    variant="outline"
+                    variant="danger"
                     size="sm"
                     disabled={bulkDeleteMutation.isPending}
-                    className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                     onClick={() => setBulkDeleteOpen(true)}
                   >
                     {bulkDeleteMutation.isPending ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
-                      <Trash2 className="h-4 w-4" />
+                      <Trash2 className="h-4 w-4" strokeWidth={1.7} />
                     )}
                     Delete
                   </Button>
@@ -698,20 +708,19 @@ export function CandidatesPage() {
                 operator conclude the pipeline is stuck. It disappears by
                 itself once the last row lands. */}
             {processingCount > 0 ? (
-              <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-6 py-2.5">
-                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
-                <p className="text-xs text-muted-foreground">
-                  <strong className="font-medium text-foreground">
-                    {processingCount} CV{processingCount === 1 ? " is" : "s are"} still
-                    being read.
+              <div className="flex items-center gap-2 border-b border-line bg-[var(--warning-soft)] px-5 py-2.5">
+                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--warning)]" />
+                <p className="text-[12.5px] text-ink-2">
+                  <strong className="font-semibold text-ink">
+                    {processingCount} CV{processingCount === 1 ? " is" : "s are"} still being read.
                   </strong>{" "}
-                  Their status updates once the AI finishes — this table won't update on
+                  Their status updates once the AI finishes — this table won&apos;t update on
                   its own, so hit Refresh in a moment to see the result.
                 </p>
                 <Button
-                  variant="outline"
+                  variant="secondary"
                   size="sm"
-                  className="ml-auto h-7 shrink-0 text-xs"
+                  className="ml-auto h-7 shrink-0"
                   onClick={() => refetch()}
                   disabled={isFetching}
                 >
@@ -721,99 +730,100 @@ export function CandidatesPage() {
               </div>
             ) : null}
 
-            <CardContent className="p-0">
-              <Table className="min-w-[1000px]" containerClassName="max-h-[70vh]">
-                {/* Sticky header: the `max-h` lives on the Table's scroll
-                    wrapper (containerClassName), which is what a sticky
-                    thead actually sticks to. */}
-                <TableHeader className="sticky top-0 z-20 bg-card [&_th]:bg-card">
-                  <TableRow>
-                    <TableHead className="w-10 pl-6">
-                      <Checkbox
-                        checked={headerChecked}
-                        onCheckedChange={toggleAll}
-                        aria-label="Select all on this page"
-                      />
-                    </TableHead>
-                    <TableHead>Candidate</TableHead>
-                    <TableHead>Contact</TableHead>
-                    <TableHead>Job</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Experience</TableHead>
-                    <TableHead>Interview</TableHead>
-                    <TableHead>Applied</TableHead>
-                    <TableHead className="pr-6 text-center">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isLoading ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={COLUMN_COUNT}
-                        className="py-16 text-center text-sm text-muted-foreground"
-                      >
-                        <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin text-primary" />
-                        Loading candidates…
-                      </TableCell>
-                    </TableRow>
-                  ) : isError ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={COLUMN_COUNT}
-                        className="py-16 text-center text-sm text-destructive"
-                      >
-                        Could not load candidates.{" "}
-                        <button onClick={() => refetch()} className="underline">
-                          Retry
-                        </button>
-                      </TableCell>
-                    </TableRow>
-                  ) : rows.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={COLUMN_COUNT}
-                        className="py-16 text-center text-sm text-muted-foreground"
-                      >
-                        <Inbox className="mx-auto mb-2 h-6 w-6" />
-                        {search.trim() || statusFilter !== ALL || jobFilter !== ALL
-                          ? "No candidates match these filters."
-                          : "No candidates yet. Pick an open job, then click Upload CVs to add some."}
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    rows.map((row) => (
-                      <CandidateRow
-                        key={row._id}
-                        row={row}
-                        selected={selectedIds.has(row._id)}
-                        jobTitle={jobsById.get(row.jobId)?.title ?? null}
-                        statuses={statuses}
-                        resolvingInterview={
-                          drawerCandidateId === row._id && detailQuery.isLoading
-                        }
-                        statusPending={
-                          statusMutation.isPending &&
-                          statusMutation.variables?.id === row._id
-                        }
-                        onToggle={(c) => toggleOne(row._id, c)}
-                        onOpenCv={() => void handleOpenCv(row._id)}
-                        onOpenInterview={() => setDrawerCandidateId(row._id)}
-                        onInvite={() => setInviteTarget(row)}
-                        onChangeStatus={(statusKey) =>
-                          statusMutation.mutate({ id: row._id, statusKey })
-                        }
-                        onDelete={() => setDeleteTarget(row)}
-                      />
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </CardContent>
+            {/* Grid header */}
+            <div
+              className={cn(
+                "grid items-center gap-3 border-b border-line bg-surface-3 px-5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-muted",
+                ROW_GRID,
+              )}
+            >
+              <span className="flex items-center gap-2.5">
+                <Checkbox
+                  checked={headerChecked}
+                  onCheckedChange={(c) => toggleAll(Boolean(c))}
+                  aria-label="Select all on this page"
+                />
+                Candidate
+              </span>
+              <span>Role</span>
+              <span>Status</span>
+              <span>AI score</span>
+              <span>Manual score</span>
+              <span>Date</span>
+              <span />
+            </div>
 
-            <div className="flex flex-col gap-3 border-t border-border px-6 py-3 sm:flex-row sm:items-center sm:justify-between">
+            {isLoading ? (
+              <div className="flex flex-col items-center gap-2 px-6 py-16 text-center text-[13px] text-ink-muted">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                Loading candidates…
+              </div>
+            ) : isError ? (
+              <div className="flex flex-col items-center gap-2 px-6 py-16 text-center text-[13px] text-[var(--danger)]">
+                Could not load candidates.
+                <button
+                  onClick={() => refetch()}
+                  className="text-primary underline"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : rows.length === 0 ? (
+              <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
+                <span className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-primary">
+                  <Inbox className="h-6 w-6" strokeWidth={1.7} />
+                </span>
+                <h3 className="text-[16px] font-semibold text-ink">
+                  {search.trim() ||
+                  statusFilter !== ALL ||
+                  jobFilter !== ALL
+                    ? "No candidates match"
+                    : "No candidates yet"}
+                </h3>
+                <p className="max-w-[340px] text-[13.5px] text-ink-muted">
+                  {search.trim() ||
+                  statusFilter !== ALL ||
+                  jobFilter !== ALL
+                    ? "Adjust your search or filters to see applicants."
+                    : "Open a job and upload CVs from its Candidates tab to add some."}
+                </p>
+              </div>
+            ) : (
+              <div>
+                {rows.map((row) => (
+                  <CandidateRow
+                    key={row._id}
+                    row={row}
+                    selected={selectedIds.has(row._id)}
+                    jobTitle={jobsById.get(row.jobId)?.title ?? null}
+                    statuses={statuses}
+                    resolvingInterview={
+                      drawerCandidateId === row._id && detailQuery.isLoading
+                    }
+                    statusPending={
+                      statusMutation.isPending &&
+                      statusMutation.variables?.id === row._id
+                    }
+                    onToggle={(c) => toggleOne(row._id, c)}
+                    onOpenCv={() => void handleOpenCv(row._id)}
+                    onOpenInterview={() => setDrawerCandidateId(row._id)}
+                    onInvite={() => setInviteTarget(row)}
+                    onChangeStatus={(statusKey) =>
+                      statusMutation.mutate({ id: row._id, statusKey })
+                    }
+                    onDelete={() => setDeleteTarget(row)}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* Pagination footer */}
+            <div className="flex flex-col gap-3 border-t border-line px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">Rows per page</span>
+                  <span className="text-[12px] text-ink-muted">
+                    Rows per page
+                  </span>
                   <Select
                     value={String(pageSize)}
                     onValueChange={(v) => {
@@ -821,7 +831,7 @@ export function CandidatesPage() {
                       resetPage();
                     }}
                   >
-                    <SelectTrigger className="h-8 w-[72px]">
+                    <SelectTrigger className="h-8 w-[72px] rounded-full">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -833,8 +843,8 @@ export function CandidatesPage() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span>
+                <div className="flex items-center gap-2 text-[12px] text-ink-muted">
+                  <span className="mono">
                     Page {page} of {Math.max(totalPages, 1)}
                   </span>
                   {/* Rows stay put via keepPreviousData, so without this a page
@@ -849,38 +859,26 @@ export function CandidatesPage() {
               </div>
               <div className="flex items-center gap-2">
                 <Button
-                  variant="outline"
+                  variant="secondary"
                   size="sm"
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                   disabled={page <= 1 || isFetching}
                 >
-                  <ChevronLeft className="h-4 w-4" />
+                  <ChevronLeft className="h-4 w-4" strokeWidth={1.7} />
                   Previous
                 </Button>
                 <Button
-                  variant="outline"
+                  variant="secondary"
                   size="sm"
                   onClick={() => setPage((p) => p + 1)}
                   disabled={!data?.nextPage || isFetching}
                 >
                   Next
-                  <ChevronRight className="h-4 w-4" />
+                  <ChevronRight className="h-4 w-4" strokeWidth={1.7} />
                 </Button>
               </div>
             </div>
-          </>
-        )}
-      </Card>
-
-      {selectedJob ? (
-        <UploadCvsDialog
-          open={uploadOpen}
-          onOpenChange={setUploadOpen}
-          jobId={selectedJob._id}
-          jobTitle={selectedJob.title}
-          onImported={invalidateCandidates}
-        />
-      ) : null}
+      </div>
 
       <ConfirmDialog
         open={Boolean(deleteTarget)}
@@ -953,8 +951,13 @@ export function CandidatesPage() {
         }}
       />
 
+      {/* `candidateId` is passed alongside `sessionId` so the drawer opens
+          for rows without an interview yet — rejected pre-screens, invited
+          but not started, etc. Otherwise those clicks silently no-op'd
+          because `interviewSessionId` stays null until the detail resolves. */}
       <InterviewDetailDrawer
         sessionId={interviewSessionId}
+        candidateId={drawerCandidateId}
         onOpenChange={(open) => {
           if (!open) setDrawerCandidateId(null);
         }}
@@ -964,102 +967,78 @@ export function CandidatesPage() {
 }
 
 /**
- * Table ⇄ board switch. The board endpoint is per-job, so it can only render
- * once a single job is picked — disabled (with the reason) rather than hidden,
- * so the capability is discoverable.
+ * AI score readout — a 54px fill bar plus the mono value. The list projection
+ * doesn't carry interview scores (only whether an interview exists), so this
+ * shows the "not yet scored" state for every list row today; the drawer holds
+ * the actual number once opened. The colour thresholds match the design's
+ * accent/warning/danger split so the visual grammar is ready when the API
+ * starts populating the field.
  */
-function ViewToggle({
-  view,
-  onChange,
-  boardAvailable,
+function AiScoreCell({
+  value,
+  hasInterview,
 }: {
-  view: "table" | "board";
-  onChange: (view: "table" | "board") => void;
-  boardAvailable: boolean;
+  value: number | null;
+  hasInterview: boolean;
 }) {
+  if (value == null) {
+    return (
+      <span className="text-[13px] text-ink-subtle">
+        {hasInterview ? (
+          <span className="inline-flex items-center gap-1.5">
+            <Loader className="h-3.5 w-3.5" strokeWidth={1.7} />
+            Pending
+          </span>
+        ) : (
+          "—"
+        )}
+      </span>
+    );
+  }
+  const barColor =
+    value >= 70
+      ? "var(--primary)"
+      : value >= 50
+        ? "var(--warning)"
+        : "var(--danger)";
   return (
-    <div className="flex shrink-0 items-center rounded-md border border-border p-0.5">
-      <Button
-        variant={view === "table" ? "secondary" : "ghost"}
-        size="sm"
-        className="h-7"
-        onClick={() => onChange("table")}
+    <span className="flex items-center gap-2.5">
+      <span
+        className="inline-block h-1.5 w-[54px] overflow-hidden rounded-full"
+        style={{ backgroundColor: "var(--surface-3)" }}
       >
-        <Rows3 className="h-4 w-4" />
-        Table
-      </Button>
-      <TooltipProvider delayDuration={200}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            {/* A disabled button emits no pointer events, so the tooltip needs
-                a wrapper to hang the hover on. */}
-            <span>
-              <Button
-                variant={view === "board" ? "secondary" : "ghost"}
-                size="sm"
-                className="h-7"
-                disabled={!boardAvailable}
-                onClick={() => onChange("board")}
-              >
-                <Columns3 className="h-4 w-4" />
-                Board
-              </Button>
-            </span>
-          </TooltipTrigger>
-          {!boardAvailable ? (
-            <TooltipContent>Pick a job to see the board</TooltipContent>
-          ) : null}
-        </Tooltip>
-      </TooltipProvider>
-    </div>
+        <span
+          className="block h-full rounded-full"
+          style={{ width: `${value}%`, backgroundColor: barColor }}
+        />
+      </span>
+      <span className="mono text-[13px] font-bold" style={{ color: barColor }}>
+        {value}
+      </span>
+    </span>
   );
 }
 
 /**
- * The page's one primary CTA. Uploading creates candidates on a job, and only
- * an `open` job accepts them (422 otherwise) — so the button explains which
- * precondition is missing instead of failing at submit.
+ * Manual score readout — mono `N/100` when a reviewer has scored the
+ * candidate, or a subtle "Not scored" chip otherwise. Reads the same field
+ * as the AI cell today (list projection doesn't carry it), so it's the
+ * "Not scored" state until the drawer populates.
  */
-function UploadCta({
-  canUpload,
-  jobSelected,
-  jobStatus,
-  jobsLoading,
-  onClick,
-}: {
-  canUpload: boolean;
-  jobSelected: boolean;
-  /** Null while the options list is loading AND for a job outside its cap. */
-  jobStatus: string | null;
-  jobsLoading: boolean;
-  onClick: () => void;
-}) {
-  // `jobStatus` is null in three situations and only one of them is a status,
-  // so it can only be interpolated once it's known to be one — reading it
-  // blind is what rendered "This job is null" to operators. The branches
-  // mirror `jobFilterLabel`'s, so the tooltip and the filter can't disagree.
-  const reason = !jobSelected
-    ? "Pick a job to upload CVs into"
-    : jobStatus
-      ? `This job is ${jobStatus} — only open jobs accept new candidates`
-      : jobsLoading
-        ? "Checking this job…"
-        : "Can't confirm this job is open — it isn't in the jobs list";
-
+function ManualScoreCell({ value }: { value: number | null }) {
+  if (value == null) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-[13px] text-ink-subtle">
+        <Clock className="h-3.5 w-3.5" strokeWidth={1.7} />
+        Not scored
+      </span>
+    );
+  }
   return (
-    <TooltipProvider delayDuration={200}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span>
-            <Button size="sm" disabled={!canUpload} onClick={onClick}>
-              <Upload className="h-4 w-4" />
-              Upload CVs
-            </Button>
-          </span>
-        </TooltipTrigger>
-        {!canUpload ? <TooltipContent>{reason}</TooltipContent> : null}
-      </Tooltip>
-    </TooltipProvider>
+    <span className="mono text-[13px]">
+      <span className="font-bold text-ink">{value}</span>
+      <span className="text-ink-subtle"> /100</span>
+    </span>
   );
 }
 
@@ -1095,121 +1074,148 @@ function CandidateRow({
   // INVALID_STATUS, so the action is gated rather than offered-then-refused.
   const canInvite = status?.key === INVITABLE_STATUS_KEY;
   const hasInterview = Boolean(row.latestInterviewId);
+  // The list projection doesn't ship scores; the drawer is where the actual
+  // number lives. Kept as explicit locals so the cells' contract is obvious
+  // when a future endpoint starts populating them.
+  const aiScore: number | null = null;
+  const manualScore: number | null = null;
 
   return (
-    <TableRow className={selected ? "bg-primary/5" : undefined}>
-      <TableCell className="w-10 pl-6">
-        <Checkbox
-          checked={selected}
-          onCheckedChange={onToggle}
-          aria-label={`Select ${row.fullName || "candidate"}`}
-        />
-      </TableCell>
-      <TableCell>
-        <div className="font-medium leading-tight">{row.fullName || "—"}</div>
-        <div className="truncate text-xs text-muted-foreground" title={row.email}>
-          {row.email}
-        </div>
-      </TableCell>
-      <TableCell>
-        {row.phone ? (
-          <PhoneActions phoneNumber={row.phone} />
-        ) : (
-          <span className="text-xs text-muted-foreground">No phone</span>
-        )}
-        <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-          <MapPin className="h-3 w-3 shrink-0" />
-          {row.city || "—"}
-        </div>
-      </TableCell>
-      <TableCell className="text-sm">
+    <div
+      onClick={onOpenInterview}
+      className={cn(
+        "grid cursor-pointer items-center gap-3 border-b border-line px-5 py-3.5 text-[13.5px] transition-colors last:border-b-0 hover:bg-hover",
+        ROW_GRID,
+        selected && "bg-[var(--accent-softer)]",
+      )}
+    >
+      {/* Candidate — checkbox + avatar + name/email */}
+      <div className="flex min-w-0 items-center gap-2.5">
+        <span
+          onClick={(e) => e.stopPropagation()}
+          className="flex items-center"
+        >
+          <Checkbox
+            checked={selected}
+            onCheckedChange={(c) => onToggle(Boolean(c))}
+            aria-label={`Select ${row.fullName || "candidate"}`}
+          />
+        </span>
+        <span
+          aria-hidden
+          className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-accent text-[12px] font-bold text-primary"
+        >
+          {initialsOf(row.fullName || row.email || "")}
+        </span>
+        <span className="min-w-0">
+          <span
+            className="block truncate font-bold text-ink"
+            title={row.fullName}
+          >
+            {row.fullName || "—"}
+          </span>
+          <span
+            className="block truncate text-[11.5px] text-ink-subtle"
+            title={row.email}
+          >
+            {row.email}
+          </span>
+        </span>
+      </div>
+
+      {/* Role */}
+      <span className="min-w-0 truncate text-[13px] text-ink-2">
         {jobTitle ?? (
           // The job dropdown is capped at the API's 100-per-page max, so a
           // very large org can hold a row whose job we never fetched. Say so
           // rather than rendering a bare dash that reads like "no job".
-          <span className="text-muted-foreground" title={row.jobId}>
+          <span className="text-ink-muted" title={row.jobId}>
             Job not listed
           </span>
         )}
-      </TableCell>
-      <TableCell>
+      </span>
+
+      {/* Status — stage pill with dot */}
+      <span className="justify-self-start">
         {status ? (
-          <div className="flex flex-col items-start gap-1">
-            <Badge variant="outline" style={statusTintStyle(status.color)}>
+          // Vertical stack so the "Reading CV…" spinner and any parse-error
+          // indicator can live under the stage pill without changing its
+          // width — the grid column stays at its intrinsic 1.1fr while the
+          // row grows only for the rare rows that need it.
+          <span className="flex flex-col items-start gap-1">
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[12px] font-semibold"
+              style={stageBadgeStyle(status.color)}
+            >
+              <span
+                className="h-[7px] w-[7px] shrink-0 rounded-full"
+                style={{
+                  backgroundColor: status.color ?? "var(--ink-muted)",
+                }}
+              />
               {status.label}
-            </Badge>
+            </span>
             {isProcessing(row) ? (
               // `applied` means two different things — "the CV is being read
               // right now" and "it was read and parked". The status alone
               // can't say which, so this pill does.
-              <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+              <span className="inline-flex items-center gap-1 text-[11px] text-ink-muted">
                 <Loader2 className="h-3 w-3 animate-spin" />
                 Reading CV…
               </span>
             ) : null}
             {row.prescreenError ? (
               <span
-                className="inline-flex items-center gap-1 text-[11px] text-destructive"
+                className="inline-flex items-center gap-1 text-[11px] text-[var(--danger)]"
                 title={row.prescreenError}
               >
                 <AlertTriangle className="h-3 w-3 shrink-0" />
-                CV couldn't be read
+                CV couldn&apos;t be read
               </span>
             ) : null}
-          </div>
+          </span>
         ) : (
-          <span className="text-muted-foreground">—</span>
+          <span className="text-ink-muted">—</span>
         )}
-      </TableCell>
-      <TableCell className="text-sm">
-        {row.yearsOfExperience === null ? (
-          <span className="text-muted-foreground">—</span>
-        ) : (
-          `${row.yearsOfExperience}y`
-        )}
-      </TableCell>
-      <TableCell>
-        {hasInterview ? (
-          <Button
-            variant="default"
-            size="sm"
-            onClick={onOpenInterview}
-            disabled={resolvingInterview}
-          >
-            {resolvingInterview ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Eye className="h-3.5 w-3.5" />
-            )}
-            View result
-          </Button>
-        ) : (
-          <Badge variant="muted" className="gap-1">
-            <UserX className="h-3 w-3" />
-            Not started
-          </Badge>
-        )}
-        {row.attemptCount > 0 ? (
-          <div className="mt-1 text-[11px] text-muted-foreground">
-            {row.attemptCount} attempt{row.attemptCount === 1 ? "" : "s"}
-          </div>
-        ) : null}
-      </TableCell>
-      <TableCell className="text-xs text-muted-foreground">
+      </span>
+
+      {/* AI score */}
+      <AiScoreCell value={aiScore} hasInterview={hasInterview} />
+
+      {/* Manual score */}
+      <ManualScoreCell value={manualScore} />
+
+      {/* Date */}
+      <span className="text-[12.5px] text-ink-muted">
         {formatDate(row.createdAt)}
-      </TableCell>
-      <TableCell className="pr-6 text-center">
+      </span>
+
+      {/* Kebab */}
+      <span
+        onClick={(e) => e.stopPropagation()}
+        className="justify-self-end"
+      >
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" aria-label="Row actions">
-              {statusPending ? (
+            <button
+              type="button"
+              aria-label="Row actions"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full text-ink-muted hover:bg-surface-3 hover:text-ink"
+            >
+              {statusPending || resolvingInterview ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <MoreVertical className="h-4 w-4" />
+                <MoreVertical className="h-4 w-4" strokeWidth={1.7} />
               )}
-            </Button>
+            </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">
+            {hasInterview ? (
+              <DropdownMenuItem onSelect={onOpenInterview}>
+                <Eye className="h-4 w-4" />
+                View interview
+              </DropdownMenuItem>
+            ) : null}
             {row.cvKey ? (
               <DropdownMenuItem onSelect={onOpenCv}>
                 <FileText className="h-4 w-4" />
@@ -1234,7 +1240,8 @@ function CandidateRow({
                     <span
                       className="h-2 w-2 shrink-0 rounded-full"
                       style={{
-                        backgroundColor: option.color ?? "var(--muted-foreground)",
+                        backgroundColor:
+                          option.color ?? "var(--ink-muted)",
                       }}
                     />
                     {option.label}
@@ -1242,15 +1249,9 @@ function CandidateRow({
                 ))}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
-            {hasInterview ? (
-              <DropdownMenuItem onSelect={onOpenInterview}>
-                <Eye className="h-4 w-4" />
-                View interview
-              </DropdownMenuItem>
-            ) : null}
             <DropdownMenuSeparator />
             <DropdownMenuItem
-              className="text-destructive focus:bg-destructive/10 focus:text-destructive"
+              className="text-[var(--danger)] focus:bg-[var(--danger-soft)] focus:text-[var(--danger)]"
               onSelect={onDelete}
             >
               <Trash2 className="h-4 w-4" />
@@ -1258,7 +1259,7 @@ function CandidateRow({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      </TableCell>
-    </TableRow>
+      </span>
+    </div>
   );
 }

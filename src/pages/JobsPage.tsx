@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-query";
 import {
   Briefcase,
+  Check,
   ChevronLeft,
   ChevronRight,
   Loader2,
@@ -15,18 +16,10 @@ import {
   Plus,
   RotateCw,
   Search,
+  X,
 } from "lucide-react";
 import toast from "react-hot-toast";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -34,14 +27,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -72,15 +57,10 @@ const ALL = "all";
 
 const JOB_STATUSES: JobStatus[] = ["draft", "open", "closed", "archived"];
 
-const statusVariant: Record<
-  JobStatus,
-  "outline" | "success" | "secondary" | "muted"
-> = {
-  draft: "outline",
-  open: "success",
-  closed: "secondary",
-  archived: "muted",
-};
+/** Column ratios mirror the DevExcel spec — kept in one const so header and
+ * rows can never drift out of alignment. */
+const COLS =
+  "grid-cols-[2.2fr_0.8fr_1.2fr_0.7fr_0.7fr_0.7fr_0.9fr_40px]";
 
 export function JobsPage() {
   const queryClient = useQueryClient();
@@ -139,229 +119,246 @@ export function JobsPage() {
   const showingTo = Math.min(page * pageSize, total);
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+    <div className="mx-auto max-w-[1240px] px-6 py-6 lg:px-8 lg:py-8">
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-            <Briefcase className="h-6 w-6 text-primary" />
-            Jobs
-          </h1>
-          <p className="text-sm text-muted-foreground">
+          <div className="flex items-center gap-2.5">
+            <span className="text-primary">
+              <Briefcase className="h-[18px] w-[18px]" strokeWidth={1.7} />
+            </span>
+            <h1 className="text-[23px] font-semibold tracking-tight text-ink">
+              Jobs
+            </h1>
+          </div>
+          <p className="mt-1.5 max-w-[620px] text-[13.5px] text-ink-muted">
             Every posting in your organization, its screening questions and its
             vetting rules.
           </p>
         </div>
-        <Button onClick={() => navigate(ROUTES.JOB_NEW)}>
-          <Plus className="h-4 w-4" />
-          Create job
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" onClick={() => navigate(ROUTES.JOB_NEW)}>
+            <Plus className="h-4 w-4" strokeWidth={2.2} />
+            Create job
+          </Button>
+        </div>
       </div>
 
-      <Card>
-        <CardHeader className="border-b border-border">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <CardTitle>Postings</CardTitle>
-              <CardDescription>
-                {total > 0
-                  ? `Showing ${showingFrom}–${showingTo} of ${total}`
-                  : "No jobs yet."}
-              </CardDescription>
-            </div>
-            <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center lg:w-auto">
-              <div className="relative w-full sm:w-72">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={search}
-                  onChange={(e) => {
-                    setSearch(e.target.value);
-                    setPage(1);
-                  }}
-                  placeholder="Search job titles…"
-                  className="pl-9"
-                />
-              </div>
-              <Select
-                value={statusFilter || ALL}
-                onValueChange={(v) => {
-                  setStatusFilter(v === ALL ? "" : (v as JobStatus));
-                  setPage(1);
-                }}
-              >
-                <SelectTrigger className="h-9 w-full sm:w-40">
-                  <SelectValue placeholder="All statuses" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL}>All statuses</SelectItem>
-                  {JOB_STATUSES.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {JOB_STATUS_LABELS[s]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => refetch()}
-                disabled={isFetching}
-              >
-                {isFetching ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RotateCw className="h-4 w-4" />
-                )}
-                Refresh
-              </Button>
+      <div className="rounded-2xl border border-line bg-surface">
+        {/* Toolbar */}
+        <div className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-4">
+          <div className="min-w-0">
+            <div className="text-[14px] font-semibold text-ink">Postings</div>
+            <div className="text-[12px] text-ink-muted">
+              {total > 0
+                ? `Showing ${showingFrom}–${showingTo} of ${total}`
+                : "No jobs yet."}
             </div>
           </div>
-        </CardHeader>
+          <div className="flex-1" />
+          <div className="relative w-full sm:w-72">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-subtle" />
+            <input
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+              placeholder="Search job titles…"
+              className="h-9 w-full rounded-lg border border-line bg-surface-3 pl-9 pr-3 text-[13.5px] text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)]"
+            />
+          </div>
+          <Select
+            value={statusFilter || ALL}
+            onValueChange={(v) => {
+              setStatusFilter(v === ALL ? "" : (v as JobStatus));
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="h-9 w-full sm:w-40">
+              <SelectValue placeholder="All statuses" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>All statuses</SelectItem>
+              {JOB_STATUSES.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {JOB_STATUS_LABELS[s]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => refetch()}
+            disabled={isFetching}
+            aria-label="Refresh"
+          >
+            {isFetching ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RotateCw className="h-4 w-4" strokeWidth={1.9} />
+            )}
+          </Button>
+        </div>
 
-        <CardContent className="p-0">
-          <Table containerClassName="max-h-[calc(100vh-22rem)]">
-            <TableHeader className="sticky top-0 z-20 bg-card [&_th]:bg-card">
-              <TableRow>
-                <TableHead className="pl-6">Title</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Classification</TableHead>
-                <TableHead>Questions</TableHead>
-                <TableHead>Threshold</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead className="pr-6 text-center">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isLoading ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={7}
-                    className="py-16 text-center text-sm text-muted-foreground"
+        {/* Table */}
+        <div>
+          {/* Header row */}
+          <div
+            className={`grid ${COLS} items-center gap-3 border-b border-line bg-surface-3 px-5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-muted`}
+          >
+            <span>Title</span>
+            <span>Status</span>
+            <span>Classification</span>
+            <span className="text-right">Applicants</span>
+            <span className="text-right">Questions</span>
+            <span className="text-right">Threshold</span>
+            <span>Created</span>
+            <span />
+          </div>
+
+          {isLoading ? (
+            <div className="flex items-center justify-center gap-2 px-6 py-14 text-[13.5px] text-ink-muted">
+              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              Loading jobs…
+            </div>
+          ) : isError ? (
+            <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
+              <p className="text-[13.5px] text-[var(--danger)]">
+                Could not load jobs.
+              </p>
+              <Button variant="secondary" size="sm" onClick={() => refetch()}>
+                Retry
+              </Button>
+            </div>
+          ) : rows.length === 0 ? (
+            <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
+              <span className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-primary">
+                <Briefcase className="h-6 w-6" strokeWidth={1.7} />
+              </span>
+              <h3 className="text-[16px] font-semibold text-ink">
+                {search || statusFilter
+                  ? "No jobs match your search"
+                  : "No jobs yet"}
+              </h3>
+              <p className="max-w-[340px] text-[13.5px] text-ink-muted">
+                {search || statusFilter
+                  ? "Try a different title or clear the status filter."
+                  : "Create your first posting to start collecting applicants."}
+              </p>
+              <Button size="sm" onClick={() => navigate(ROUTES.JOB_NEW)}>
+                <Plus className="h-4 w-4" strokeWidth={2.2} />
+                Create job
+              </Button>
+            </div>
+          ) : (
+            rows.map((row) => (
+              <div
+                key={row._id}
+                onClick={() => navigate(jobDetail(row._id))}
+                className={`grid ${COLS} cursor-pointer items-center gap-3 border-b border-line px-5 py-3.5 text-[13.5px] text-ink last:border-b-0 hover:bg-hover`}
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-lg bg-accent text-primary">
+                    <Briefcase className="h-[17px] w-[17px]" strokeWidth={1.7} />
+                  </span>
+                  <Link
+                    to={jobDetail(row._id)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="truncate font-semibold text-ink hover:underline"
                   >
-                    <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin text-primary" />
-                    Loading jobs…
-                  </TableCell>
-                </TableRow>
-              ) : isError ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={7}
-                    className="py-16 text-center text-sm text-destructive"
-                  >
-                    Could not load jobs.{" "}
-                    <button onClick={() => refetch()} className="underline">
-                      Retry
-                    </button>
-                  </TableCell>
-                </TableRow>
-              ) : rows.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={7}
-                    className="py-16 text-center text-sm text-muted-foreground"
-                  >
-                    No jobs yet. Click "Create job" to create one.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                rows.map((row) => (
-                  <TableRow key={row._id}>
-                    <TableCell className="pl-6">
-                      <Link
-                        to={jobDetail(row._id)}
-                        className="font-medium leading-tight hover:underline"
+                    {row.title}
+                  </Link>
+                </div>
+                <div>
+                  <JobStatusBadge status={row.status} />
+                </div>
+                <div>
+                  <JobClassification job={row} />
+                </div>
+                <div className="mono text-right text-ink-subtle">—</div>
+                <div className="mono text-right font-semibold text-ink">
+                  {row.questionCount}
+                </div>
+                <div className="mono text-right font-semibold text-ink">
+                  {row.rejectionThreshold}
+                </div>
+                <div className="text-[12.5px] text-ink-muted">
+                  {formatDate(row.createdAt)}
+                </div>
+                <div className="flex justify-end">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label={`Actions for ${row.title}`}
+                        className="flex h-8 w-8 items-center justify-center rounded-md text-ink-muted hover:bg-hover hover:text-ink"
                       >
-                        {row.title}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={statusVariant[row.status]}>
-                        {JOB_STATUS_LABELS[row.status]}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <JobClassification job={row} />
-                    </TableCell>
-                    <TableCell className="text-sm tabular-nums">
-                      {row.questionCount}
-                    </TableCell>
-                    <TableCell className="text-sm tabular-nums">
-                      {row.rejectionThreshold}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {formatDate(row.createdAt)}
-                    </TableCell>
-                    <TableCell className="pr-6 text-center">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label={`Actions for ${row.title}`}
-                          >
-                            <MoreVertical className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-48">
-                          <DropdownMenuItem
-                            onSelect={() => navigate(jobDetail(row._id))}
-                          >
-                            Open
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onSelect={() => navigate(jobEdit(row._id))}
-                          >
-                            Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onSelect={() => navigate(jobCandidates(row._id))}
-                          >
-                            View candidates
-                          </DropdownMenuItem>
-                          {/* Only the transitions legal from THIS status —
-                              anything else is a 409. `archived` is terminal,
-                              so its list is empty and the separator with it. */}
-                          {STATUS_TRANSITIONS[row.status].length > 0 ? (
-                            <>
-                              <DropdownMenuSeparator />
-                              {STATUS_TRANSITIONS[row.status].map((t) => (
-                                <DropdownMenuItem
-                                  key={t.status}
-                                  disabled={statusMutation.isPending}
-                                  onSelect={() =>
-                                    statusMutation.mutate({
-                                      id: row._id,
-                                      status: t.status,
-                                    })
-                                  }
-                                >
-                                  {t.label}
-                                </DropdownMenuItem>
-                              ))}
-                            </>
-                          ) : null}
+                        <MoreVertical className="h-4 w-4" strokeWidth={1.9} />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      align="end"
+                      className="w-48"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <DropdownMenuItem
+                        onSelect={() => navigate(jobDetail(row._id))}
+                      >
+                        Open
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() => navigate(jobEdit(row._id))}
+                      >
+                        Edit
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() => navigate(jobCandidates(row._id))}
+                      >
+                        View candidates
+                      </DropdownMenuItem>
+                      {/* Only the transitions legal from THIS status —
+                          anything else is a 409. `archived` is terminal,
+                          so its list is empty and the separator with it. */}
+                      {STATUS_TRANSITIONS[row.status].length > 0 ? (
+                        <>
                           <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            className="text-destructive focus:bg-destructive/10"
-                            onSelect={() => setDeleteTarget(row)}
-                          >
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
+                          {STATUS_TRANSITIONS[row.status].map((t) => (
+                            <DropdownMenuItem
+                              key={t.status}
+                              disabled={statusMutation.isPending}
+                              onSelect={() =>
+                                statusMutation.mutate({
+                                  id: row._id,
+                                  status: t.status,
+                                })
+                              }
+                            >
+                              {t.label}
+                            </DropdownMenuItem>
+                          ))}
+                        </>
+                      ) : null}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        className="text-[var(--danger)] focus:bg-[var(--danger-soft)] focus:text-[var(--danger)]"
+                        onSelect={() => setDeleteTarget(row)}
+                      >
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
 
-        <div className="flex flex-col gap-3 border-t border-border px-6 py-3 sm:flex-row sm:items-center sm:justify-between">
+        {/* Pagination footer */}
+        <div className="flex flex-col gap-3 border-t border-line px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">
-                Rows per page
-              </span>
+              <span className="text-[12px] text-ink-muted">Rows per page</span>
               <Select
                 value={String(pageSize)}
                 onValueChange={(v) => {
@@ -381,7 +378,7 @@ export function JobsPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2 text-[12px] text-ink-muted">
               <span>
                 Page {page} of {Math.max(totalPages, 1)}
               </span>
@@ -395,34 +392,26 @@ export function JobsPage() {
           </div>
           <div className="flex items-center gap-2">
             <Button
-              variant="outline"
+              variant="secondary"
               size="sm"
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page <= 1 || isFetching}
             >
-              {isFetching ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <ChevronLeft className="h-4 w-4" />
-              )}
+              <ChevronLeft className="h-4 w-4" strokeWidth={1.9} />
               Previous
             </Button>
             <Button
-              variant="outline"
+              variant="secondary"
               size="sm"
               onClick={() => setPage((p) => p + 1)}
               disabled={!data?.nextPage || isFetching}
             >
               Next
-              {isFetching ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <ChevronRight className="h-4 w-4" />
-              )}
+              <ChevronRight className="h-4 w-4" strokeWidth={1.9} />
             </Button>
           </div>
         </div>
-      </Card>
+      </div>
 
       <ConfirmDialog
         open={Boolean(deleteTarget)}
@@ -439,6 +428,45 @@ export function JobsPage() {
   );
 }
 
+/** Status pill — mirrors the DevExcel `jobStatusBadge` helper. Open gets a
+ * check + success tint; closed gets an x + muted tint; the transitional
+ * states (draft, archived) keep the same shape so the column doesn't jump. */
+export function JobStatusBadge({ status }: { status: JobStatus }) {
+  const base =
+    "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[12px] font-semibold";
+  if (status === "open") {
+    return (
+      <span
+        className={`${base} bg-[var(--success-soft)] text-[var(--success)]`}
+      >
+        <Check className="h-3 w-3" strokeWidth={2.6} />
+        Open
+      </span>
+    );
+  }
+  if (status === "draft") {
+    return (
+      <span
+        className={`${base} bg-[var(--warning-soft)] text-[var(--warning)]`}
+      >
+        Draft
+      </span>
+    );
+  }
+  if (status === "closed") {
+    return (
+      <span className={`${base} bg-ink-faint text-ink-muted`}>
+        <X className="h-3 w-3" strokeWidth={2.6} />
+        Closed
+      </span>
+    );
+  }
+  // archived — terminal, kept visually neutral.
+  return (
+    <span className={`${base} bg-ink-faint text-ink-muted`}>Archived</span>
+  );
+}
+
 /** The three optional classification chips, or a single `—` when all are null. */
 function JobClassification({ job }: { job: JobListItem }) {
   const chips = [
@@ -448,14 +476,17 @@ function JobClassification({ job }: { job: JobListItem }) {
   ].filter((c): c is string => Boolean(c));
 
   if (chips.length === 0) {
-    return <span className="text-muted-foreground">—</span>;
+    return <span className="text-ink-subtle">—</span>;
   }
   return (
-    <div className="flex flex-wrap items-center gap-1">
+    <div className="flex flex-wrap items-center gap-1.5">
       {chips.map((chip) => (
-        <Badge key={chip} variant="secondary">
+        <span
+          key={chip}
+          className="rounded-full bg-surface-3 px-2 py-0.5 text-[11.5px] font-semibold text-ink-2"
+        >
           {chip}
-        </Badge>
+        </span>
       ))}
     </div>
   );

@@ -14,7 +14,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core"
-import { GripVertical, Loader2, MapPin, Repeat2 } from "lucide-react"
+import { Loader2 } from "lucide-react"
 import {
   getCandidateKanban,
   updateCandidateStatus,
@@ -26,16 +26,14 @@ import { cn } from "@/lib/utils"
 /** Board query key — scoped per job, since the board only ever is. */
 export const kanbanQueryKey = (jobId: string) => ["candidateKanban", jobId] as const
 
-/**
- * Tint a column header / card accent from the catalog row's own hex. Driven by
- * data rather than a theme token on purpose: a custom column the org invented
- * gets its colour with no code change. `color-mix` keeps the fill a light wash
- * of that hue in both themes; the text stays the hue itself.
- */
-function tint(color: string | null, pct: number): string | undefined {
-  if (!color) return undefined
-  return `color-mix(in oklch, ${color} ${pct}%, transparent)`
-}
+const initials = (name: string) =>
+  name
+    .split(" ")
+    .filter(Boolean)
+    .map((w) => w[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase()
 
 interface Props {
   jobId: string
@@ -141,16 +139,39 @@ export function CandidateKanban({ jobId, onOpenCandidate }: Props) {
 
   if (isLoading) {
     return (
-      <div className="py-16 text-center text-sm text-muted-foreground">
-        <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin text-primary" />
-        Loading board…
+      <div className="overflow-x-auto scroll">
+        <div className="flex min-w-max gap-3 pb-2">
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="flex w-[280px] flex-shrink-0 flex-col rounded-2xl border border-line bg-surface"
+            >
+              <div className="flex items-center justify-between border-b border-line px-4 py-3">
+                <div className="h-3 w-24 animate-pulse rounded bg-surface-3" />
+                <div className="h-4 w-6 animate-pulse rounded-md bg-surface-3" />
+              </div>
+              <div className="flex flex-1 flex-col gap-2 bg-surface-2 px-3 py-3">
+                {[0, 1].map((j) => (
+                  <div
+                    key={j}
+                    className="h-[76px] animate-pulse rounded-xl border border-line bg-surface"
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 flex items-center justify-center gap-2 text-[12.5px] text-ink-muted">
+          <Loader2 className="h-4 w-4 animate-spin text-primary" />
+          Loading board…
+        </div>
       </div>
     )
   }
 
   if (isError || !data) {
     return (
-      <div className="py-16 text-center text-sm text-destructive">
+      <div className="py-16 text-center text-[13px] text-[var(--danger)]">
         Could not load the board.{" "}
         <button onClick={() => refetch()} className="underline">
           Retry
@@ -167,18 +188,20 @@ export function CandidateKanban({ jobId, onOpenCandidate }: Props) {
       onDragEnd={handleDragEnd}
       onDragCancel={() => setDraggingCard(null)}
     >
-      <div className="flex gap-4 overflow-x-auto px-6 pb-4 pt-1">
-        {data.columns.map((column) => (
-          <KanbanColumnLane
-            key={column.key}
-            columnKey={column.key}
-            label={column.label}
-            color={column.color}
-            count={column.count}
-            cards={column.candidates}
-            onOpenCandidate={onOpenCandidate}
-          />
-        ))}
+      <div className="overflow-x-auto scroll">
+        <div className="flex min-w-max gap-3 pb-2">
+          {data.columns.map((column) => (
+            <KanbanColumnLane
+              key={column.key}
+              columnKey={column.key}
+              label={column.label}
+              color={column.color}
+              count={column.count}
+              cards={column.candidates}
+              onOpenCandidate={onOpenCandidate}
+            />
+          ))}
+        </div>
       </div>
       {/* Rendered in a portal-ish overlay so the dragged card isn't clipped by
           the columns' own horizontal scroll container. */}
@@ -215,31 +238,33 @@ function KanbanColumnLane({
     <div
       ref={setNodeRef}
       className={cn(
-        "flex w-72 shrink-0 flex-col rounded-xl border border-border bg-muted/30 transition-colors",
-        isOver && "border-primary bg-primary/5"
+        "flex w-[280px] flex-shrink-0 flex-col rounded-2xl border border-line bg-surface transition-colors",
+        isOver && "border-primary"
       )}
     >
-      <div
-        className="flex shrink-0 items-center justify-between gap-2 rounded-t-xl border-b border-border px-3 py-2"
-        style={{ backgroundColor: tint(color, 10) }}
-      >
+      <div className="flex items-center justify-between border-b border-line px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
           <span
             className="h-2 w-2 shrink-0 rounded-full"
-            style={{ backgroundColor: color ?? "var(--muted-foreground)" }}
+            style={{ backgroundColor: color ?? "var(--ink-muted)" }}
           />
-          <span className="truncate text-sm font-semibold" title={label}>
+          <span
+            className="truncate text-[13px] font-semibold text-ink"
+            title={label}
+          >
             {label}
           </span>
         </div>
-        <span className="shrink-0 rounded-full bg-background px-2 py-0.5 text-xs font-medium text-muted-foreground">
+        <span className="mono shrink-0 rounded-md bg-surface-3 px-2 py-0.5 text-[11.5px] font-semibold text-ink-muted">
           {count}
         </span>
       </div>
 
-      <div className="flex min-h-24 flex-1 flex-col gap-2 p-2">
+      <div className="scroll min-h-[200px] flex-1 space-y-2 overflow-y-auto bg-surface-2 px-3 py-3">
         {cards.length === 0 ? (
-          <p className="py-6 text-center text-xs text-muted-foreground">Empty</p>
+          <p className="py-6 text-center text-[12.5px] text-ink-subtle">
+            No candidates here yet.
+          </p>
         ) : (
           cards.map((card) => (
             <DraggableCard
@@ -258,7 +283,7 @@ function KanbanColumnLane({
       </div>
 
       {windowed ? (
-        <p className="shrink-0 border-t border-border px-3 py-2 text-[11px] text-muted-foreground">
+        <p className="shrink-0 border-t border-line px-3 py-2 text-[11px] text-ink-muted">
           Showing {cards.length} of {count} — use the table view to see the rest.
         </p>
       ) : null}
@@ -306,60 +331,93 @@ function CardBody({
   handleProps?: Record<string, unknown>
   dragging?: boolean
 }) {
+  // Row 2 chips derived from what a KanbanCard actually carries. No interview
+  // status/score is projected onto the card, so we surface the proxies we do
+  // have: whether an interview exists, attempt count, city, and years.
+  const chips: Array<{ key: string; label: string; className: string }> = []
+  if (card.latestInterviewId) {
+    chips.push({
+      key: "interviewed",
+      label: "Interviewed",
+      className: "bg-accent text-primary",
+    })
+  }
+  if (card.attemptCount > 0) {
+    chips.push({
+      key: "attempts",
+      label: `${card.attemptCount} attempt${card.attemptCount === 1 ? "" : "s"}`,
+      className: "mono bg-surface-3 text-ink-muted",
+    })
+  }
+  if (card.city) {
+    chips.push({
+      key: "city",
+      label: card.city,
+      className: "bg-surface-3 text-ink-muted",
+    })
+  }
+  if (card.yearsOfExperience !== null) {
+    chips.push({
+      key: "yoe",
+      label: `${card.yearsOfExperience}y`,
+      className: "mono bg-surface-3 text-ink-muted",
+    })
+  }
+
   return (
     <div
+      role={onOpen ? "button" : undefined}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (!onOpen) return
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault()
+          onOpen()
+        }
+      }}
+      tabIndex={onOpen ? 0 : -1}
+      title={onOpen ? "Open the interview result" : undefined}
+      {...(handleProps ?? {})}
       className={cn(
-        "group rounded-lg border border-border bg-card p-2.5 shadow-sm",
+        "cursor-grab touch-none select-none rounded-xl border border-line bg-surface p-3 transition-colors hover:border-line-2 hover:shadow-md active:cursor-grabbing",
         dragging && "cursor-grabbing shadow-lg"
       )}
     >
-      <div className="flex items-start gap-1.5">
-        {/* Handle-only drag so the card body stays clickable — a whole-card
-            drag would swallow the click that opens the drawer. */}
-        <button
-          type="button"
-          aria-label={`Drag ${card.fullName}`}
-          title="Drag to another column"
-          className="mt-0.5 shrink-0 cursor-grab touch-none text-muted-foreground/50 transition-colors hover:text-muted-foreground active:cursor-grabbing"
-          {...handleProps}
+      <div className="flex items-center gap-2.5">
+        <span
+          aria-hidden
+          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-accent text-[11px] font-bold text-primary"
         >
-          <GripVertical className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          onClick={onOpen}
-          disabled={!onOpen}
-          title={onOpen ? "Open the interview result" : undefined}
-          className="min-w-0 flex-1 text-left"
-        >
-          <p
-            className={cn(
-              "truncate text-sm font-medium leading-tight",
-              onOpen && "group-hover:underline"
-            )}
-          >
+          {initials(card.fullName)}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[13.5px] font-semibold text-ink leading-tight">
             {card.fullName}
           </p>
-          <p className="truncate text-xs text-muted-foreground" title={card.email}>
+          <p
+            className="truncate text-[11px] text-ink-muted"
+            title={card.email}
+          >
             {card.email}
           </p>
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-            {card.city ? (
-              <span className="inline-flex items-center gap-1">
-                <MapPin className="h-3 w-3" />
-                {card.city}
-              </span>
-            ) : null}
-            {card.yearsOfExperience !== null ? <span>{card.yearsOfExperience}y</span> : null}
-            {card.attemptCount > 0 ? (
-              <span className="inline-flex items-center gap-1">
-                <Repeat2 className="h-3 w-3" />
-                {card.attemptCount} attempt{card.attemptCount === 1 ? "" : "s"}
-              </span>
-            ) : null}
-          </div>
-        </button>
+        </div>
       </div>
+
+      {chips.length > 0 ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {chips.map((c) => (
+            <span
+              key={c.key}
+              className={cn(
+                "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                c.className
+              )}
+            >
+              {c.label}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }

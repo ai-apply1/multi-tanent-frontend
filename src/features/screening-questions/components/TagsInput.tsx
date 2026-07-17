@@ -1,6 +1,5 @@
 import * as React from "react"
 import { X } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { TAG_MAX_LENGTH } from "@/features/screening-questions/types"
 
@@ -91,28 +90,29 @@ export function TagsInput({
 
   return (
     <div className={cn("relative", className)}>
-      {/* Mirrors `Input`'s box (focus-within rather than focus-visible, since
-          the focused element is the naked input nested inside). */}
       <div
         className={cn(
-          "flex min-h-10 w-full flex-wrap items-center gap-1.5 rounded-md border border-input bg-background px-2 py-1.5 text-sm shadow-sm transition-colors focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/40",
+          "flex flex-wrap gap-1.5 items-center min-h-[44px] rounded-lg border border-[var(--field-border)] bg-surface px-2 py-1.5 focus-within:border-primary focus-within:shadow-[0_0_0_3px_var(--accent-ring)] transition-colors",
           disabled && "cursor-not-allowed opacity-50",
-          ariaInvalid && "border-destructive"
+          ariaInvalid && "border-[var(--danger)]"
         )}
       >
         {value.map((tag, idx) => (
-          <Badge key={tag} variant="secondary" className="max-w-full pr-1">
-            <span className="min-w-0 truncate">{tag}</span>
+          <span
+            key={tag}
+            className="inline-flex items-center gap-1.5 rounded-full bg-accent text-primary text-[12.5px] font-semibold pl-3 pr-1.5 py-1 max-w-full"
+          >
+            <span className="truncate" title={tag}>{tag}</span>
             <button
               type="button"
               disabled={disabled}
               onClick={() => removeAt(idx)}
               aria-label={`Remove tag ${tag}`}
-              className="rounded-full p-0.5 text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed"
+              className="inline-flex h-4 w-4 items-center justify-center rounded-full text-primary hover:bg-primary/10 disabled:cursor-not-allowed"
             >
-              <X className="h-3 w-3" />
+              <X className="h-3 w-3" strokeWidth={2} />
             </button>
-          </Badge>
+          </span>
         ))}
         <input
           id={id}
@@ -124,7 +124,7 @@ export function TagsInput({
           role="combobox"
           aria-expanded={open}
           aria-invalid={ariaInvalid}
-          className="h-6 min-w-24 flex-1 bg-transparent px-1 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
+          className="flex-1 min-w-[120px] border-0 outline-0 bg-transparent text-[14px] text-ink placeholder:text-ink-subtle disabled:cursor-not-allowed"
           onFocus={() => setOpen(true)}
           onChange={(e) => {
             setDraft(e.target.value)
@@ -134,12 +134,6 @@ export function TagsInput({
           onBlur={() => {
             // Commit what's typed on the way out, or a tag typed but never
             // Entered is silently dropped when the user clicks Save.
-            // Synchronous, NOT deferred: `blur` is a discrete event, so this
-            // state update flushes before the `click` that caused it reaches
-            // Save — a `setTimeout` here would land after submit and lose the
-            // tag anyway. Nothing needs the delay: picking a suggestion below
-            // preventDefaults its mousedown, so it never blurs us in the
-            // first place.
             setOpen(false)
             add(draft)
           }}
@@ -152,7 +146,7 @@ export function TagsInput({
           // mousedown fires before blur — preventing it keeps focus (and the
           // draft) intact so the click below doesn't race the blur commit.
           onMouseDown={(e) => e.preventDefault()}
-          className="absolute left-0 right-0 top-full z-50 mt-1 max-h-56 overflow-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+          className="absolute left-0 right-0 top-full z-50 mt-1 max-h-56 overflow-auto rounded-xl border border-line bg-surface p-1.5 shadow-[0_16px_44px_rgba(13,11,11,0.2)]"
         >
           {matches.map((tag, i) => (
             <button
@@ -160,10 +154,10 @@ export function TagsInput({
               type="button"
               onClick={() => add(tag)}
               className={cn(
-                "flex w-full cursor-pointer items-center rounded-sm px-2 py-1.5 text-left text-sm outline-none transition-colors",
+                "flex w-full items-center rounded-lg px-2.5 py-1.5 text-left text-[13.5px] font-medium outline-none transition-colors",
                 active === i
-                  ? "bg-accent text-accent-foreground"
-                  : "hover:bg-accent hover:text-accent-foreground"
+                  ? "bg-accent text-primary"
+                  : "text-ink hover:bg-surface-3"
               )}
             >
               {tag}

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react"
-import { useMutation } from "@tanstack/react-query"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import toast from "react-hot-toast"
 import {
   AlertTriangle,
@@ -17,12 +17,17 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
-  DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   bulkConfirmCvs,
   bulkExtractCvs,
@@ -41,6 +46,10 @@ import {
   type BulkExtractError,
 } from "@/features/candidates/types"
 import { extractCvsFromZip, isZipFile } from "@/features/candidates/unzipCvs"
+import {
+  JOB_OPTIONS_QUERY_KEY,
+  listJobOptions,
+} from "@/features/jobs/jobsApi"
 import { errorMessage } from "@/lib/errors"
 import { cn } from "@/lib/utils"
 
@@ -131,7 +140,7 @@ type Phase = "select" | "review" | "summary"
 interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
-  /** The import target. The dialog only opens for an `open` job (422 otherwise). */
+  /** The initial import target — pre-selects the "Attach to job" picker. */
   jobId: string
   jobTitle: string
   /** Fired once the confirm lands with at least one created row. */
@@ -167,6 +176,8 @@ export function UploadCvsDialog({
   const [result, setResult] = useState<BulkConfirmResult | null>(null)
   const [unzipping, setUnzipping] = useState(false)
   const [readProgress, setReadProgress] = useState({ done: 0, total: 0 })
+  const [selectedJobId, setSelectedJobId] = useState(jobId)
+  const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Fresh dialog every time: a previous run's rows/result must not leak into
@@ -180,7 +191,30 @@ export function UploadCvsDialog({
     setResult(null)
     setUnzipping(false)
     setReadProgress({ done: 0, total: 0 })
-  }, [open])
+    setSelectedJobId(jobId)
+    setIsDragging(false)
+  }, [open, jobId])
+
+  // Open jobs only — closed/archived jobs 422 on presign.
+  const jobsQuery = useQuery({
+    queryKey: JOB_OPTIONS_QUERY_KEY,
+    queryFn: listJobOptions,
+    enabled: open,
+    staleTime: 60_000,
+  })
+
+  const jobOptions = useMemo(() => {
+    const all = jobsQuery.data ?? []
+    const openJobs = all.filter((j) => j.status === "open")
+    // If the caller's job isn't open (rare — the caller should have blocked
+    // opening this dialog) show it anyway so the picker isn't visibly empty
+    // of the "current" job.
+    if (jobId && !openJobs.some((j) => j._id === jobId)) {
+      const passed = all.find((j) => j._id === jobId)
+      if (passed) return [passed, ...openJobs]
+    }
+    return openJobs
+  }, [jobsQuery.data, jobId])
 
   const appendFiles = (incoming: File[], rejectedCount: number) => {
     const built: UploadRow[] = []
@@ -307,7 +341,7 @@ export function UploadCvsDialog({
       //    fields are omitted on purpose: we don't know them yet, and they
       //    are informational at presign anyway (fixed at confirm).
       const presigned = await bulkPresignCvs(
-        jobId,
+        selectedJobId,
         rows.map((r) => ({ fileName: r.file.name, contentType: r.contentType }))
       )
 
@@ -355,7 +389,7 @@ export function UploadCvsDialog({
       for (const batch of chunk(uploaded, BULK_EXTRACT_BATCH)) {
         try {
           const out = await bulkExtractCvs(
-            jobId,
+            selectedJobId,
             batch.map(({ key }) => key)
           )
           const byKey = new Map(out.map((r) => [r.cvKey, r]))
@@ -400,7 +434,7 @@ export function UploadCvsDialog({
   const importMutation = useMutation({
     mutationFn: async (): Promise<BulkConfirmResult> =>
       bulkConfirmCvs(
-        jobId,
+        selectedJobId,
         // phone/city are unconditional now — they're required server-side,
         // and `canImport` already blocked the empty ones.
         importable.map((row) => ({
@@ -437,93 +471,164 @@ export function UploadCvsDialog({
         onOpenChange(next)
       }}
     >
-      <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-3xl">
-        <DialogHeader className="shrink-0">
-          <DialogTitle>
-            {phase === "review" ? "Check the details" : "Upload CVs"}
-          </DialogTitle>
-          <DialogDescription>
-            {phase === "summary" ? (
-              <>Import summary for {jobTitle}.</>
-            ) : phase === "review" ? (
-              <>
-                Read from {importable.length} CV{importable.length === 1 ? "" : "s"}. Fix
-                anything wrong before importing — the email is where the interview invite
-                (or rejection) goes, and it can't be unsent.
-              </>
-            ) : (
-              <>
-                Add up to {MAX_CV_UPLOAD_FILES} CVs to <strong>{jobTitle}</strong> — drop a{" "}
-                <strong>ZIP</strong> or pick files. Each becomes a candidate at{" "}
-                <em>Applied</em>, and the CV is parsed and pre-screened automatically. PDF,
-                DOC and DOCX only.
-              </>
-            )}
-          </DialogDescription>
-        </DialogHeader>
+      <DialogContent className="flex max-h-[90vh] max-w-[480px] flex-col gap-0 p-0">
+        <div className="flex items-start justify-between gap-4 px-6 pt-[22px] pb-[14px]">
+          <div className="min-w-0">
+            <DialogTitle className="text-[18px] font-semibold leading-tight">
+              {phase === "review" ? "Check the details" : "Upload CVs"}
+            </DialogTitle>
+            <DialogDescription className="mt-1.5 text-[13px] leading-relaxed text-ink-muted">
+              {phase === "summary" ? (
+                <>Import summary for {jobTitle}.</>
+              ) : phase === "review" ? (
+                <>
+                  Read from {importable.length} CV{importable.length === 1 ? "" : "s"}. Fix
+                  anything wrong before importing — the email is where the interview invite
+                  (or rejection) goes, and it can't be unsent.
+                </>
+              ) : (
+                <>
+                  Add up to {MAX_CV_UPLOAD_FILES} CVs — drop a{" "}
+                  <strong>ZIP</strong> or pick files. Each becomes a candidate at{" "}
+                  <em>Applied</em>, and the CV is parsed and pre-screened automatically. PDF,
+                  DOC and DOCX only.
+                </>
+              )}
+            </DialogDescription>
+          </div>
+        </div>
 
-        <div className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1 py-2">
+        <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto px-6 pb-5">
           {phase === "summary" && result ? (
             <ImportSummary result={result} />
           ) : (
-            <div className="space-y-4">
+            <>
               {phase === "select" ? (
                 <>
-                  <button
-                    type="button"
-                    disabled={busy || rows.length >= MAX_CV_UPLOAD_FILES}
-                    onClick={() => fileInputRef.current?.click()}
-                    className={cn(
-                      "flex w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border px-4 py-8 text-center transition-colors",
-                      "hover:border-primary hover:bg-primary/5",
-                      "disabled:pointer-events-none disabled:opacity-50"
-                    )}
-                  >
-                    {unzipping ? (
-                      <>
-                        <Loader2 className="h-6 w-6 animate-spin text-primary" />
-                        <span className="text-sm font-medium">Opening ZIP…</span>
-                      </>
-                    ) : (
-                      <>
-                        <UploadCloud className="h-6 w-6 text-primary" />
-                        <span className="text-sm font-medium">Choose a ZIP or CV files</span>
-                      </>
-                    )}
-                    <span className="text-xs text-muted-foreground">
-                      {rows.length > 0
-                        ? `${rows.length} of ${MAX_CV_UPLOAD_FILES} selected`
-                        : "ZIP, PDF, DOC or DOCX"}
-                    </span>
-                  </button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    accept={ACCEPT_ATTR}
-                    className="hidden"
-                    onChange={(e) => {
-                      void addFiles(e.target.files)
-                      // Reset so re-picking the same file fires `change` again.
-                      e.target.value = ""
+                  <div>
+                    <label
+                      htmlFor="upl-job"
+                      className="mb-1.5 block text-[13px] font-semibold text-ink"
+                    >
+                      Attach to job
+                    </label>
+                    <Select
+                      value={selectedJobId}
+                      onValueChange={(v) => setSelectedJobId(v)}
+                      disabled={busy || jobsQuery.isLoading}
+                    >
+                      <SelectTrigger
+                        id="upl-job"
+                        className="h-11"
+                        aria-label="Attach to job"
+                      >
+                        <SelectValue placeholder={jobTitle || "Select a job…"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {jobOptions.length === 0 ? (
+                          <div className="px-2 py-2 text-[12.5px] text-ink-muted">
+                            No open jobs.
+                          </div>
+                        ) : (
+                          jobOptions.map((j) => (
+                            <SelectItem key={j._id} value={j._id}>
+                              {j.title}
+                            </SelectItem>
+                          ))
+                        )}
+                      </SelectContent>
+                    </Select>
+                    <p className="mt-1.5 text-[12px] text-ink-muted">
+                      New candidates are added to this job and screened against
+                      its gates.
+                    </p>
+                  </div>
+
+                  <div
+                    onDragEnter={(e) => {
+                      e.preventDefault()
+                      if (!busy) setIsDragging(true)
                     }}
-                  />
+                    onDragOver={(e) => {
+                      e.preventDefault()
+                      if (!busy) setIsDragging(true)
+                    }}
+                    onDragLeave={(e) => {
+                      // Only clear when leaving the drop zone itself, not a child.
+                      if (e.currentTarget.contains(e.relatedTarget as Node)) return
+                      setIsDragging(false)
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault()
+                      setIsDragging(false)
+                      if (busy) return
+                      void addFiles(e.dataTransfer.files)
+                    }}
+                  >
+                    <button
+                      type="button"
+                      disabled={busy || rows.length >= MAX_CV_UPLOAD_FILES}
+                      onClick={() => fileInputRef.current?.click()}
+                      className={cn(
+                        "flex w-full flex-col items-center justify-center rounded-xl border-2 border-dashed border-line-2 bg-surface-2 px-5 py-8 text-center transition-colors",
+                        "hover:border-primary/60",
+                        isDragging ? "border-primary bg-accent" : "",
+                        "disabled:pointer-events-none disabled:opacity-50",
+                      )}
+                    >
+                      <span className="mb-3 inline-flex h-[46px] w-[46px] items-center justify-center rounded-xl bg-accent text-primary">
+                        {unzipping ? (
+                          <Loader2
+                            className="h-[22px] w-[22px] animate-spin"
+                            strokeWidth={1.7}
+                          />
+                        ) : (
+                          <UploadCloud
+                            className="h-[22px] w-[22px]"
+                            strokeWidth={1.7}
+                          />
+                        )}
+                      </span>
+                      <span className="text-[14px] font-semibold text-ink">
+                        {unzipping ? "Opening ZIP…" : "Drag & drop CVs here"}
+                      </span>
+                      <span className="mt-1.5 text-[12.5px] text-ink-muted">
+                        {rows.length > 0
+                          ? `${rows.length} of ${MAX_CV_UPLOAD_FILES} selected`
+                          : `or click to browse · ZIP, PDF or DOCX, up to ${MAX_CV_UPLOAD_FILES} files`}
+                      </span>
+                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      accept={ACCEPT_ATTR}
+                      className="hidden"
+                      onChange={(e) => {
+                        void addFiles(e.target.files)
+                        // Reset so re-picking the same file fires `change` again.
+                        e.target.value = ""
+                      }}
+                    />
+                  </div>
                 </>
               ) : null}
 
-              {rows.length === 0 ? (
-                <p className="text-center text-xs text-muted-foreground">
-                  Drop a ZIP of CVs and the details are read from each one — you check them
-                  on the next step before anything is created.
-                </p>
-              ) : phase === "select" ? (
-                <SelectList rows={rows} busy={busy} onRemove={removeRow} />
+              {phase === "select" ? (
+                rows.length === 0 ? (
+                  <p className="text-center text-[12px] text-ink-muted">
+                    Drop a ZIP of CVs and the details are read from each one —
+                    you check them on the next step before anything is created.
+                  </p>
+                ) : (
+                  <SelectList rows={rows} busy={busy} onRemove={removeRow} />
+                )
               ) : (
                 <>
                   {needsAttention.length > 0 ? (
-                    <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2">
-                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
-                      <p className="text-xs text-destructive">
+                    <div className="flex items-start gap-2 rounded-lg border border-[var(--danger)]/40 bg-[var(--danger-soft)] px-3 py-2">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--danger)]" />
+                      <p className="text-xs text-[var(--danger)]">
                         <strong>
                           {needsAttention.length} CV
                           {needsAttention.length === 1 ? "" : "s"}
@@ -560,23 +665,23 @@ export function UploadCvsDialog({
 
                   {failedUploads.length > 0 ? (
                     <div className="space-y-1.5">
-                      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      <h4 className="text-[11px] font-bold uppercase tracking-[0.05em] text-ink-subtle">
                         Didn't upload
                       </h4>
                       {failedUploads.map((row) => (
                         <div
                           key={row.id}
-                          className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2"
+                          className="flex items-center justify-between gap-2 rounded-md border border-line px-3 py-2"
                         >
-                          <span className="truncate text-xs" title={row.file.name}>
+                          <span className="truncate text-xs text-ink" title={row.file.name}>
                             {row.file.name}
                           </span>
-                          <span className="shrink-0 text-[11px] text-destructive">
+                          <span className="shrink-0 text-[11px] text-[var(--danger)]">
                             {row.error}
                           </span>
                         </div>
                       ))}
-                      <p className="text-[11px] text-muted-foreground">
+                      <p className="text-[11px] text-ink-muted">
                         These aren't part of the import. Close and try them again.
                       </p>
                     </div>
@@ -585,16 +690,16 @@ export function UploadCvsDialog({
               )}
 
               {readMutation.isPending && readProgress.total > 0 ? (
-                <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                <div className="flex items-center justify-center gap-2 text-xs text-ink-muted">
                   <Sparkles className="h-3.5 w-3.5 text-primary" />
                   Reading CVs… {readProgress.done} of {readProgress.total}
                 </div>
               ) : null}
-            </div>
+            </>
           )}
         </div>
 
-        <DialogFooter className="shrink-0">
+        <div className="flex justify-end gap-2.5 border-t border-line px-6 py-4">
           {phase === "summary" ? (
             <Button onClick={() => onOpenChange(false)}>Done</Button>
           ) : phase === "review" ? (
@@ -632,11 +737,15 @@ export function UploadCvsDialog({
             </>
           ) : (
             <>
-              <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>
+              <Button
+                variant="secondary"
+                disabled={busy}
+                onClick={() => onOpenChange(false)}
+              >
                 Cancel
               </Button>
               <Button
-                disabled={rows.length === 0 || busy}
+                disabled={rows.length === 0 || !selectedJobId || busy}
                 onClick={() => readMutation.mutate()}
               >
                 {readMutation.isPending ? (
@@ -654,7 +763,7 @@ export function UploadCvsDialog({
               </Button>
             </>
           )}
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   )
@@ -671,41 +780,42 @@ function SelectList({
   onRemove: (id: string) => void
 }) {
   return (
-    <div className="space-y-2">
+    <div className="grid gap-2">
       {rows.map((row) => (
         <div
           key={row.id}
-          className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2"
+          className="flex items-center justify-between gap-2 rounded-xl border border-line bg-surface px-3 py-2"
         >
           <div className="flex min-w-0 items-center gap-2">
-            <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span className="truncate text-xs font-medium" title={row.file.name}>
+            <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-primary">
+              <FileText className="h-4 w-4" strokeWidth={1.7} />
+            </span>
+            <span className="truncate text-[12.5px] font-medium text-ink" title={row.file.name}>
               {row.file.name}
             </span>
-            <span className="shrink-0 text-[11px] text-muted-foreground">
+            <span className="shrink-0 text-[11px] text-ink-subtle">
               {formatBytes(row.file.size)}
             </span>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1.5">
             {row.status === "uploading" ? (
-              <span className="text-[11px] text-muted-foreground">{row.progress}%</span>
+              <span className="text-[11px] text-ink-muted">{row.progress}%</span>
             ) : null}
             {row.status === "uploaded" ? (
               <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />
             ) : null}
             {row.status === "failed" ? (
-              <AlertTriangle className="h-4 w-4 text-destructive" />
+              <AlertTriangle className="h-4 w-4 text-[var(--danger)]" />
             ) : null}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 hover:bg-destructive/10 hover:text-destructive"
+            <button
+              type="button"
               disabled={busy}
               onClick={() => onRemove(row.id)}
               aria-label={`Remove ${row.file.name}`}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:pointer-events-none disabled:opacity-50"
             >
-              <Trash2 className="h-4 w-4" />
-            </Button>
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
           </div>
         </div>
       ))}
@@ -740,40 +850,41 @@ function ReviewRow({
   return (
     <div
       className={cn(
-        "rounded-lg border bg-card p-3",
-        incomplete ? "border-destructive/50" : "border-border"
+        "rounded-xl border bg-surface p-3",
+        incomplete ? "border-[var(--danger)]/50" : "border-line"
       )}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          <FileArchive className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span className="truncate text-xs font-medium" title={row.file.name}>
+          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-primary">
+            <FileArchive className="h-4 w-4" strokeWidth={1.7} />
+          </span>
+          <span className="truncate text-[12.5px] font-medium text-ink" title={row.file.name}>
             {row.file.name}
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {row.extractError ? (
-            <span className="text-[11px] text-destructive">
+            <span className="text-[11px] text-[var(--danger)]">
               {EXTRACT_ERROR_LABELS[row.extractError as BulkExtractError] ??
                 row.extractError}
             </span>
           ) : null}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 hover:bg-destructive/10 hover:text-destructive"
+          <button
+            type="button"
             disabled={busy}
             onClick={onRemove}
             aria-label={`Remove ${row.file.name}`}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] disabled:pointer-events-none disabled:opacity-50"
           >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
         </div>
       </div>
 
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
-          <Label htmlFor={`name-${row.id}`} className="text-xs">
+          <Label htmlFor={`name-${row.id}`} className="text-xs text-ink">
             Name
           </Label>
           <Input
@@ -785,10 +896,10 @@ function ReviewRow({
             onChange={(e) => onPatch({ fullName: e.target.value })}
             onBlur={onTouch}
           />
-          {nameMsg ? <p className="text-xs text-destructive">{nameMsg}</p> : null}
+          {nameMsg ? <p className="text-xs text-[var(--danger)]">{nameMsg}</p> : null}
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor={`email-${row.id}`} className="text-xs">
+          <Label htmlFor={`email-${row.id}`} className="text-xs text-ink">
             Email
           </Label>
           <Input
@@ -802,10 +913,10 @@ function ReviewRow({
             onChange={(e) => onPatch({ email: e.target.value })}
             onBlur={onTouch}
           />
-          {emailMsg ? <p className="text-xs text-destructive">{emailMsg}</p> : null}
+          {emailMsg ? <p className="text-xs text-[var(--danger)]">{emailMsg}</p> : null}
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor={`phone-${row.id}`} className="text-xs">
+          <Label htmlFor={`phone-${row.id}`} className="text-xs text-ink">
             Phone
           </Label>
           <Input
@@ -818,10 +929,10 @@ function ReviewRow({
             onChange={(e) => onPatch({ phone: e.target.value })}
             onBlur={onTouch}
           />
-          {phoneMsg ? <p className="text-xs text-destructive">{phoneMsg}</p> : null}
+          {phoneMsg ? <p className="text-xs text-[var(--danger)]">{phoneMsg}</p> : null}
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor={`city-${row.id}`} className="text-xs">
+          <Label htmlFor={`city-${row.id}`} className="text-xs text-ink">
             City
           </Label>
           <Input
@@ -834,7 +945,7 @@ function ReviewRow({
             onChange={(e) => onPatch({ city: e.target.value })}
             onBlur={onTouch}
           />
-          {cityMsg ? <p className="text-xs text-destructive">{cityMsg}</p> : null}
+          {cityMsg ? <p className="text-xs text-[var(--danger)]">{cityMsg}</p> : null}
         </div>
       </div>
     </div>
@@ -848,14 +959,14 @@ function ReviewRow({
  */
 function ImportSummary({ result }: { result: BulkConfirmResult }) {
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="inline-flex items-center gap-1.5 font-medium">
+    <div className="grid gap-4">
+      <div className="flex flex-wrap items-center gap-3 text-[13px]">
+        <span className="inline-flex items-center gap-1.5 font-medium text-ink">
           <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />
           {result.created.length} created
         </span>
         {result.skipped.length > 0 ? (
-          <span className="inline-flex items-center gap-1.5 font-medium text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5 font-medium text-ink-muted">
             <AlertTriangle className="h-4 w-4" />
             {result.skipped.length} skipped
           </span>
@@ -863,18 +974,18 @@ function ImportSummary({ result }: { result: BulkConfirmResult }) {
       </div>
 
       {result.created.length > 0 ? (
-        <div className="space-y-1.5">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <div className="grid gap-1.5">
+          <h4 className="text-[11px] font-bold uppercase tracking-[0.05em] text-ink-subtle">
             Created
           </h4>
-          <ul className="space-y-1">
+          <ul className="grid gap-1">
             {result.created.map((row) => (
               <li
                 key={row.candidateId}
-                className="flex flex-wrap items-baseline gap-x-2 rounded-md border border-border px-3 py-2 text-sm"
+                className="flex flex-wrap items-baseline gap-x-2 rounded-lg border border-line px-3 py-2 text-[13px]"
               >
-                <span className="font-medium">{row.fullName}</span>
-                <span className="text-xs text-muted-foreground">{row.email}</span>
+                <span className="font-medium text-ink">{row.fullName}</span>
+                <span className="text-[12px] text-ink-muted">{row.email}</span>
               </li>
             ))}
           </ul>
@@ -882,29 +993,33 @@ function ImportSummary({ result }: { result: BulkConfirmResult }) {
       ) : null}
 
       {result.skipped.length > 0 ? (
-        <div className="space-y-1.5">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <div className="grid gap-1.5">
+          <h4 className="text-[11px] font-bold uppercase tracking-[0.05em] text-ink-subtle">
             Skipped
           </h4>
-          <ul className="space-y-1">
+          <ul className="grid gap-1">
             {result.skipped.map((row, index) => (
               <li
                 key={`${row.email}-${index}`}
-                className="flex flex-wrap items-baseline justify-between gap-x-2 rounded-md border border-border px-3 py-2 text-sm"
+                className="flex flex-wrap items-baseline justify-between gap-x-2 rounded-lg border border-line px-3 py-2 text-[13px]"
               >
                 <span className="flex flex-wrap items-baseline gap-x-2">
-                  <span className="font-medium">{row.fullName}</span>
-                  <span className="text-xs text-muted-foreground">{row.email}</span>
+                  <span className="font-medium text-ink">{row.fullName}</span>
+                  <span className="text-[12px] text-ink-muted">
+                    {row.email}
+                  </span>
                 </span>
-                <span className="text-xs text-muted-foreground">
-                  {SKIP_REASON_LABELS[row.reason as BulkConfirmSkipReason] ?? row.reason}
+                <span className="text-[12px] text-ink-muted">
+                  {SKIP_REASON_LABELS[row.reason as BulkConfirmSkipReason] ??
+                    row.reason}
                 </span>
               </li>
             ))}
           </ul>
-          <p className="text-[11px] text-muted-foreground">
-            Skipped rows created nothing — nothing to undo. Re-upload after fixing the
-            email, or open the existing candidate if they already applied to this job.
+          <p className="text-[11px] text-ink-muted">
+            Skipped rows created nothing — nothing to undo. Re-upload after
+            fixing the email, or open the existing candidate if they already
+            applied to this job.
           </p>
         </div>
       ) : null}

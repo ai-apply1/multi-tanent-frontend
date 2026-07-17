@@ -3,90 +3,152 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ------------------------------------------------------------------ */
-/* Jobjen Admin theme tokens (light by default; data-rich UI)          */
+/* Jobjen Admin theme tokens                                           */
+/* Palette maps the DevExcel design tokens onto Tailwind v4 variables. */
+/* Names kept (primary/accent/foreground/etc.) so shadcn/ui utilities  */
+/* keep resolving; values re-tuned for the blue-accent org portal.     */
 /* ------------------------------------------------------------------ */
 
 :root {
-  /* Make native controls (date/time pickers, scrollbars) follow the theme
-     so the datetime-local widget's text + calendar icon stay legible. */
   color-scheme: light;
 
-  --background: oklch(0.985 0.005 264);
-  --foreground: oklch(0.18 0.03 264);
+  /* App body sits on a cool grey-blue; cards float above on pure white. */
+  --background: #f9fbff;
+  --foreground: #0d0b0b;
 
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.18 0.03 264);
+  --card: #ffffff;
+  --card-foreground: #0d0b0b;
 
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.18 0.03 264);
+  --popover: #ffffff;
+  --popover-foreground: #0d0b0b;
 
-  /* Brand: aligns with candidate-facing app (purple primary) but desaturated for long-form data UI */
-  --primary: oklch(0.52 0.22 296);
-  --primary-foreground: oklch(0.985 0 0);
+  /* Brand blue — buttons, active states, focus ring, links. */
+  --primary: #003fbc;
+  --primary-foreground: #ffffff;
 
-  --secondary: oklch(0.96 0.01 264);
-  --secondary-foreground: oklch(0.21 0.034 264);
+  --secondary: #f3f6fc;
+  --secondary-foreground: #3a3a3a;
 
-  --muted: oklch(0.97 0.005 264);
-  --muted-foreground: oklch(0.5 0.025 264);
+  --muted: #f3f6fc;
+  --muted-foreground: #6b7280;
 
-  --accent: oklch(0.95 0.02 296);
-  --accent-foreground: oklch(0.21 0.05 296);
+  /* Very-light tinted blue used for chip/tab active backgrounds. */
+  --accent: #e6ecf8;
+  --accent-foreground: #003fbc;
 
-  --destructive: oklch(0.577 0.245 27);
-  --destructive-foreground: oklch(0.985 0 0);
+  --destructive: #b42318;
+  --destructive-foreground: #ffffff;
 
-  --success: oklch(0.62 0.16 152);
-  --success-foreground: oklch(0.985 0 0);
+  --success: #15803d;
+  --success-foreground: #ffffff;
 
-  --warning: oklch(0.78 0.16 70);
-  --warning-foreground: oklch(0.18 0.05 70);
+  --warning: #b45309;
+  --warning-foreground: #ffffff;
 
-  --border: oklch(0.92 0.005 264);
-  --input: oklch(0.92 0.005 264);
-  --ring: var(--primary);
+  --info: #0e7490;
+  --info-foreground: #ffffff;
 
-  --radius: 0.625rem;
+  --border: rgba(13, 11, 11, 0.09);
+  --input: rgba(0, 0, 0, 0.15);
+  --ring: color-mix(in srgb, var(--primary), transparent 66%);
 
-  --sidebar: oklch(0.99 0.003 264);
-  --sidebar-foreground: oklch(0.18 0.03 264);
-  --sidebar-border: var(--border);
+  --radius: 0.75rem;
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: #0d0b0b;
+  --sidebar-border: rgba(13, 11, 11, 0.09);
+
+  /* Portal-specific tokens — not on the shadcn contract, referenced */
+  /* directly by pages/components. Kept in sync with the design.     */
+  --ink: #0d0b0b;
+  --ink-2: #3a3a3a;
+  --ink-muted: #6b7280;
+  --ink-subtle: #9ca3af;
+  --ink-faint: #edeff3;
+
+  --surface: #ffffff;
+  --surface-2: #f9fbff;
+  --surface-3: #f3f6fc;
+  --hover: #f4f7fd;
+  --line: rgba(13, 11, 11, 0.09);
+  --line-2: rgba(13, 11, 11, 0.15);
+  --field-border: rgba(0, 0, 0, 0.15);
+
+  --accent-hover: #003399;
+  --accent-active: #002a7a;
+  --accent-soft: #e6ecf8;
+  --accent-softer: #f1f4fb;
+  --accent-ring: color-mix(in srgb, var(--primary), transparent 66%);
+
+  --success-soft: #e7f5ec;
+  --warning-soft: #fbf1e1;
+  --danger: #b42318;
+  --danger-soft: #fbeae8;
+  --info-soft: #e1f3f7;
+
+  --stage-applied: #64748b;
+  --stage-prescreen: #7c3aed;
+  --stage-invited: #2563eb;
+  --stage-interviewing: #db2777;
+  --stage-scored: #ea580c;
+  --stage-shortlisted: #0d9488;
+  --stage-hired: #15803d;
+  --stage-rejected: #b42318;
 }
 
 .dark {
   color-scheme: dark;
 
-  --background: oklch(0.16 0.03 270);
-  --foreground: oklch(0.985 0 0);
+  --background: #0f1220;
+  --foreground: #f4f6fb;
 
-  --card: oklch(0.2 0.03 270);
-  --card-foreground: oklch(0.985 0 0);
+  --card: #171a2c;
+  --card-foreground: #f4f6fb;
 
-  --popover: oklch(0.2 0.03 270);
-  --popover-foreground: oklch(0.985 0 0);
+  --popover: #171a2c;
+  --popover-foreground: #f4f6fb;
 
-  --primary: oklch(0.7 0.2 296);
-  --primary-foreground: oklch(0.13 0.04 296);
+  --primary: #6b8bff;
+  --primary-foreground: #0d0b0b;
 
-  --secondary: oklch(0.27 0.03 270);
-  --secondary-foreground: oklch(0.985 0 0);
+  --secondary: #1f2338;
+  --secondary-foreground: #f4f6fb;
 
-  --muted: oklch(0.27 0.03 270);
-  --muted-foreground: oklch(0.7 0.02 270);
+  --muted: #1f2338;
+  --muted-foreground: #a0aec0;
 
-  --accent: oklch(0.27 0.04 296);
-  --accent-foreground: oklch(0.985 0 0);
+  --accent: #223056;
+  --accent-foreground: #cfd8ff;
 
-  --destructive: oklch(0.62 0.245 27);
-  --destructive-foreground: oklch(0.985 0 0);
+  --destructive: #f0857c;
+  --destructive-foreground: #0d0b0b;
 
-  --border: rgba(255, 255, 255, 0.1);
-  --input: rgba(255, 255, 255, 0.16);
-  --ring: var(--primary);
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.14);
+  --ring: color-mix(in srgb, var(--primary), transparent 66%);
 
-  --sidebar: oklch(0.18 0.03 270);
-  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar: #131627;
+  --sidebar-foreground: #f4f6fb;
   --sidebar-border: rgba(255, 255, 255, 0.08);
+
+  --ink: #f4f6fb;
+  --ink-2: #dfe4ee;
+  --ink-muted: #a0aec0;
+  --ink-subtle: #7b8394;
+  --ink-faint: #1f2338;
+
+  --surface: #171a2c;
+  --surface-2: #0f1220;
+  --surface-3: #1f2338;
+  --hover: #1c2038;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-2: rgba(255, 255, 255, 0.14);
+  --field-border: rgba(255, 255, 255, 0.14);
+
+  --accent-hover: #7a97ff;
+  --accent-active: #8ba7ff;
+  --accent-soft: #223056;
+  --accent-softer: #1a2243;
 }
 
 @theme inline {
@@ -118,6 +180,9 @@
   --color-warning: var(--warning);
   --color-warning-foreground: var(--warning-foreground);
 
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -126,19 +191,41 @@
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-border: var(--sidebar-border);
 
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-subtle: var(--ink-subtle);
+  --color-ink-faint: var(--ink-faint);
 
-  --font-sans:
-    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial,
-    "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-hover: var(--hover);
+
+  --color-stage-applied: var(--stage-applied);
+  --color-stage-prescreen: var(--stage-prescreen);
+  --color-stage-invited: var(--stage-invited);
+  --color-stage-interviewing: var(--stage-interviewing);
+  --color-stage-scored: var(--stage-scored);
+  --color-stage-shortlisted: var(--stage-shortlisted);
+  --color-stage-hired: var(--stage-hired);
+  --color-stage-rejected: var(--stage-rejected);
+
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-pill: 999px;
+
+  --font-sans: "Outfit", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 @layer base {
   * {
     border-color: var(--border);
+    box-sizing: border-box;
   }
 
   html,
@@ -154,20 +241,38 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  /* Subtle ambient gradient on auth pages — opt-in via .auth-gradient */
+  .mono {
+    font-family: var(--font-mono);
+    font-feature-settings: "tnum";
+  }
+
+  /* Auth split-panel backdrop is white; we still keep a subtle radial */
+  /* glow behind the brand-side panel for depth (drawn inline).        */
   .auth-gradient {
-    background-image:
-      radial-gradient(800px circle at 10% 0%, rgba(133, 12, 255, 0.12), transparent 55%),
-      radial-gradient(900px circle at 90% 100%, rgba(236, 72, 153, 0.1), transparent 55%);
-    background-attachment: fixed;
+    background: var(--surface);
   }
 
   ::selection {
-    background-color: var(--primary);
-    color: var(--primary-foreground);
+    background-color: color-mix(in srgb, var(--primary), transparent 78%);
+    color: var(--primary);
   }
 
-  /* Pointer cursor on all interactive button-like elements */
+  /* Scrollbar polish for the app shell. */
+  .scroll::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  .scroll::-webkit-scrollbar-thumb {
+    background: rgba(13, 11, 11, 0.14);
+    border-radius: 99px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+  }
+  .dark .scroll::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.14);
+    background-clip: padding-box;
+  }
+
   button,
   [role="button"],
   input[type="button"],
@@ -184,20 +289,6 @@
     cursor: not-allowed;
   }
 
-  /*
-   * Browser autofill repaints inputs with a pale-yellow / sky-blue
-   * box that ignores our design tokens. Chrome specifically refuses
-   * to overwrite `background-color` on autofilled inputs, so the
-   * canonical workaround is a huge `inset` box-shadow in our own
-   * surface color (covers the entire field) plus an explicit
-   * `-webkit-text-fill-color` (Chrome overrides `color` too). The
-   * 9999s transition delay covers the brief flash between Chrome's
-   * animation start and our shadow taking effect.
-   *
-   * We use `var(--card)` rather than `var(--background)` because the
-   * shadcn `<Input>` renders on the elevated card surface and that's
-   * the color admins expect the field to be — not the page bg.
-   */
   input:-webkit-autofill,
   input:-webkit-autofill:hover,
   input:-webkit-autofill:focus,
@@ -216,3 +307,10 @@
     transition: background-color 9999s ease-in-out 0s;
   }
 }
+
+/* --------- animations reused across the portal --------- */
+@keyframes om-spin { to { transform: rotate(360deg); } }
+@keyframes om-toast-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes om-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes om-pop { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes om-slide { from { transform: translateX(100%); } to { transform: translateX(0); } }

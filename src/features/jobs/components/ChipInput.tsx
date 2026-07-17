@@ -1,6 +1,5 @@
 import { useState, type KeyboardEvent } from "react"
 import { X } from "lucide-react"
-import { Input } from "@/components/ui/input"
 
 interface ChipInputProps {
   id?: string
@@ -48,31 +47,27 @@ export function ChipInput({
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      {values.length > 0 ? (
-        <div className="flex flex-wrap gap-1.5">
-          {values.map((value) => (
-            <span
-              key={value}
-              className="inline-flex h-6 max-w-56 items-center gap-1.5 rounded-md border border-primary/25 bg-primary/5 pl-2 pr-0.5 text-xs"
-            >
-              <span className="truncate text-foreground/90" title={value}>
-                {value}
-              </span>
-              <button
-                type="button"
-                disabled={disabled}
-                onClick={() => onChange(values.filter((v) => v !== value))}
-                aria-label={`Remove ${value}`}
-                className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-primary/20 hover:text-foreground"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </span>
-          ))}
-        </div>
-      ) : null}
-      <Input
+    <div className="flex flex-wrap gap-1.5 items-center min-h-[44px] rounded-lg border border-[var(--field-border)] bg-surface px-2 py-1.5 focus-within:border-primary focus-within:shadow-[0_0_0_3px_var(--accent-ring)] transition-colors">
+      {values.map((value) => (
+        <span
+          key={value}
+          className="inline-flex items-center gap-1.5 rounded-full bg-accent text-primary text-[12.5px] font-semibold pl-3 pr-1.5 py-1 max-w-full"
+        >
+          <span className="truncate" title={value}>
+            {value}
+          </span>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onChange(values.filter((v) => v !== value))}
+            aria-label={`Remove ${value}`}
+            className="inline-flex h-4 w-4 items-center justify-center rounded-full text-primary hover:bg-primary/10 disabled:cursor-not-allowed"
+          >
+            <X className="h-3 w-3" strokeWidth={2} />
+          </button>
+        </span>
+      ))}
+      <input
         id={id}
         value={draft}
         disabled={disabled}
@@ -82,7 +77,8 @@ export function ChipInput({
         // Committing on blur too, so a typed-but-not-Entered value isn't
         // silently dropped when the user tabs straight to Save.
         onBlur={commit}
-        placeholder={placeholder}
+        placeholder={values.length === 0 ? placeholder : undefined}
+        className="flex-1 min-w-[120px] border-0 outline-0 bg-transparent text-[14px] text-ink placeholder:text-ink-subtle disabled:cursor-not-allowed"
       />
     </div>
   )

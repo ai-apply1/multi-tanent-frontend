@@ -17,32 +17,9 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import {
-  AlertTriangle,
-  GripVertical,
-  ListChecks,
-  Loader2,
-  Plus,
-  Scale,
-  X,
-} from "lucide-react"
+import { AlertTriangle, Loader2, Plus, Scale, Star } from "lucide-react"
 import toast from "react-hot-toast"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
 import { AddJobQuestionsDialog } from "@/features/jobs/components/AddJobQuestionsDialog"
 import { setJobQuestions } from "@/features/jobs/jobsApi"
 import type {
@@ -52,7 +29,6 @@ import type {
 } from "@/features/jobs/types"
 import {
   askableCount,
-  difficultyVariant,
   questionLabel,
   type ScreeningQuestion,
 } from "@/features/screening-questions/types"
@@ -110,6 +86,12 @@ const withWeights = (
   rows: JobQuestionView[],
   weights: number[],
 ): JobQuestionView[] => rows.map((q, i) => ({ ...q, weightPct: weights[i] }))
+
+const DIFFICULTY_CHIP: Record<string, string> = {
+  easy: "bg-[var(--success-soft)] text-[var(--success)]",
+  medium: "bg-[var(--warning-soft)] text-[var(--warning)]",
+  hard: "bg-[var(--danger-soft)] text-[var(--danger)]",
+}
 
 interface JobQuestionsManagerProps {
   job: Job
@@ -216,117 +198,50 @@ export function JobQuestionsManager({ job }: JobQuestionsManagerProps) {
       prev.map((q) => (q.questionId === questionId ? { ...q, weightPct } : q)),
     )
 
-  const handleDistribute = () =>
-    setDraft((prev) => withWeights(prev, splitEvenly(prev.length)))
+  /**
+   * Split 100% across every question as evenly as an integer split allows.
+   * `rescaleToHundred` handles the drift — for N=3 the raw shares are 33.33
+   * each, this hands them 33/33/34 in a stable order so the total still lands
+   * on the exact 100 the backend requires.
+   */
+  const handleDistributeEvenly = () => {
+    if (draft.length === 0) return
+    const even = Array(draft.length).fill(100 / draft.length)
+    setDraft(withWeights(draft, rescaleToHundred(even)))
+  }
 
   return (
-    <Card>
-      <CardHeader className="border-b border-border">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <ListChecks className="h-4 w-4 text-primary" />
-              Interview questions
-            </CardTitle>
-            <CardDescription>
-              {draft.length > 0
-                ? `${draft.length} question${draft.length === 1 ? "" : "s"}, asked in this order. Every candidate gets the same order, in different words.`
-                : "No questions attached — this job can't interview anyone yet."}
-            </CardDescription>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <Button size="sm" onClick={() => setAddOpen(true)}>
-              <Plus className="h-4 w-4" />
-              Add questions
-            </Button>
-          </div>
+    <div className="rounded-2xl border border-line bg-surface p-6">
+      <div className="mb-1 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Star className="h-[18px] w-[18px] text-primary" strokeWidth={1.7} />
+          <h2 className="text-[15px] font-semibold text-ink">Interview questions</h2>
         </div>
-      </CardHeader>
-
-      <CardContent className="p-4">
-        {orphaned.length > 0 ? (
-          <div className="mb-3 flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-xs leading-relaxed text-destructive">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>
-              {orphaned.length === 1
-                ? "A question below no longer exists in the bank."
-                : `${orphaned.length} questions below no longer exist in the bank.`}{" "}
-              No further change to this list can be saved until{" "}
-              {orphaned.length === 1 ? "it is" : "they are"} removed.
-            </span>
-          </div>
-        ) : null}
-
-        {draft.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-border bg-muted/30 px-3 py-10 text-center text-sm text-muted-foreground">
-            No questions yet. Click "Add questions" to pick some from your bank.
-          </p>
-        ) : (
-          <TooltipProvider delayDuration={300}>
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragEnd={handleDragEnd}
+        <div className="flex items-center gap-2">
+          {/* Distribute evenly — always available when there's more than one
+              question. Fires the same draft update path as a manual edit, so
+              the Save button still lights up and the total-weight footer
+              recomputes without special-casing. */}
+          {draft.length > 1 ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={mutation.isPending}
+              onClick={handleDistributeEvenly}
+              title="Split 100% evenly across every question"
             >
-              <SortableContext
-                items={draft.map((q) => q.questionId)}
-                strategy={verticalListSortingStrategy}
-              >
-                <div className="flex flex-col gap-2">
-                  {draft.map((question, index) => (
-                    <SortableQuestionRow
-                      key={question.questionId}
-                      question={question}
-                      index={index}
-                      disabled={mutation.isPending}
-                      onRemove={() => handleRemove(question.questionId)}
-                      onWeight={(weightPct) =>
-                        handleWeight(question.questionId, weightPct)
-                      }
-                    />
-                  ))}
-                </div>
-              </SortableContext>
-            </DndContext>
-          </TooltipProvider>
-        )}
-
-        {draft.length > 0 ? (
-          <div className="mt-4 flex flex-col gap-3 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-3">
-              <span
-                className={cn(
-                  "text-xs font-medium tabular-nums",
-                  balanced ? "text-muted-foreground" : "text-destructive",
-                )}
-              >
-                Total {total}%
-                {!balanced && ` — must be 100% (${total > 100 ? `${total - 100} over` : `${100 - total} short`})`}
-              </span>
+              <Scale className="h-4 w-4" />
+              Distribute evenly
+            </Button>
+          ) : null}
+          {dirty ? (
+            <>
               <Button
                 type="button"
-                variant="outline"
+                variant="secondary"
                 size="sm"
-                className="h-7 text-xs"
-                onClick={handleDistribute}
                 disabled={mutation.isPending}
-              >
-                <Scale className="h-3.5 w-3.5" />
-                Distribute evenly
-              </Button>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {dirty ? (
-                <span className="text-xs text-muted-foreground">
-                  Unsaved changes
-                </span>
-              ) : null}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={!dirty || mutation.isPending}
                 onClick={() => setDraft(job.questions)}
               >
                 Reset
@@ -334,7 +249,7 @@ export function JobQuestionsManager({ job }: JobQuestionsManagerProps) {
               <Button
                 type="button"
                 size="sm"
-                disabled={!dirty || !balanced || mutation.isPending}
+                disabled={!balanced || mutation.isPending || orphaned.length > 0}
                 title={
                   !balanced
                     ? "The weights must total 100% before this can be saved"
@@ -345,12 +260,83 @@ export function JobQuestionsManager({ job }: JobQuestionsManagerProps) {
                 {mutation.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : null}
-                {mutation.isPending ? "Saving…" : "Save questions"}
+                {mutation.isPending ? "Saving…" : "Save"}
               </Button>
-            </div>
+            </>
+          ) : null}
+          <Button size="sm" onClick={() => setAddOpen(true)}>
+            <Plus className="h-4 w-4" />
+            Add questions
+          </Button>
+        </div>
+      </div>
+
+      <p className="mt-1 mb-3.5 text-[13px] text-ink-muted">
+        {draft.length > 0
+          ? `${draft.length} question${draft.length === 1 ? "" : "s"}, asked in this order. Edit each weight (%) — the total should reach 100%.`
+          : "No questions yet."}
+      </p>
+
+      {orphaned.length > 0 ? (
+        <div className="mb-3 flex items-start gap-2 rounded-lg border border-[var(--danger)]/40 bg-[var(--danger-soft)] p-3 text-[12.5px] leading-relaxed text-[var(--danger)]">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.7} />
+          <span>
+            {orphaned.length === 1
+              ? "A question below no longer exists in the bank."
+              : `${orphaned.length} questions below no longer exist in the bank.`}{" "}
+            No further change to this list can be saved until{" "}
+            {orphaned.length === 1 ? "it is" : "they are"} removed.
+          </span>
+        </div>
+      ) : null}
+
+      {draft.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-line-2 py-8 text-center text-[13px] text-ink-muted">
+          This job has no questions yet. Add some from your bank.
+        </div>
+      ) : (
+        <>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={draft.map((q) => q.questionId)}
+              strategy={verticalListSortingStrategy}
+            >
+              <div className="grid gap-2">
+                {draft.map((question, index) => (
+                  <SortableQuestionRow
+                    key={question.questionId}
+                    question={question}
+                    index={index}
+                    disabled={mutation.isPending}
+                    onRemove={() => handleRemove(question.questionId)}
+                    onWeight={(weightPct) =>
+                      handleWeight(question.questionId, weightPct)
+                    }
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
+
+          <div className="mt-0.5 flex items-center justify-between border-t border-line px-3.5 py-3">
+            <span className="text-[12.5px] font-semibold text-ink-muted">
+              Total weight
+            </span>
+            <span
+              className={cn(
+                "mono text-[14px] font-bold",
+                balanced ? "text-[var(--success)]" : "text-[var(--warning)]",
+              )}
+            >
+              {total}%{balanced ? "" : " — should total 100%"}
+            </span>
           </div>
-        ) : null}
-      </CardContent>
+        </>
+      )}
 
       <AddJobQuestionsDialog
         open={addOpen}
@@ -359,7 +345,7 @@ export function JobQuestionsManager({ job }: JobQuestionsManagerProps) {
         onAdd={handleAdd}
         saving={mutation.isPending}
       />
-    </Card>
+    </div>
   )
 }
 
@@ -443,142 +429,102 @@ function QuestionRow({
     if (parsed !== question.weightPct) onWeight(parsed)
   }
 
+  const diffClass = question.difficultyLevel
+    ? DIFFICULTY_CHIP[question.difficultyLevel]
+    : ""
+
   return (
     <div
       ref={sortableRef}
       style={style}
       className={cn(
-        "rounded-lg border border-border bg-card p-3",
+        "flex items-center gap-3 rounded-xl border border-line bg-surface px-3.5 py-3",
         isDragging && "z-10 opacity-60 shadow-lg",
       )}
     >
-      <div className="flex items-start gap-2">
-        <button
-          type="button"
-          ref={dragHandleRef}
-          {...dragHandleAttributes}
-          {...dragHandleListeners}
-          className="mt-0.5 cursor-grab touch-none rounded p-1 text-muted-foreground/70 transition-colors hover:text-foreground active:cursor-grabbing"
-          aria-label={`Drag to reorder question ${index + 1}`}
-          title="Drag to reorder"
-        >
-          <GripVertical className="h-4 w-4" />
-        </button>
-        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted text-[11px] font-semibold tabular-nums text-muted-foreground">
-          {index + 1}
-        </span>
+      <button
+        type="button"
+        ref={dragHandleRef}
+        {...dragHandleAttributes}
+        {...dragHandleListeners}
+        aria-label={`Drag to reorder question ${index + 1}`}
+        title="Drag to reorder"
+        className="cursor-grab touch-none border-0 bg-transparent p-0 text-[14px] text-ink-subtle active:cursor-grabbing"
+      >
+        ⠿
+      </button>
 
-        <div className="min-w-0 flex-1">
-          <p className="whitespace-pre-wrap text-sm leading-snug">
-            {question.text ?? "(removed from the bank)"}
-          </p>
+      <span className="flex h-[22px] w-[22px] flex-shrink-0 items-center justify-center rounded-full bg-surface-3 text-[11px] font-bold text-ink-2">
+        {index + 1}
+      </span>
 
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+      <div className="min-w-0 flex-1">
+        <div className="text-[13.5px] font-medium text-ink">
+          {question.text ?? "(removed from the bank)"}
+        </div>
+        {(question.difficultyLevel ||
+          question.tags.length > 0 ||
+          question.text === null) && (
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
             {question.difficultyLevel ? (
-              <Badge
-                variant={difficultyVariant[question.difficultyLevel]}
-                className="capitalize"
+              <span
+                className={cn(
+                  "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize",
+                  diffClass,
+                )}
               >
                 {question.difficultyLevel}
-              </Badge>
+              </span>
             ) : null}
             {question.tags.map((tag) => (
-              <Badge key={tag} variant="secondary">
+              <span
+                key={tag}
+                className="inline-flex items-center rounded-full bg-surface-3 px-2 py-0.5 text-[11px] font-semibold text-ink-2"
+              >
                 {tag}
-              </Badge>
+              </span>
             ))}
-
-            {/* The wording shown above is only the bank's FIRST one. Say how
-                many others exist, since that's what stops candidates
-                comparing notes — and flag when there are none. */}
-            {question.variantCount !== null ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span
-                    className={cn(
-                      "inline-flex cursor-help items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
-                      question.variantCount === 1
-                        ? "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-300"
-                        : "border-border text-muted-foreground",
-                    )}
-                  >
-                    {question.variantCount === 1
-                      ? "1 wording"
-                      : `${question.variantCount} wordings`}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  {question.variantCount === 1 ? (
-                    <p>
-                      Every candidate for this job is asked these exact words.
-                      Add wordings in the question bank to vary them.
-                    </p>
-                  ) : (
-                    <p>
-                      Each candidate is asked one of {question.variantCount}{" "}
-                      wordings, picked at random. The words above are just the
-                      first one.
-                    </p>
-                  )}
-                </TooltipContent>
-              </Tooltip>
-            ) : null}
-
             {question.text === null ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="inline-flex cursor-help items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-300">
-                    <AlertTriangle className="h-3 w-3 shrink-0" />
-                    Removed from the bank
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  <p>
-                    This question no longer exists in the question bank, so it
-                    has no wording to ask. Remove this row before saving.
-                  </p>
-                </TooltipContent>
-              </Tooltip>
+              <span className="inline-flex items-center gap-1 rounded-full bg-[var(--danger-soft)] px-2 py-0.5 text-[11px] font-semibold text-[var(--danger)]">
+                <AlertTriangle className="h-3 w-3" strokeWidth={1.9} />
+                Removed from the bank
+              </span>
             ) : null}
           </div>
-        </div>
+        )}
+      </div>
 
-        <div className="flex shrink-0 items-center gap-1.5">
-          <label className="flex items-center gap-1.5">
-            <span className="text-[11px] text-muted-foreground">Weight</span>
-            <div className="relative">
-              <Input
-                type="number"
-                min={0}
-                max={100}
-                step={1}
-                value={weightDraft}
-                disabled={disabled}
-                aria-label={`Percent of the score for question ${index + 1}`}
-                title="Percent of the interview score. All questions must total 100%."
-                onChange={(e) => setWeightDraft(e.target.value)}
-                onBlur={commitWeight}
-                className="h-8 w-20 pr-5 text-xs"
-              />
-              <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground">
-                %
-              </span>
-            </div>
-          </label>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
+      <div className="flex flex-col items-end gap-0.5">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-subtle">
+          Weight
+        </span>
+        <div className="flex h-8 w-[74px] items-center overflow-hidden rounded-lg border border-[var(--field-border)]">
+          <input
+            value={weightDraft}
             disabled={disabled}
-            className="h-8 w-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-            aria-label={`Remove question ${index + 1}`}
-            title="Remove from this job"
-            onClick={onRemove}
-          >
-            <X className="h-4 w-4" />
-          </Button>
+            aria-label={`Percent of the score for question ${index + 1}`}
+            title="Percent of the interview score. All questions must total 100%."
+            onChange={(e) =>
+              setWeightDraft(e.target.value.replace(/[^0-9]/g, ""))
+            }
+            onBlur={commitWeight}
+            className="mono h-full w-[44px] border-0 bg-transparent px-1 text-right text-[13px] font-bold text-primary outline-none"
+            inputMode="numeric"
+          />
+          <span className="mono px-2.5 text-[12px] text-ink-muted">%</span>
         </div>
       </div>
+
+      <button
+        type="button"
+        disabled={disabled}
+        aria-label={`Remove question ${index + 1}`}
+        title="Remove from this job"
+        onClick={onRemove}
+        className="cursor-pointer border-0 bg-transparent p-0 text-ink-subtle hover:text-[var(--danger)] disabled:cursor-not-allowed"
+      >
+        ✕
+      </button>
     </div>
   )
 }

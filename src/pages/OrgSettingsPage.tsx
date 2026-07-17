@@ -1,19 +1,17 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ImageOff, Loader2, Lock, Settings, Trash2, Upload } from "lucide-react";
-import toast from "react-hot-toast";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+  ImageOff,
+  Loader2,
+  Lock,
+  Settings,
+  Trash2,
+  Upload,
+} from "lucide-react";
+import toast from "react-hot-toast";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useOrganization } from "@/features/organization/useOrganization";
 import { EmailDomainCard } from "@/features/organization/components/EmailDomainCard";
 import {
@@ -108,6 +106,19 @@ const toInt = (value: string) => {
   return Number.isInteger(n) ? n : NaN;
 };
 
+type SettingsTab = "identity" | "defaults" | "platform" | "notifications";
+
+const TABS: Array<{ id: SettingsTab; label: string }> = [
+  { id: "identity", label: "Identity" },
+  { id: "defaults", label: "Interview defaults" },
+  { id: "platform", label: "Platform" },
+  { id: "notifications", label: "My notifications" },
+];
+
+const inputBase =
+  "h-11 w-full rounded-lg border border-[var(--field-border)] bg-surface px-3.5 text-[14px] text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)] disabled:cursor-not-allowed disabled:bg-ink-faint disabled:text-ink-muted";
+const labelBase = "mb-1.5 block text-[13px] font-semibold text-ink";
+
 export function OrgSettingsPage() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -115,6 +126,7 @@ export function OrgSettingsPage() {
 
   const canWrite = user?.role === "org_admin";
 
+  const [activeTab, setActiveTab] = useState<SettingsTab>("identity");
   const [name, setName] = useState("");
   const [maxAttempts, setMaxAttempts] = useState("");
   const [expiryDays, setExpiryDays] = useState("");
@@ -308,13 +320,17 @@ export function OrgSettingsPage() {
   };
 
   const header = (
-    <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+    <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
       <div>
-        <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-          <Settings className="h-6 w-6 text-primary" />
-          Organization settings
-        </h1>
-        <p className="text-sm text-muted-foreground">
+        <div className="flex items-center gap-2.5">
+          <span className="text-primary">
+            <Settings className="h-[18px] w-[18px]" strokeWidth={1.7} />
+          </span>
+          <h1 className="text-[23px] font-semibold tracking-tight text-ink">
+            Organization settings
+          </h1>
+        </div>
+        <p className="mt-1.5 max-w-[620px] text-[13.5px] text-ink-muted">
           Your organization&apos;s identity and the defaults every job inherits.
         </p>
       </div>
@@ -322,14 +338,19 @@ export function OrgSettingsPage() {
         <div className="flex shrink-0 items-center gap-2">
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             size="sm"
             onClick={reset}
             disabled={!isDirty || saveMutation.isPending}
           >
             Reset
           </Button>
-          <Button type="submit" form="org-settings-form" disabled={!canSave}>
+          <Button
+            type="submit"
+            size="sm"
+            form="org-settings-form"
+            disabled={!canSave}
+          >
             {saveMutation.isPending ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -346,351 +367,419 @@ export function OrgSettingsPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6">
+      <div className="mx-auto max-w-[1240px] px-6 py-6 lg:px-8 lg:py-8">
         {header}
-        <Card>
-          <CardContent className="py-16 text-center text-sm text-muted-foreground">
-            <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin text-primary" />
+        <div className="rounded-2xl border border-line bg-surface">
+          <div className="flex items-center justify-center gap-2 px-6 py-14 text-[13.5px] text-ink-muted">
+            <Loader2 className="h-4 w-4 animate-spin text-primary" />
             Loading organization…
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
     );
   }
 
   if (isError || !org) {
     return (
-      <div className="space-y-6">
+      <div className="mx-auto max-w-[1240px] px-6 py-6 lg:px-8 lg:py-8">
         {header}
-        <Card>
-          <CardContent className="py-16 text-center text-sm text-destructive">
-            Could not load organization.{" "}
-            <button onClick={() => refetch()} className="underline">
+        <div className="rounded-2xl border border-line bg-surface">
+          <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
+            <p className="text-[13.5px] text-[var(--danger)]">
+              Could not load organization.
+            </p>
+            <Button variant="secondary" size="sm" onClick={() => refetch()}>
               Retry
-            </button>
-          </CardContent>
-        </Card>
+            </Button>
+          </div>
+        </div>
       </div>
     );
   }
 
+  const identityBody = (
+    <div className="grid gap-5">
+      <div>
+        <label htmlFor="org-name" className={labelBase}>
+          Name
+        </label>
+        <input
+          id="org-name"
+          className={inputBase}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onBlur={() => setTouched((t) => ({ ...t, name: true }))}
+          disabled={!canWrite}
+          aria-invalid={Boolean(touched.name && nameError)}
+        />
+        {touched.name && nameError ? (
+          <p className="mt-1.5 text-[12px] text-[var(--danger)]">{nameError}</p>
+        ) : null}
+      </div>
+
+      <div>
+        <label className={labelBase}>Organization logo</label>
+        <p className="mb-3 text-[12px] text-ink-muted">
+          Goes out on every candidate invite email and heads the screening page
+          candidates take their interview on — for most candidates it&apos;s the
+          only branding they ever see.
+        </p>
+
+        <div className="flex items-center gap-4">
+          {/* Fixed-size 72px tile so the row never reflows between the empty,
+              uploading and loaded states. */}
+          <div className="relative flex h-[72px] w-[72px] shrink-0 items-center justify-center overflow-hidden rounded-[14px] border border-line-2 bg-surface-3 text-ink-subtle">
+            {isUploading ? (
+              <Loader2 className="h-5 w-5 animate-spin text-ink-muted" />
+            ) : previewUrl && !logoBroken ? (
+              <img
+                src={previewUrl}
+                alt={`${name || "Organization"} logo`}
+                className="h-full w-full object-contain p-2"
+                onError={() => setLogoBroken(true)}
+              />
+            ) : (
+              <ImageOff className="h-6 w-6" strokeWidth={1.6} />
+            )}
+          </div>
+
+          <div
+            onDragOver={(e) => {
+              if (!canWrite || isUploading) return;
+              e.preventDefault();
+              setIsDragging(true);
+            }}
+            onDragLeave={(e) => {
+              // Fires when crossing into a CHILD too, which would flicker
+              // the highlight — only clear when the cursor has actually
+              // left the drop zone's subtree.
+              if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+              setIsDragging(false);
+            }}
+            onDrop={(e) => {
+              if (!canWrite || isUploading) return;
+              e.preventDefault();
+              setIsDragging(false);
+              const file = e.dataTransfer.files?.[0];
+              if (file) void handleLogoFile(file);
+            }}
+            onClick={() => {
+              if (!canWrite || isUploading) return;
+              fileInputRef.current?.click();
+            }}
+            className={cn(
+              "flex-1 rounded-[12px] border-2 border-dashed px-5 py-4 text-center transition-colors",
+              canWrite && !isUploading
+                ? "cursor-pointer bg-surface-2"
+                : "bg-surface-2",
+              isDragging
+                ? "border-primary bg-accent"
+                : "border-line-2 hover:border-primary/50",
+            )}
+          >
+            {isUploading ? (
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between text-[12px]">
+                  <span className="font-semibold text-ink">Uploading…</span>
+                  <span className="mono text-ink-muted">{uploadPct}%</span>
+                </div>
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-3">
+                  <div
+                    className="h-full rounded-full bg-primary transition-[width] duration-200"
+                    style={{ width: `${uploadPct ?? 0}%` }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="text-[13.5px] font-semibold text-ink">
+                  Drag &amp; drop or click to upload
+                </div>
+                <p className="mt-1 text-[12px] text-ink-muted">
+                  PNG, JPG or SVG · up to 2 MB
+                </p>
+              </>
+            )}
+          </div>
+
+          <input
+            ref={fileInputRef}
+            id="org-logo"
+            type="file"
+            accept={LOGO_ACCEPT}
+            className="sr-only"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void handleLogoFile(file);
+            }}
+          />
+        </div>
+
+        {canWrite && previewUrl && !isUploading ? (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Upload className="h-4 w-4" strokeWidth={1.9} />
+              Replace
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-ink-muted hover:text-[var(--danger)]"
+              onClick={removeLogo}
+            >
+              <Trash2 className="h-4 w-4" strokeWidth={1.9} />
+              Remove
+            </Button>
+          </div>
+        ) : null}
+
+        {logoError ? (
+          <p className="mt-2 text-[12px] text-[var(--danger)]">{logoError}</p>
+        ) : logoKey !== null && !isUploading ? (
+          <p className="mt-2 text-[12px] font-semibold text-[var(--warning)]">
+            Not saved yet — hit Save changes.
+          </p>
+        ) : logoBroken ? (
+          <p className="mt-2 text-[12px] text-ink-muted">
+            That image didn&apos;t load — candidates would see the Jobjen mark.
+          </p>
+        ) : null}
+      </div>
+
+      {/* EmailDomainCard mounts on Identity — same PATCH surface (org profile)
+          as the fields above, and the domain is part of the org's identity. */}
+      {org.emailDomain ? (
+        <div className="pt-2">
+          <EmailDomainCard
+            emailDomain={org.emailDomain}
+            canWrite={canWrite}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+
+  const defaultsBody = (
+    <div className="grid gap-5">
+      <div className="grid gap-5 sm:grid-cols-2">
+        <div>
+          <label htmlFor="org-attempts" className={labelBase}>
+            Max interview attempts
+          </label>
+          <input
+            id="org-attempts"
+            type="number"
+            className={inputBase}
+            min={MAX_ATTEMPTS_MIN}
+            max={MAX_ATTEMPTS_MAX}
+            value={maxAttempts}
+            onChange={(e) => setMaxAttempts(e.target.value)}
+            onBlur={() => setTouched((t) => ({ ...t, maxAttempts: true }))}
+            disabled={!canWrite}
+            aria-invalid={Boolean(touched.maxAttempts && attemptsError)}
+          />
+          {touched.maxAttempts && attemptsError ? (
+            <p className="mt-1.5 text-[12px] text-[var(--danger)]">
+              {attemptsError}
+            </p>
+          ) : (
+            <p className="mt-1.5 text-[12px] text-ink-muted">
+              How many times a candidate may sit an interview before re-invites
+              are refused ({MAX_ATTEMPTS_MIN}–{MAX_ATTEMPTS_MAX}). A job can set
+              its own.
+            </p>
+          )}
+        </div>
+
+        <div>
+          <label htmlFor="org-expiry" className={labelBase}>
+            Interview link expiry (days)
+          </label>
+          <input
+            id="org-expiry"
+            type="number"
+            className={inputBase}
+            min={EXPIRY_DAYS_MIN}
+            max={EXPIRY_DAYS_MAX}
+            value={expiryDays}
+            onChange={(e) => setExpiryDays(e.target.value)}
+            onBlur={() => setTouched((t) => ({ ...t, expiryDays: true }))}
+            disabled={!canWrite}
+            aria-invalid={Boolean(touched.expiryDays && expiryError)}
+          />
+          {touched.expiryDays && expiryError ? (
+            <p className="mt-1.5 text-[12px] text-[var(--danger)]">
+              {expiryError}
+            </p>
+          ) : (
+            <p className="mt-1.5 text-[12px] text-ink-muted">
+              How long an invite link stays usable ({EXPIRY_DAYS_MIN}–
+              {EXPIRY_DAYS_MAX}).
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="max-w-[320px]">
+        <label htmlFor="org-timezone" className={labelBase}>
+          Time zone
+        </label>
+        <Combobox
+          id="org-timezone"
+          value={timezone}
+          onValueChange={(v) => {
+            setTouched((t) => ({ ...t, timezone: true }));
+            setTimezone(v);
+          }}
+          options={TIMEZONE_OPTIONS}
+          allowCustom={false}
+          placeholder="Asia/Karachi"
+          disabled={!canWrite}
+          aria-invalid={Boolean(touched.timezone && timezoneError)}
+        />
+        {touched.timezone && timezoneError ? (
+          <p className="mt-1.5 text-[12px] text-[var(--danger)]">
+            {timezoneError}
+          </p>
+        ) : (
+          <p className="mt-1.5 text-[12px] text-ink-muted">
+            Type to search the IANA zones. Used for scheduling and the dates
+            shown to candidates.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+
+  const platformBody = (
+    <div>
+      <div className="mb-4 flex items-center gap-2 text-[12.5px] text-ink-muted">
+        <Lock className="h-3.5 w-3.5 text-ink-subtle" strokeWidth={1.7} />
+        Set when your organization is provisioned. Contact the platform admin
+        to change these.
+      </div>
+
+      <div className="grid gap-5 sm:grid-cols-2">
+        <div>
+          <label htmlFor="org-slug" className={labelBase}>
+            Slug
+          </label>
+          <input
+            id="org-slug"
+            className={cn(inputBase, "cursor-not-allowed bg-ink-faint")}
+            value={org.slug}
+            readOnly
+            disabled
+          />
+        </div>
+        <div>
+          <label htmlFor="org-status" className={labelBase}>
+            Status
+          </label>
+          <input
+            id="org-status"
+            className={cn(inputBase, "cursor-not-allowed bg-ink-faint")}
+            value={org.status === "active" ? "Active" : "Inactive"}
+            readOnly
+            disabled
+          />
+        </div>
+        <div>
+          <label htmlFor="org-seats" className={labelBase}>
+            Seats
+          </label>
+          <input
+            id="org-seats"
+            className={cn(inputBase, "cursor-not-allowed bg-ink-faint")}
+            value={String(org.seats)}
+            readOnly
+            disabled
+          />
+          <p className="mt-1.5 text-[12px] text-ink-muted">
+            The cap on active team members.
+          </p>
+        </div>
+        <div>
+          <label htmlFor="org-industry" className={labelBase}>
+            Industry
+          </label>
+          <input
+            id="org-industry"
+            className={cn(inputBase, "cursor-not-allowed bg-ink-faint")}
+            value={org.industry || "—"}
+            readOnly
+            disabled
+          />
+        </div>
+      </div>
+    </div>
+  );
+
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-[1240px] px-6 py-6 lg:px-8 lg:py-8">
       {header}
 
       {!canWrite ? (
-        <p className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+        <p className="mb-4 rounded-lg border border-line bg-surface-3 px-3 py-2 text-[13px] text-ink-muted">
           You have read-only access to these settings. Ask an org admin in your
           organization to change them.
         </p>
       ) : null}
 
-      <form id="org-settings-form" onSubmit={submit} className="space-y-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Identity</CardTitle>
-            <CardDescription>
-              How your organization is presented to candidates and inside this
-              dashboard.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            <div className="flex flex-col gap-2.5">
-              <Label htmlFor="org-name">Name</Label>
-              <Input
-                id="org-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                onBlur={() => setTouched((t) => ({ ...t, name: true }))}
-                disabled={!canWrite}
-                aria-invalid={Boolean(touched.name && nameError)}
-              />
-              {touched.name && nameError ? (
-                <p className="text-xs text-destructive">{nameError}</p>
-              ) : null}
-            </div>
-
-            <div className="flex flex-col gap-2.5">
-              <Label htmlFor="org-logo">Logo</Label>
-              <p className="text-xs text-muted-foreground">
-                Goes out on every candidate invite email and heads the screening
-                page candidates take their interview on — for most candidates
-                it&apos;s the only branding they ever see.
-              </p>
-
-              <div
-                onDragOver={(e) => {
-                  if (!canWrite || isUploading) return;
-                  e.preventDefault();
-                  setIsDragging(true);
-                }}
-                onDragLeave={(e) => {
-                  // Fires when crossing into a CHILD too, which would flicker
-                  // the highlight — only clear when the cursor has actually
-                  // left the drop zone's subtree.
-                  if (e.currentTarget.contains(e.relatedTarget as Node)) return;
-                  setIsDragging(false);
-                }}
-                onDrop={(e) => {
-                  if (!canWrite || isUploading) return;
-                  e.preventDefault();
-                  setIsDragging(false);
-                  const file = e.dataTransfer.files?.[0];
-                  if (file) void handleLogoFile(file);
-                }}
-                className={cn(
-                  "flex items-center gap-4 rounded-xl border p-4 transition-colors",
-                  isDragging
-                    ? "border-primary border-dashed bg-primary/5"
-                    : "border-border bg-muted/20",
-                )}
-              >
-                {/* Fixed-size tile so the row never reflows between the empty,
-                    uploading and loaded states. */}
-                <div className="relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-background">
-                  {isUploading ? (
-                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                  ) : previewUrl && !logoBroken ? (
-                    <img
-                      src={previewUrl}
-                      alt={`${name || "Organization"} logo`}
-                      className="h-full w-full object-contain p-2"
-                      onError={() => setLogoBroken(true)}
-                    />
-                  ) : (
-                    <ImageOff className="h-5 w-5 text-muted-foreground" />
-                  )}
-                </div>
-
-                <div className="flex min-w-0 flex-1 flex-col gap-2">
-                  {isUploading ? (
-                    <>
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="font-medium">Uploading…</span>
-                        <span className="tabular-nums text-muted-foreground">
-                          {uploadPct}%
-                        </span>
-                      </div>
-                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                        <div
-                          className="h-full rounded-full bg-primary transition-[width] duration-200"
-                          style={{ width: `${uploadPct ?? 0}%` }}
-                        />
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <p className="text-xs text-muted-foreground">
-                        {logoBroken
-                          ? "That image didn't load — candidates would see the Jobjen mark."
-                          : previewUrl
-                            ? "PNG, JPEG, SVG or WebP · up to 2 MB"
-                            : "No logo set — the Jobjen mark is used instead."}
-                      </p>
-                      {canWrite ? (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <input
-                            ref={fileInputRef}
-                            id="org-logo"
-                            type="file"
-                            accept={LOGO_ACCEPT}
-                            className="sr-only"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) void handleLogoFile(file);
-                            }}
-                          />
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => fileInputRef.current?.click()}
-                          >
-                            <Upload className="mr-2 h-4 w-4" />
-                            {previewUrl ? "Replace" : "Upload logo"}
-                          </Button>
-                          {previewUrl ? (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="text-muted-foreground hover:text-destructive"
-                              onClick={removeLogo}
-                            >
-                              <Trash2 className="mr-2 h-4 w-4" />
-                              Remove
-                            </Button>
-                          ) : null}
-                          <span className="text-xs text-muted-foreground">
-                            or drop an image here
-                          </span>
-                        </div>
-                      ) : null}
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {logoError ? (
-                <p className="text-xs text-destructive">{logoError}</p>
-              ) : logoKey !== null && !isUploading ? (
-                <p className="text-xs font-medium text-amber-600 dark:text-amber-500">
-                  Not saved yet — hit Save changes.
-                </p>
-              ) : null}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Interview defaults</CardTitle>
-            <CardDescription>
-              Applied to every job that doesn&apos;t override them.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            <div className="grid gap-5 sm:grid-cols-2">
-              <div className="flex flex-col gap-2.5">
-                <Label htmlFor="org-attempts">Max interview attempts</Label>
-                <Input
-                  id="org-attempts"
-                  type="number"
-                  min={MAX_ATTEMPTS_MIN}
-                  max={MAX_ATTEMPTS_MAX}
-                  value={maxAttempts}
-                  onChange={(e) => setMaxAttempts(e.target.value)}
-                  onBlur={() => setTouched((t) => ({ ...t, maxAttempts: true }))}
-                  disabled={!canWrite}
-                  aria-invalid={Boolean(touched.maxAttempts && attemptsError)}
-                />
-                {touched.maxAttempts && attemptsError ? (
-                  <p className="text-xs text-destructive">{attemptsError}</p>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    How many times a candidate may sit an interview before
-                    re-invites are refused ({MAX_ATTEMPTS_MIN}–{MAX_ATTEMPTS_MAX}
-                    ). A job can set its own.
-                  </p>
-                )}
-              </div>
-
-              <div className="flex flex-col gap-2.5">
-                <Label htmlFor="org-expiry">Interview link expiry (days)</Label>
-                <Input
-                  id="org-expiry"
-                  type="number"
-                  min={EXPIRY_DAYS_MIN}
-                  max={EXPIRY_DAYS_MAX}
-                  value={expiryDays}
-                  onChange={(e) => setExpiryDays(e.target.value)}
-                  onBlur={() => setTouched((t) => ({ ...t, expiryDays: true }))}
-                  disabled={!canWrite}
-                  aria-invalid={Boolean(touched.expiryDays && expiryError)}
-                />
-                {touched.expiryDays && expiryError ? (
-                  <p className="text-xs text-destructive">{expiryError}</p>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    How long an invite link stays usable ({EXPIRY_DAYS_MIN}–
-                    {EXPIRY_DAYS_MAX}).
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-2.5 sm:max-w-sm">
-              <Label htmlFor="org-timezone">Time zone</Label>
-              <Combobox
-                id="org-timezone"
-                value={timezone}
-                onValueChange={(v) => {
-                  setTouched((t) => ({ ...t, timezone: true }));
-                  setTimezone(v);
-                }}
-                options={TIMEZONE_OPTIONS}
-                allowCustom={false}
-                placeholder="Asia/Karachi"
-                disabled={!canWrite}
-                aria-invalid={Boolean(touched.timezone && timezoneError)}
-              />
-              {touched.timezone && timezoneError ? (
-                <p className="text-xs text-destructive">{timezoneError}</p>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  Type to search the IANA zones. Used for scheduling and the
-                  dates shown to candidates.
-                </p>
+      {/* Segmented pill tabs */}
+      <div
+        role="tablist"
+        aria-label="Settings sections"
+        className="mb-4 flex max-w-[560px] gap-1 rounded-full border border-line bg-surface-3 p-1"
+      >
+        {TABS.map((t) => {
+          const isActive = activeTab === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => setActiveTab(t.id)}
+              className={cn(
+                "flex-1 rounded-full px-3 py-2 text-[13px] font-semibold transition-colors",
+                isActive
+                  ? "bg-surface text-primary shadow-sm"
+                  : "text-ink-muted hover:text-ink",
               )}
-            </div>
-          </CardContent>
-        </Card>
+            >
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
 
-        {/* Shown, not editable: the PATCH whitelist silently strips these, so
-            offering them as fields would look like a save that did nothing. */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Lock className="h-4 w-4 text-muted-foreground" />
-              Managed by the platform admin
-            </CardTitle>
-            <CardDescription>
-              These are set when your organization is provisioned. Contact the
-              platform admin to change any of them.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-5 sm:grid-cols-2">
-            <div className="flex flex-col gap-2.5">
-              <Label htmlFor="org-slug">Slug</Label>
-              <Input id="org-slug" value={org.slug} disabled readOnly />
-            </div>
-            <div className="flex flex-col gap-2.5">
-              <Label htmlFor="org-status">Status</Label>
-              <Input
-                id="org-status"
-                value={org.status === "active" ? "Active" : "Inactive"}
-                disabled
-                readOnly
-              />
-            </div>
-            <div className="flex flex-col gap-2.5">
-              <Label htmlFor="org-seats">Seats</Label>
-              <Input id="org-seats" value={String(org.seats)} disabled readOnly />
-              <p className="text-xs text-muted-foreground">
-                The cap on active team members.
-              </p>
-            </div>
-            <div className="flex flex-col gap-2.5">
-              <Label htmlFor="org-industry">Industry</Label>
-              <Input
-                id="org-industry"
-                value={org.industry || "—"}
-                disabled
-                readOnly
-              />
-            </div>
-          </CardContent>
-        </Card>
+      <form id="org-settings-form" onSubmit={submit}>
+        <div className="rounded-2xl border border-line bg-surface">
+          <div className="p-5 sm:p-6">
+            {activeTab === "identity" ? identityBody : null}
+            {activeTab === "defaults" ? defaultsBody : null}
+            {activeTab === "platform" ? platformBody : null}
+            {activeTab === "notifications" ? <NotificationPrefsBody /> : null}
+          </div>
+        </div>
       </form>
-
-      {/* Outside the form: it has its own action (ask Resend to re-check) and
-          nothing here is part of the profile PATCH. Guarded because a response
-          cached from before this field shipped has no emailDomain block. */}
-      {org.emailDomain ? (
-        <EmailDomainCard emailDomain={org.emailDomain} canWrite={canWrite} />
-      ) : null}
-
-      <NotificationPrefsCard />
     </div>
   );
 }
 
 /**
- * Self-scoped preferences (`/admin/users/me/...`), so this sits here rather
- * than on the org_admin-only Team page — otherwise `hr` could never reach their
- * own notification settings.
+ * Self-scoped preferences (`/admin/users/me/...`), so this sits inside the
+ * Settings page rather than on the org_admin-only Team page — otherwise `hr`
+ * could never reach their own notification settings.
  */
-function NotificationPrefsCard() {
+function NotificationPrefsBody() {
   const queryClient = useQueryClient();
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["notificationPrefs"],
@@ -723,93 +812,90 @@ function NotificationPrefsCard() {
         prefs.statusChange !== data.statusChange),
   );
 
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center gap-2 py-8 text-[13.5px] text-ink-muted">
+        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+        Loading preferences…
+      </div>
+    );
+  }
+
+  if (isError || !prefs) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-8 text-center">
+        <p className="text-[13.5px] text-[var(--danger)]">
+          Could not load preferences.
+        </p>
+        <Button variant="secondary" size="sm" onClick={() => refetch()}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>My notifications</CardTitle>
-        <CardDescription>
-          Emails sent to you personally. Everyone else on the team sets their
-          own.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {isLoading ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">
-            <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin text-primary" />
-            Loading preferences…
-          </p>
-        ) : isError || !prefs ? (
-          <p className="py-6 text-center text-sm text-destructive">
-            Could not load preferences.{" "}
-            <button onClick={() => refetch()} className="underline">
-              Retry
-            </button>
-          </p>
-        ) : (
-          <div className="space-y-4">
-            {/* A <label> wrapper would be safe here — `Checkbox` renders a
-                <button>, which is interactive content, so label activation bails
-                when the box itself is clicked (see the select-all in
-                OverviewPage). It's a plain <div> only because the visible text is
-                a two-line title + description block, which reads better as an
-                aria-label than as a giant click target. */}
-            <div className="flex items-start gap-3">
-              <Checkbox
-                checked={prefs.interviewCompleted}
-                onCheckedChange={(checked) =>
-                  setPrefs({ ...prefs, interviewCompleted: checked })
-                }
-                disabled={mutation.isPending}
-                className="mt-0.5"
-                aria-label="Email me when a candidate submits an interview"
-              />
-              <div>
-                <p className="text-sm font-medium leading-none">
-                  Interview completed
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Email me when a candidate submits an interview.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-3">
-              <Checkbox
-                checked={prefs.statusChange}
-                onCheckedChange={(checked) =>
-                  setPrefs({ ...prefs, statusChange: checked })
-                }
-                disabled={mutation.isPending}
-                className="mt-0.5"
-                aria-label="Email me when a candidate moves to a different stage"
-              />
-              <div>
-                <p className="text-sm font-medium leading-none">Status change</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Email me when a candidate moves to a different stage.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex justify-end">
-              <Button
-                type="button"
-                onClick={() => mutation.mutate(prefs)}
-                disabled={!isDirty || mutation.isPending}
-              >
-                {mutation.isPending ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Saving…
-                  </>
-                ) : (
-                  "Save preferences"
-                )}
-              </Button>
-            </div>
+    <div className="grid gap-3">
+      {/* A <label> wrapper would be safe here — `Checkbox` renders a
+          <button>, which is interactive content, so label activation bails
+          when the box itself is clicked. */}
+      <div className="flex items-start gap-3 rounded-xl border border-line p-4">
+        <div className="min-w-0 flex-1">
+          <div className="text-[13.5px] font-semibold text-ink">
+            Interview completed
           </div>
-        )}
-      </CardContent>
-    </Card>
+          <p className="mt-1 text-[12px] text-ink-muted">
+            Email me when a candidate submits an interview.
+          </p>
+        </div>
+        <Checkbox
+          checked={prefs.interviewCompleted}
+          onCheckedChange={(checked) =>
+            setPrefs({ ...prefs, interviewCompleted: checked })
+          }
+          disabled={mutation.isPending}
+          className="mt-0.5"
+          aria-label="Email me when a candidate submits an interview"
+        />
+      </div>
+
+      <div className="flex items-start gap-3 rounded-xl border border-line p-4">
+        <div className="min-w-0 flex-1">
+          <div className="text-[13.5px] font-semibold text-ink">
+            Status change
+          </div>
+          <p className="mt-1 text-[12px] text-ink-muted">
+            Email me when a candidate moves to a different stage.
+          </p>
+        </div>
+        <Checkbox
+          checked={prefs.statusChange}
+          onCheckedChange={(checked) =>
+            setPrefs({ ...prefs, statusChange: checked })
+          }
+          disabled={mutation.isPending}
+          className="mt-0.5"
+          aria-label="Email me when a candidate moves to a different stage"
+        />
+      </div>
+
+      <div className="mt-1 flex justify-end">
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => prefs && mutation.mutate(prefs)}
+          disabled={!isDirty || mutation.isPending}
+        >
+          {mutation.isPending ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Saving…
+            </>
+          ) : (
+            "Save preferences"
+          )}
+        </Button>
+      </div>
+    </div>
   );
 }

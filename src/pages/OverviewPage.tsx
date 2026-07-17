@@ -7,13 +7,13 @@ import {
 } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import {
+  ChevronRight,
+  Clock,
   Filter,
-  GripVertical,
-  LayoutDashboard,
+  LayoutGrid,
   Loader2,
   Pencil,
   Plus,
-  RefreshCw,
   SquarePlus,
   Trash2,
   X,
@@ -35,16 +35,13 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
@@ -63,13 +60,11 @@ import {
 } from "@/components/ui/dialog";
 import {
   bulkDeleteOverviewStats,
-  createManualOverviewStat,
   createOverviewStat,
   deleteOverviewStat,
   fetchOverviewFilterOptions,
   fetchOverviewStats,
   reorderOverviewStats,
-  updateManualOverviewStat,
   updateOverviewStat,
 } from "@/features/overview/overviewApi";
 import type {
@@ -79,11 +74,55 @@ import type {
 } from "@/features/overview/types";
 import { OverviewFunnelDrawer } from "@/features/overview/OverviewFunnel";
 import { JOB_OPTIONS_QUERY_KEY, listJobOptions } from "@/features/jobs/jobsApi";
+import {
+  getCandidate,
+  listCandidates,
+} from "@/features/candidates/candidatesApi";
+import { InterviewDetailDrawer } from "@/components/interviews/InterviewDetailDrawer";
+import { useAuth } from "@/features/auth/AuthContext";
 import { errorMessage } from "@/lib/errors";
 import { cn } from "@/lib/utils";
 
 const STATS_QUERY_KEY = ["overviewStats"] as const;
 const OPTIONS_QUERY_KEY = ["overviewFilterOptions"] as const;
+
+/**
+ * Ordered palette used to color the funnel bars. Matches the org-portal stage
+ * palette so the same colors read across the app; cycles if there are more
+ * cards than stages.
+ */
+const FUNNEL_COLORS = [
+  "var(--stage-applied)",
+  "var(--stage-prescreen)",
+  "var(--stage-invited)",
+  "var(--stage-interviewing)",
+  "var(--stage-scored)",
+  "var(--stage-shortlisted)",
+  "var(--stage-hired)",
+  "var(--stage-rejected)",
+];
+
+/**
+ * A funnel-shaped icon for the "View funnel" header action. Mirrors the DevExcel
+ * reference glyph so the header reads the same across the design and the app.
+ */
+function FunnelIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.7}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M1.5 3h13l-5 6v4l-3 1.5V9z" />
+    </svg>
+  );
+}
 
 /**
  * Compact count for the small metric cards: plain under 1,000, then abbreviated
@@ -95,6 +134,15 @@ function formatCount(value: number): string {
     notation: "compact",
     maximumFractionDigits: 1,
   }).format(value);
+}
+
+/** Two-letter initials for the awaiting-decision avatar. */
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const first = parts[0]![0] ?? "";
+  const second = parts.length > 1 ? parts[parts.length - 1]![0] ?? "" : "";
+  return (first + second).toUpperCase();
 }
 
 /** Preserve the catalog's order while bucketing options under their group. */
@@ -117,6 +165,7 @@ function groupOptions(
 
 export function OverviewPage() {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
 
   // Page-level Job overlay. Folded into the stats query key so switching it
   // refetches every card's count scoped to that job; "all" sends no param. The
@@ -145,7 +194,6 @@ export function OverviewPage() {
     data: stats,
     isLoading,
     isError,
-    isFetching,
     refetch,
   } = useQuery({
     queryKey: statsQueryKey,
@@ -154,10 +202,9 @@ export function OverviewPage() {
     placeholderData: keepPreviousData,
   });
 
-  // The two card kinds render as separate sections: manual cards (a title + a
-  // number the admin typed) sit directly under the header, while the live
-  // filter metrics keep the grid below with select-all / reorder / bulk delete.
-  // Order within each section preserves the backend's position sort.
+  // The two card kinds share the KPI grid but keep their own edit dialogs.
+  // Order within each section preserves the backend's position sort; the merged
+  // list (metrics first, manual after) is what drag-reorder persists.
   const manualStats = useMemo(
     () => stats?.filter((s) => s.kind === "manual") ?? [],
     [stats],
@@ -166,14 +213,18 @@ export function OverviewPage() {
     () => stats?.filter((s) => s.kind !== "manual") ?? [],
     [stats],
   );
+  const combinedStats = useMemo(
+    () => [...metricStats, ...manualStats],
+    [metricStats, manualStats],
+  );
+  const combinedIds = useMemo(
+    () => combinedStats.map((s) => s.id),
+    [combinedStats],
+  );
 
   const [createOpen, setCreateOpen] = useState(false);
-  const [manualCreateOpen, setManualCreateOpen] = useState(false);
-  // Cards being edited (null = the corresponding edit dialog is closed).
+  // Cards being edited (null = the edit dialog is closed).
   const [editMetricTarget, setEditMetricTarget] = useState<OverviewStat | null>(
-    null,
-  );
-  const [editManualTarget, setEditManualTarget] = useState<OverviewStat | null>(
     null,
   );
   const [funnelOpen, setFunnelOpen] = useState(false);
@@ -181,6 +232,36 @@ export function OverviewPage() {
   // Multi-select: ids the operator has ticked. Drives the bulk delete bar.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+
+  // Awaiting your decision: reuse the shared candidates list endpoint scoped to
+  // the `scored` status. Guarded on `user` so it never fires before sign-in.
+  const { data: awaitingData } = useQuery({
+    queryKey: ["awaiting-decision"],
+    queryFn: () => listCandidates({ statusKey: "scored", limit: 5 }),
+    enabled: Boolean(user),
+  });
+  const awaiting = useMemo(() => awaitingData?.data ?? [], [awaitingData]);
+
+  // Interview drawer wiring. `GET /admin/candidates` returns `latestInterviewId`
+  // as a raw ObjectId, but the drawer is keyed by `publicSessionId` — resolve
+  // it via a detail read once the row is clicked.
+  const [drawerCandidateId, setDrawerCandidateId] = useState<string | null>(
+    null,
+  );
+  const drawerDetailQuery = useQuery({
+    queryKey: ["candidate", drawerCandidateId],
+    queryFn: () => getCandidate(drawerCandidateId as string),
+    enabled: Boolean(drawerCandidateId),
+  });
+  const interviewSessionId =
+    drawerDetailQuery.data?.latestInterviewId?.publicSessionId ?? null;
+  useEffect(() => {
+    if (!drawerDetailQuery.isError) return;
+    toast.error(
+      errorMessage(drawerDetailQuery.error, "Could not open the interview."),
+    );
+    setDrawerCandidateId(null);
+  }, [drawerDetailQuery.isError, drawerDetailQuery.error]);
 
   // Prune the selection whenever the live cards change (a single-card delete,
   // a refetch, etc.) so an id that no longer exists can't linger in a bulk
@@ -207,11 +288,15 @@ export function OverviewPage() {
     });
   };
 
-  // Select-all and drag reorder apply only to the filter-metric grid.
-  const allIds = useMemo(() => metricStats.map((s) => s.id), [metricStats]);
+  // Select-all applies only to the filter-metric cards (bulk delete is scoped
+  // to metrics; manual cards keep their own single-item delete).
+  const allMetricIds = useMemo(
+    () => metricStats.map((s) => s.id),
+    [metricStats],
+  );
   const selectedCount = selectedIds.size;
   const allSelected =
-    allIds.length > 0 && allIds.every((id) => selectedIds.has(id));
+    allMetricIds.length > 0 && allMetricIds.every((id) => selectedIds.has(id));
   const headerChecked: boolean | "indeterminate" = allSelected
     ? true
     : selectedCount > 0
@@ -219,11 +304,11 @@ export function OverviewPage() {
       : false;
 
   const toggleSelectAll = () => {
-    setSelectedIds(allSelected ? new Set() : new Set(allIds));
+    setSelectedIds(allSelected ? new Set() : new Set(allMetricIds));
   };
 
   // Drag-and-drop reorder. A small activation distance keeps a plain click on
-  // the handle from starting a drag; the keyboard sensor makes it accessible.
+  // the card from starting a drag; the keyboard sensor makes it accessible.
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, {
@@ -264,49 +349,44 @@ export function OverviewPage() {
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    const oldIndex = metricStats.findIndex((s) => s.id === active.id);
-    const newIndex = metricStats.findIndex((s) => s.id === over.id);
+    const oldIndex = combinedIds.indexOf(String(active.id));
+    const newIndex = combinedIds.indexOf(String(over.id));
     if (oldIndex < 0 || newIndex < 0) return;
-    const reorderedMetrics = arrayMove(metricStats, oldIndex, newIndex);
-    // Persist the FULL id order (reordered metrics + the untouched manual cards)
-    // so the optimistic cache keeps every card and manual positions stay valid.
-    reorderMutation.mutate(
-      [...reorderedMetrics, ...manualStats].map((s) => s.id),
-    );
+    const reordered = arrayMove(combinedIds, oldIndex, newIndex);
+    reorderMutation.mutate(reordered);
   };
 
-  // Manual cards reorder within their own section; same "persist the full id
-  // order" contract, with the metric cards left untouched.
-  const handleManualDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const oldIndex = manualStats.findIndex((s) => s.id === active.id);
-    const newIndex = manualStats.findIndex((s) => s.id === over.id);
-    if (oldIndex < 0 || newIndex < 0) return;
-    const reorderedManual = arrayMove(manualStats, oldIndex, newIndex);
-    reorderMutation.mutate(
-      [...metricStats, ...reorderedManual].map((s) => s.id),
-    );
-  };
-
-  const manualIds = useMemo(() => manualStats.map((s) => s.id), [manualStats]);
+  // Funnel rows for the left card: each metric becomes a bar, normalized to
+  // the largest count so the widest bar fills the track.
+  const funnelMax = useMemo(
+    () => metricStats.reduce((m, s) => Math.max(m, s.count), 0),
+    [metricStats],
+  );
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div className="min-w-0">
-          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-            <LayoutDashboard className="h-6 w-6 text-primary" />
-            Overview
-          </h1>
+    <div className="mx-auto max-w-[1240px] px-6 py-6 lg:px-8 lg:py-8">
+      {/* Page header */}
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <span className="inline-flex text-primary">
+              <LayoutGrid className="h-[18px] w-[18px]" strokeWidth={1.7} />
+            </span>
+            <h1 className="text-[23px] font-semibold tracking-tight">
+              Overview
+            </h1>
+          </div>
+          <p className="mt-1.5 max-w-[620px] text-[13.5px] text-ink-muted">
+            What needs you across your pipeline today. Drag cards to reorder.
+          </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Select value={jobFilter} onValueChange={(v) => setJobFilter(v)}>
             <SelectTrigger
               className={cn(
-                "h-8 w-[150px] shrink-0 text-xs",
+                "h-9 w-[170px] shrink-0 rounded-full border-[var(--field-border)] bg-surface text-[12.5px]",
                 jobFilter !== "all" &&
-                  "border-primary bg-primary/10 text-primary",
+                  "border-primary bg-[var(--accent-soft)] text-primary",
               )}
               aria-label="Job"
             >
@@ -321,34 +401,15 @@ export function OverviewPage() {
             </SelectContent>
           </Select>
           <Button
-            variant="outline"
+            variant="secondary"
             size="sm"
             onClick={() => setFunnelOpen(true)}
             // Only filter cards become funnel stages, so counting every card
             // would enable the button on a board the drawer renders empty.
             disabled={metricStats.length < 2}
           >
-            <Filter className="h-4 w-4" />
-            View Funnel
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => refetch()}
-            disabled={isFetching}
-          >
-            <RefreshCw
-              className={isFetching ? "h-4 w-4 animate-spin" : "h-4 w-4"}
-            />
-            Refresh
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setManualCreateOpen(true)}
-          >
-            <SquarePlus className="h-4 w-4" />
-            Add card
+            <FunnelIcon className="h-3.5 w-3.5" />
+            View funnel
           </Button>
           <Button size="sm" onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4" />
@@ -357,115 +418,88 @@ export function OverviewPage() {
         </div>
       </div>
 
-      {/* Manual cards: a title + a number the admin typed. Shown directly under
-          the header, kept separate from the live filter metrics below. Drag to
-          reorder, pencil to edit. */}
-      {!isLoading && !isError && manualStats.length > 0 ? (
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragEnd={handleManualDragEnd}
-        >
-          <SortableContext items={manualIds} strategy={rectSortingStrategy}>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
-              {manualStats.map((stat) => (
-                <SortableManualCard
-                  key={stat.id}
-                  stat={stat}
-                  onEdit={() => setEditManualTarget(stat)}
-                  onDelete={() => setDeleteTarget(stat)}
-                />
-              ))}
-            </div>
-          </SortableContext>
-        </DndContext>
-      ) : null}
-
+      {/* KPI grid — filter metrics and manual cards flow together so drag
+          reorder can move either kind and the layout matches the design. */}
       {isLoading ? (
-        <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
+        <div className="flex items-center justify-center gap-2 rounded-2xl border border-line bg-surface py-16 text-ink-muted">
           <Loader2 className="h-4 w-4 animate-spin" />
           Loading metrics...
         </div>
       ) : isError ? (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
-            <p className="text-sm text-destructive">
+        <div className="rounded-2xl border border-line bg-surface">
+          <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
+            <p className="text-[13.5px] text-[var(--danger)]">
               Could not load your metrics.
             </p>
-            <Button variant="outline" size="sm" onClick={() => refetch()}>
+            <Button variant="secondary" size="sm" onClick={() => refetch()}>
               Try again
             </Button>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       ) : !stats || stats.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
-              <LayoutDashboard className="h-6 w-6" />
-            </div>
-            <div>
-              <p className="font-medium">No metrics yet</p>
-              <p className="text-sm text-muted-foreground">
-                Add a live metric (for example the number of applicants at
-                pre-screened), or a manual card with a title and number you type
-                yourself.
-              </p>
-            </div>
+        <div className="rounded-2xl border border-line bg-surface">
+          <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
+            <span className="flex h-[50px] w-[50px] items-center justify-center rounded-[14px] bg-accent text-primary">
+              <LayoutGrid className="h-[26px] w-[26px]" strokeWidth={1.6} />
+            </span>
+            <h3 className="text-[16px] font-semibold">No metrics yet</h3>
+            <p className="max-w-[340px] text-[13.5px] text-ink-muted">
+              Add a live metric — for example the number of applicants at
+              pre-screened — to start building your pipeline funnel.
+            </p>
             <div className="flex flex-wrap items-center justify-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setManualCreateOpen(true)}
-              >
-                <SquarePlus className="h-4 w-4" />
-                Add card
-              </Button>
               <Button size="sm" onClick={() => setCreateOpen(true)}>
                 <Plus className="h-4 w-4" />
                 Add metric
               </Button>
             </div>
-          </CardContent>
-        </Card>
-      ) : metricStats.length > 0 ? (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
-              <Checkbox
-                checked={headerChecked}
-                onCheckedChange={toggleSelectAll}
-                aria-label="Select all metrics"
-              />
-              {selectedCount > 0 ? `${selectedCount} selected` : "Select all"}
-            </label>
-            {selectedCount > 0 ? (
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setSelectedIds(new Set())}
-                >
-                  <X className="h-4 w-4" />
-                  Clear
-                </Button>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => setBulkDeleteOpen(true)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Delete selected
-                </Button>
-              </div>
-            ) : null}
           </div>
+        </div>
+      ) : (
+        <>
+          {/* Select / bulk-delete toolbar (only relevant to filter metrics). */}
+          {metricStats.length > 0 ? (
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <label className="flex cursor-pointer items-center gap-2 text-[12.5px] text-ink-muted">
+                <Checkbox
+                  checked={headerChecked}
+                  onCheckedChange={toggleSelectAll}
+                  aria-label="Select all metrics"
+                />
+                {selectedCount > 0
+                  ? `${selectedCount} selected`
+                  : "Select all metrics"}
+              </label>
+              {selectedCount > 0 ? (
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelectedIds(new Set())}
+                  >
+                    <X className="h-4 w-4" />
+                    Clear
+                  </Button>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => setBulkDeleteOpen(true)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Delete selected
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
             onDragEnd={handleDragEnd}
           >
-            <SortableContext items={allIds} strategy={rectSortingStrategy}>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
+            <SortableContext items={combinedIds} strategy={rectSortingStrategy}>
+              <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 md:[grid-template-columns:repeat(auto-fit,minmax(210px,1fr))]">
                 {metricStats.map((stat) => (
                   <SortableStatCard
                     key={stat.id}
@@ -476,11 +510,131 @@ export function OverviewPage() {
                     onDelete={() => setDeleteTarget(stat)}
                   />
                 ))}
+                {manualStats.map((stat) => (
+                  <SortableManualCard
+                    key={stat.id}
+                    stat={stat}
+                    onDelete={() => setDeleteTarget(stat)}
+                  />
+                ))}
               </div>
             </SortableContext>
           </DndContext>
-        </div>
-      ) : null}
+
+          {/* Two-column: pipeline funnel + awaiting-decision list. Render even
+              when metricStats is empty so the shell is present; the funnel body
+              shows a hint until the operator adds a filter metric. */}
+          <div className="grid grid-cols-1 items-start gap-4 md:[grid-template-columns:1.15fr_1fr]">
+            <div className="rounded-2xl border border-line bg-surface">
+              <div className="flex items-center justify-between border-b border-line px-[18px] py-4">
+                <h2 className="text-[15px] font-semibold">Pipeline funnel</h2>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setFunnelOpen(true)}
+                  disabled={metricStats.length < 2}
+                >
+                  Expand funnel
+                  <ChevronRight className="h-3.5 w-3.5" strokeWidth={1.8} />
+                </Button>
+              </div>
+              <div className="scroll grid max-h-[360px] gap-2.5 overflow-y-auto px-[18px] py-4">
+                {metricStats.length === 0 ? (
+                  <p className="py-8 text-center text-[13px] text-ink-muted">
+                    Add a filter metric to build your pipeline funnel.
+                  </p>
+                ) : (
+                  metricStats.map((stat, i) => {
+                    const color = FUNNEL_COLORS[i % FUNNEL_COLORS.length];
+                    const pct =
+                      funnelMax > 0
+                        ? Math.max(
+                            6,
+                            Math.round((stat.count / funnelMax) * 100),
+                          )
+                        : 0;
+                    return (
+                      <div
+                        key={stat.id}
+                        className="grid items-center gap-3 [grid-template-columns:110px_1fr_34px]"
+                      >
+                        <span
+                          className="truncate text-[13px] font-medium text-ink-2"
+                          title={stat.title}
+                        >
+                          {stat.title}
+                        </span>
+                        <div className="h-[26px] overflow-hidden rounded-lg bg-surface-3">
+                          <div
+                            className="h-full opacity-90"
+                            style={{
+                              width: `${pct}%`,
+                              minWidth: stat.count > 0 ? 8 : 0,
+                              background: color,
+                            }}
+                          />
+                        </div>
+                        <span
+                          className="mono text-right text-[13px] font-semibold"
+                          title={stat.count.toLocaleString()}
+                        >
+                          {formatCount(stat.count)}
+                        </span>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-line bg-surface">
+              <div className="flex items-center gap-2 border-b border-line px-[18px] py-4">
+                <span className="inline-flex text-[var(--warning)]">
+                  <Clock className="h-[18px] w-[18px]" strokeWidth={1.8} />
+                </span>
+                <h2 className="text-[15px] font-semibold">
+                  Awaiting your decision
+                </h2>
+                <span className="mono ml-auto rounded-md bg-[var(--warning-soft)] px-2 py-0.5 text-[11.5px] font-semibold text-[var(--warning)]">
+                  {awaiting.length} open
+                </span>
+              </div>
+              {awaiting.length === 0 ? (
+                <div className="py-8 text-center text-[13px] text-ink-muted">
+                  All caught up — no interviews waiting.
+                </div>
+              ) : (
+                <div className="scroll max-h-[360px] overflow-y-auto">
+                  {awaiting.map((cand) => (
+                    <button
+                      key={cand._id}
+                      type="button"
+                      onClick={() => setDrawerCandidateId(cand._id)}
+                      className="flex w-full items-center gap-3 border-b border-line px-[18px] py-3.5 text-left last:border-b-0 hover:bg-hover"
+                    >
+                      <span className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-accent text-[12px] font-bold text-primary">
+                        {initials(cand.fullName)}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[13.5px] font-semibold text-ink">
+                          {cand.fullName}
+                        </div>
+                        <div className="truncate text-[12px] text-ink-muted">
+                          {cand.currentStatusId?.label ?? "Scored"}
+                        </div>
+                      </div>
+                      <ChevronRight
+                        className="h-4 w-4 text-ink-subtle"
+                        strokeWidth={1.8}
+                      />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
 
       <OverviewFunnelDrawer
         open={funnelOpen}
@@ -509,27 +663,6 @@ export function OverviewPage() {
         }}
       />
 
-      <ManualCardDialog
-        open={manualCreateOpen}
-        editing={null}
-        onOpenChange={setManualCreateOpen}
-        onSaved={() => {
-          queryClient.invalidateQueries({ queryKey: STATS_QUERY_KEY });
-        }}
-      />
-
-      <ManualCardDialog
-        open={Boolean(editManualTarget)}
-        editing={editManualTarget}
-        onOpenChange={(open) => {
-          if (!open) setEditManualTarget(null);
-        }}
-        onSaved={() => {
-          queryClient.invalidateQueries({ queryKey: STATS_QUERY_KEY });
-          setEditManualTarget(null);
-        }}
-      />
-
       <DeleteStatDialog
         target={deleteTarget}
         onOpenChange={(open) => {
@@ -554,6 +687,13 @@ export function OverviewPage() {
           setBulkDeleteOpen(false);
         }}
       />
+
+      <InterviewDetailDrawer
+        sessionId={interviewSessionId}
+        onOpenChange={(open) => {
+          if (!open) setDrawerCandidateId(null);
+        }}
+      />
     </div>
   );
 }
@@ -570,7 +710,6 @@ function SortableStatCard(props: {
     attributes,
     listeners,
     setNodeRef,
-    setActivatorNodeRef,
     transform,
     transition,
     isDragging,
@@ -585,7 +724,6 @@ function SortableStatCard(props: {
       sortableRef={setNodeRef}
       style={style}
       isDragging={isDragging}
-      dragHandleRef={setActivatorNodeRef}
       dragHandleListeners={listeners}
       dragHandleAttributes={attributes}
     />
@@ -602,11 +740,17 @@ interface StatCardProps {
   sortableRef?: (node: HTMLElement | null) => void;
   style?: CSSProperties;
   isDragging?: boolean;
-  dragHandleRef?: (node: HTMLElement | null) => void;
   dragHandleListeners?: ReturnType<typeof useSortable>["listeners"];
   dragHandleAttributes?: ReturnType<typeof useSortable>["attributes"];
 }
 
+/**
+ * KPI card for a live filter metric. The whole card is the drag activator (a
+ * short activation distance keeps a click on a nested button from starting a
+ * drag). Header shows the drag glyph + label on the left; the right slot shows
+ * a small filter icon by default and swaps to the checkbox + edit/delete row
+ * on hover (or when the card is already selected).
+ */
 function StatCard({
   stat,
   selected,
@@ -616,160 +760,163 @@ function StatCard({
   sortableRef,
   style,
   isDragging,
-  dragHandleRef,
   dragHandleListeners,
   dragHandleAttributes,
 }: StatCardProps) {
+  const shown = stat.criteria.slice(-1);
+  const hidden = stat.criteria.slice(0, stat.criteria.length - shown.length);
   return (
-    <Card
+    <div
       ref={sortableRef}
       style={style}
+      {...dragHandleAttributes}
+      {...dragHandleListeners}
       className={cn(
-        "flex flex-col overflow-hidden transition-shadow",
+        "group relative cursor-grab select-none rounded-2xl border border-line bg-surface p-4 transition-shadow active:cursor-grabbing",
         selected && "ring-2 ring-primary ring-offset-2 ring-offset-background",
-        isDragging && "z-10 opacity-60 shadow-lg",
+        isDragging && "z-10 opacity-70 shadow-lg",
       )}
     >
-      <CardHeader className="flex-row items-start justify-between gap-1.5 space-y-0 p-3 pb-2">
-        <div className="flex min-w-0 items-start gap-2">
-          <Checkbox
-            checked={selected}
-            onCheckedChange={() => onToggleSelect()}
-            aria-label={`Select ${stat.title}`}
-            className="mt-0.5 shrink-0"
-          />
-          <CardTitle
-            className="line-clamp-2 min-w-0 wrap-break-word text-sm leading-snug"
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span
+            className="select-none text-[13px] leading-none text-ink-subtle"
+            aria-hidden="true"
+          >
+            ⠿
+          </span>
+          <span
+            className="truncate text-[12.5px] font-medium text-ink-muted"
             title={stat.title}
           >
             {stat.title}
-          </CardTitle>
+          </span>
         </div>
-        <div className="-mr-1 -mt-1 flex shrink-0 items-center">
-          {dragHandleListeners ? (
+        {/* Fixed-width, stacked area — the Filter glyph and the hover
+            controls occupy the SAME slot so the header layout can't shift
+            when the pointer enters/leaves. Two absolute layers cross-fade
+            via opacity instead of `hidden`, which was the jitter cause. */}
+        <div className="relative h-5 w-[74px] shrink-0">
+          {/* Default: small filter glyph. */}
+          <span
+            className={cn(
+              "absolute inset-y-0 right-0 flex items-center text-ink-subtle transition-opacity",
+              selected ? "opacity-0" : "opacity-100 group-hover:opacity-0",
+            )}
+            aria-hidden="true"
+          >
+            <Filter className="h-3.5 w-3.5" strokeWidth={1.7} />
+          </span>
+          {/* Hover / selected: checkbox + edit + delete. */}
+          <div
+            className={cn(
+              "absolute inset-y-0 right-0 flex items-center gap-0.5 transition-opacity",
+              selected
+                ? "opacity-100"
+                : "opacity-0 group-hover:opacity-100 focus-within:opacity-100",
+            )}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <Checkbox
+              checked={selected}
+              onCheckedChange={() => onToggleSelect()}
+              aria-label={`Select ${stat.title}`}
+              className="mr-1"
+            />
             <button
               type="button"
-              ref={dragHandleRef}
-              {...dragHandleAttributes}
-              {...dragHandleListeners}
-              className="cursor-grab touch-none rounded p-1 text-muted-foreground/70 hover:text-foreground active:cursor-grabbing"
-              aria-label={`Drag to reorder ${stat.title}`}
-              title="Drag to reorder"
+              className="rounded-md p-1 text-ink-subtle hover:bg-hover hover:text-ink"
+              aria-label={`Edit ${stat.title}`}
+              title="Edit metric"
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit();
+              }}
             >
-              <GripVertical className="h-4 w-4" />
+              <Pencil className="h-3.5 w-3.5" strokeWidth={1.8} />
             </button>
-          ) : null}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-foreground"
-            aria-label={`Edit ${stat.title}`}
-            title="Edit metric"
-            onClick={onEdit}
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-destructive"
-            aria-label={`Delete ${stat.title}`}
-            title="Delete metric"
-            onClick={onDelete}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
+            <button
+              type="button"
+              className="rounded-md p-1 text-ink-subtle hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
+              aria-label={`Delete ${stat.title}`}
+              title="Delete metric"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
+            >
+              <Trash2 className="h-3.5 w-3.5" strokeWidth={1.8} />
+            </button>
+          </div>
         </div>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3.5 p-3 pt-0">
-        <p
-          className="text-2xl font-semibold leading-none tabular-nums tracking-tight"
+      </div>
+
+      <div className="mt-2 flex items-baseline gap-2">
+        <span
+          className="mono text-[28px] font-semibold tracking-[-0.02em]"
           title={stat.count.toLocaleString()}
         >
           {formatCount(stat.count)}
-        </p>
+        </span>
+      </div>
+
+      <div className="mt-0.5 min-h-[16px] text-[11.5px] text-ink-subtle">
         {stat.criteria.length === 0 ? (
-          <Badge variant="muted" className="w-fit max-w-full font-normal">
-            All applicants
-          </Badge>
+          <span>All applicants</span>
         ) : (
           <TooltipProvider delayDuration={300}>
             <div className="flex flex-wrap items-center gap-1.5">
-              {(() => {
-                // Mirror the Applicants table's chip overflow: show only the
-                // latest (last-added) filter inline and tuck the rest behind a
-                // "+N" badge revealed on hover, so a small square card stays a
-                // single tidy row.
-                const shown = stat.criteria.slice(-1);
-                const hidden = stat.criteria.slice(
-                  0,
-                  stat.criteria.length - shown.length,
-                );
-                return (
-                  <>
-                    {shown.map((criterion) => (
-                      <Badge
-                        key={criterion.key}
-                        variant="secondary"
-                        className="min-w-0 max-w-full"
-                        title={criterion.label}
-                      >
-                        <span className="min-w-0 truncate">
+              {shown.map((criterion) => (
+                <span
+                  key={criterion.key}
+                  className="inline-flex min-w-0 max-w-full items-center rounded-full bg-surface-3 px-2 py-0.5 text-[11px] font-semibold text-ink-2"
+                  title={criterion.label}
+                >
+                  <span className="min-w-0 truncate">{criterion.label}</span>
+                </span>
+              ))}
+              {hidden.length > 0 ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex shrink-0 cursor-pointer items-center rounded-full bg-surface-3 px-2 py-0.5 text-[11px] font-semibold text-ink-muted">
+                      +{hidden.length}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    <p className="mb-2 font-medium">
+                      {hidden.length} more{" "}
+                      {hidden.length === 1 ? "filter" : "filters"}
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {hidden.map((criterion) => (
+                        <span
+                          key={criterion.key}
+                          className="inline-flex items-center justify-center rounded-full bg-surface-3 px-2 py-0.5 text-[11px] font-semibold text-ink-2"
+                        >
                           {criterion.label}
                         </span>
-                      </Badge>
-                    ))}
-                    {hidden.length > 0 ? (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Badge
-                            variant="muted"
-                            className="shrink-0 cursor-pointer"
-                          >
-                            +{hidden.length}
-                          </Badge>
-                        </TooltipTrigger>
-                        <TooltipContent side="top">
-                          <p className="mb-2 font-medium">
-                            {hidden.length} more{" "}
-                            {hidden.length === 1 ? "filter" : "filters"}
-                          </p>
-                          <div className="grid grid-cols-2 gap-2">
-                            {hidden.map((criterion) => (
-                              <Badge
-                                key={criterion.key}
-                                variant="secondary"
-                                className="justify-center"
-                              >
-                                {criterion.label}
-                              </Badge>
-                            ))}
-                          </div>
-                        </TooltipContent>
-                      </Tooltip>
-                    ) : null}
-                  </>
-                );
-              })()}
+                      ))}
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
+              ) : null}
             </div>
           </TooltipProvider>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 
 /** Sortable wrapper: feeds dnd-kit's refs/listeners into the visual ManualCard. */
 function SortableManualCard(props: {
   stat: OverviewStat;
-  onEdit: () => void;
   onDelete: () => void;
 }) {
   const {
     attributes,
     listeners,
     setNodeRef,
-    setActivatorNodeRef,
     transform,
     transition,
     isDragging,
@@ -784,7 +931,6 @@ function SortableManualCard(props: {
       sortableRef={setNodeRef}
       style={style}
       isDragging={isDragging}
-      dragHandleRef={setActivatorNodeRef}
       dragHandleListeners={listeners}
       dragHandleAttributes={attributes}
     />
@@ -793,94 +939,99 @@ function SortableManualCard(props: {
 
 interface ManualCardProps {
   stat: OverviewStat;
-  onEdit: () => void;
   onDelete: () => void;
   // Drag-and-drop wiring from useSortable; when omitted the card is static.
   sortableRef?: (node: HTMLElement | null) => void;
   style?: CSSProperties;
   isDragging?: boolean;
-  dragHandleRef?: (node: HTMLElement | null) => void;
   dragHandleListeners?: ReturnType<typeof useSortable>["listeners"];
   dragHandleAttributes?: ReturnType<typeof useSortable>["attributes"];
 }
 
 /**
- * A manual card: just the title and the fixed number the admin typed. Rendered
- * in its own section above the filter-metric grid, so it has no kind badge and
- * no select checkbox, only drag-to-reorder, edit, and delete actions.
+ * A manual card: just the title and the fixed number the admin typed. Shares
+ * the KPI grid with filter metrics; has no select checkbox (bulk delete is
+ * metric-only). Editing is no longer offered — manual cards can be deleted
+ * only. The header shows a SquarePlus glyph by default and swaps to a delete
+ * icon on hover.
  */
 function ManualCard({
   stat,
-  onEdit,
   onDelete,
   sortableRef,
   style,
   isDragging,
-  dragHandleRef,
   dragHandleListeners,
   dragHandleAttributes,
 }: ManualCardProps) {
   return (
-    <Card
+    <div
       ref={sortableRef}
       style={style}
+      {...dragHandleAttributes}
+      {...dragHandleListeners}
       className={cn(
-        "flex flex-col overflow-hidden transition-shadow",
-        isDragging && "z-10 opacity-60 shadow-lg",
+        "group relative cursor-grab select-none rounded-2xl border border-line bg-surface p-4 transition-shadow active:cursor-grabbing",
+        isDragging && "z-10 opacity-70 shadow-lg",
       )}
     >
-      <CardHeader className="flex-row items-start justify-between gap-1.5 space-y-0 p-3 pb-2">
-        <CardTitle
-          className="line-clamp-2 min-w-0 wrap-break-word text-sm leading-snug"
-          title={stat.title}
-        >
-          {stat.title}
-        </CardTitle>
-        <div className="-mr-1 -mt-1 flex shrink-0 items-center">
-          {dragHandleListeners ? (
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span
+            className="select-none text-[13px] leading-none text-ink-subtle"
+            aria-hidden="true"
+          >
+            ⠿
+          </span>
+          <span
+            className="truncate text-[12.5px] font-medium text-ink-muted"
+            title={stat.title}
+          >
+            {stat.title}
+          </span>
+        </div>
+        {/* Cross-fade in a fixed slot — same fix as FilterMetricCard so the
+            manual-card header can't nudge on hover either. */}
+        <div className="relative h-5 w-6 shrink-0">
+          <span
+            className="absolute inset-y-0 right-0 flex items-center text-ink-subtle transition-opacity group-hover:opacity-0"
+            aria-hidden="true"
+          >
+            <SquarePlus className="h-3.5 w-3.5" strokeWidth={1.7} />
+          </span>
+          <div
+            className="absolute inset-y-0 right-0 flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100"
+            onPointerDown={(e) => e.stopPropagation()}
+          >
             <button
               type="button"
-              ref={dragHandleRef}
-              {...dragHandleAttributes}
-              {...dragHandleListeners}
-              className="cursor-grab touch-none rounded p-1 text-muted-foreground/70 hover:text-foreground active:cursor-grabbing"
-              aria-label={`Drag to reorder ${stat.title}`}
-              title="Drag to reorder"
+              className="rounded-md p-1 text-ink-subtle hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
+              aria-label={`Delete ${stat.title}`}
+              title="Delete card"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
             >
-              <GripVertical className="h-4 w-4" />
+              <Trash2 className="h-3.5 w-3.5" strokeWidth={1.8} />
             </button>
-          ) : null}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-foreground"
-            aria-label={`Edit ${stat.title}`}
-            title="Edit card"
-            onClick={onEdit}
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-destructive"
-            aria-label={`Delete ${stat.title}`}
-            title="Delete card"
-            onClick={onDelete}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
+          </div>
         </div>
-      </CardHeader>
-      <CardContent className="p-3 pt-0">
-        <p
-          className="text-2xl font-semibold leading-none tabular-nums tracking-tight"
+      </div>
+
+      <div className="mt-2 flex items-baseline gap-2">
+        <span
+          className="mono text-[28px] font-semibold tracking-[-0.02em]"
           title={stat.count.toLocaleString()}
         >
           {formatCount(stat.count)}
-        </p>
-      </CardContent>
-    </Card>
+        </span>
+      </div>
+
+      <div className="mt-0.5 min-h-[16px] text-[11.5px] text-ink-subtle">
+        Manual entry
+      </div>
+    </div>
   );
 }
 
@@ -999,59 +1150,58 @@ function StatDialog({ open, editing, onOpenChange, onSaved }: StatDialogProps) {
           <div className="space-y-1.5">
             <label
               htmlFor="overview-stat-title"
-              className="text-sm font-medium"
+              className="mb-1.5 block text-[13px] font-semibold text-ink"
             >
               Title
             </label>
-            <Input
+            <input
               id="overview-stat-title"
               value={title}
               maxLength={120}
               placeholder="e.g. Applicants at pre-screened"
               onChange={(e) => setTitle(e.target.value)}
               autoComplete="off"
+              className="h-11 w-full rounded-lg border border-[var(--field-border)] bg-surface px-3.5 text-[14px] text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)]"
             />
           </div>
 
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">Filters</span>
-              <span className="text-xs text-muted-foreground">
+              <span className="text-[13px] font-semibold text-ink">
+                Filters
+              </span>
+              <span className="text-[12px] text-ink-muted">
                 {selected.length === 0
                   ? "None selected, counts all applicants"
                   : `${selected.length} selected`}
               </span>
             </div>
-            <div className="max-h-72 overflow-y-auto rounded-md border border-border">
+            <div className="max-h-72 overflow-y-auto rounded-lg border border-line">
               {optionsLoading ? (
-                <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+                <div className="flex items-center justify-center gap-2 py-10 text-[13px] text-ink-muted">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Loading filters...
                 </div>
               ) : grouped.length === 0 ? (
-                <div className="py-10 text-center text-sm text-muted-foreground">
+                <div className="py-10 text-center text-[13px] text-ink-muted">
                   No filters available.
                 </div>
               ) : (
                 grouped.map((section) => (
                   <div
                     key={section.group}
-                    className="border-b border-border last:border-b-0"
+                    className="border-b border-line last:border-b-0"
                   >
-                    <p className="bg-muted/50 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    <p className="bg-surface-3 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-muted">
                       {section.group}
                     </p>
                     <div className="p-1">
                       {section.options.map((option) => {
                         const checked = selectedSet.has(option.key);
                         return (
-                          // The Checkbox is a <button>: labelable, so clicking
-                          // the text forwards one click to it, and interactive
-                          // content, so clicking the box itself doesn't also
-                          // fire the label. Either way it toggles exactly once.
                           <label
                             key={option.key}
-                            className="flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
+                            className="flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-[13.5px] text-ink transition-colors hover:bg-hover"
                           >
                             <Checkbox
                               checked={checked}
@@ -1071,7 +1221,7 @@ function StatDialog({ open, editing, onOpenChange, onSaved }: StatDialogProps) {
           <DialogFooter>
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               onClick={() => onOpenChange(false)}
               disabled={mutation.isPending}
             >
@@ -1087,158 +1237,6 @@ function StatDialog({ open, editing, onOpenChange, onSaved }: StatDialogProps) {
                 "Save changes"
               ) : (
                 "Create metric"
-              )}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-interface ManualCardDialogProps {
-  open: boolean;
-  /** The manual card being edited, or null to create a new one. */
-  editing: OverviewStat | null;
-  onOpenChange: (open: boolean) => void;
-  onSaved: () => void;
-}
-
-/**
- * Create or edit a manual card: just a title and a fixed number the admin types.
- * Unlike a filter metric, this number is stored and shown verbatim, it never
- * recalculates from candidate data and ignores the page Job overlay.
- */
-function ManualCardDialog({
-  open,
-  editing,
-  onOpenChange,
-  onSaved,
-}: ManualCardDialogProps) {
-  const isEditing = Boolean(editing);
-  const [title, setTitle] = useState("");
-  // Kept as the raw string so the field can be empty while typing; parsed and
-  // validated to a non-negative integer on submit.
-  const [value, setValue] = useState("");
-
-  // Prefill from the edited card each time the dialog opens (or clear for new).
-  useEffect(() => {
-    if (!open) return;
-    setTitle(editing?.title ?? "");
-    setValue(editing ? String(editing.value) : "");
-  }, [open, editing]);
-
-  const mutation = useMutation({
-    mutationFn: (payload: { title: string; value: number }) =>
-      editing
-        ? updateManualOverviewStat(editing.id, payload)
-        : createManualOverviewStat(payload),
-    onSuccess: () => {
-      toast.success(isEditing ? "Card updated." : "Card created.");
-      onOpenChange(false);
-      onSaved();
-    },
-    onError: (err: unknown) => {
-      toast.error(
-        errorMessage(
-          err,
-          isEditing ? "Could not update the card." : "Could not create the card.",
-        ),
-      );
-    },
-  });
-
-  const trimmedTitle = title.trim();
-  const parsedValue = Number(value);
-  const validValue =
-    value.trim().length > 0 &&
-    Number.isInteger(parsedValue) &&
-    parsedValue >= 0;
-  const canSubmit =
-    trimmedTitle.length > 0 && validValue && !mutation.isPending;
-
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!next && mutation.isPending) return;
-        onOpenChange(next);
-      }}
-    >
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>{isEditing ? "Edit card" : "New card"}</DialogTitle>
-          <DialogDescription>
-            A simple card with a title and a number you type yourself. It is
-            saved for the whole team and never recalculates, it always shows the
-            number you enter here.
-          </DialogDescription>
-        </DialogHeader>
-
-        <form
-          className="space-y-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!canSubmit) return;
-            mutation.mutate({ title: trimmedTitle, value: parsedValue });
-          }}
-        >
-          <div className="space-y-1.5">
-            <label
-              htmlFor="overview-manual-title"
-              className="text-sm font-medium"
-            >
-              Title
-            </label>
-            <Input
-              id="overview-manual-title"
-              value={title}
-              maxLength={120}
-              placeholder="e.g. Offers accepted"
-              onChange={(e) => setTitle(e.target.value)}
-              autoComplete="off"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label
-              htmlFor="overview-manual-value"
-              className="text-sm font-medium"
-            >
-              Number
-            </label>
-            <Input
-              id="overview-manual-value"
-              type="number"
-              inputMode="numeric"
-              min={0}
-              step={1}
-              value={value}
-              placeholder="e.g. 42"
-              onChange={(e) => setValue(e.target.value)}
-              autoComplete="off"
-            />
-          </div>
-
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-              disabled={mutation.isPending}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" disabled={!canSubmit}>
-              {mutation.isPending ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  {isEditing ? "Saving..." : "Creating..."}
-                </>
-              ) : isEditing ? (
-                "Save changes"
-              ) : (
-                "Create card"
               )}
             </Button>
           </DialogFooter>
@@ -1292,14 +1290,14 @@ function DeleteStatDialog({
         </DialogHeader>
         <DialogFooter>
           <Button
-            variant="outline"
+            variant="secondary"
             onClick={() => onOpenChange(false)}
             disabled={mutation.isPending}
           >
             Cancel
           </Button>
           <Button
-            variant="destructive"
+            variant="danger"
             disabled={!target || mutation.isPending}
             onClick={() => {
               if (target) mutation.mutate(target.id);
@@ -1369,14 +1367,14 @@ function BulkDeleteStatsDialog({
         </DialogHeader>
         <DialogFooter>
           <Button
-            variant="outline"
+            variant="secondary"
             onClick={() => onOpenChange(false)}
             disabled={mutation.isPending}
           >
             Cancel
           </Button>
           <Button
-            variant="destructive"
+            variant="danger"
             disabled={ids.length === 0 || mutation.isPending}
             onClick={() => mutation.mutate(ids)}
           >

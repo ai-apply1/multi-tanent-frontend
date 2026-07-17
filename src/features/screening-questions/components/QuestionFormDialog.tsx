@@ -1,19 +1,9 @@
 import { useEffect, useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { Loader2, Plus, Save, Sparkles, Trash2, Undo2 } from "lucide-react"
+import { Loader2, Minus, Plus, Sparkles, Trash2, Undo2 } from "lucide-react"
 import toast from "react-hot-toast"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle
-} from "@/components/ui/dialog"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
+import { Dialog, DialogContent } from "@/components/ui/dialog"
 import {
   Select,
   SelectContent,
@@ -38,7 +28,6 @@ import {
   type ScreeningQuestion
 } from "@/features/screening-questions/types"
 import { errorMessage as apiError } from "@/lib/errors"
-import { cn } from "@/lib/utils"
 
 interface QuestionFormDialogProps {
   open: boolean
@@ -69,14 +58,45 @@ const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim()
 const DEFAULT_SUGGEST_COUNT = 3
 
 /**
+ * The bank has no first-class `category` column — it lives inside the
+ * question's tag list, so a shared vocabulary keeps the filter on the
+ * bank page useful. Storing the category as a plain tag (rather than a
+ * `category:X` prefix) means it round-trips through the existing tags
+ * filter without a special case.
+ */
+const CATEGORY_OPTIONS = [
+  "Introductory",
+  "Behavioral",
+  "Technical",
+  "System Design",
+  "Culture Fit",
+  "Situational"
+] as const
+type QuestionCategory = (typeof CATEGORY_OPTIONS)[number]
+const CATEGORY_SET = new Set<string>(CATEGORY_OPTIONS)
+
+/** Pluck the first tag we recognise as a category, if any. */
+function categoryFromTags(tags: string[] | undefined): QuestionCategory | "" {
+  const hit = tags?.find((t) => CATEGORY_SET.has(t))
+  return (hit as QuestionCategory | undefined) ?? ""
+}
+function withCategoryTag(
+  tags: string[],
+  category: QuestionCategory | ""
+): string[] {
+  // Drop every recognised category and reinsert the chosen one at the
+  // front — keeps a single source of truth without mutating unrelated tags.
+  const cleaned = tags.filter((t) => !CATEGORY_SET.has(t))
+  return category ? [category, ...cleaned] : cleaned
+}
+
+/**
  * Create / edit one bank question and all of its wordings.
  *
- * The list row IS the full record, so there's no detail fetch — everything
- * the form edits comes straight off the row and saves in one request.
- *
- * Variants are what make two candidates for the same job hear different
- * words, so the editor's whole job is to keep them synonyms: same meaning,
- * same difficulty. The AI drafts them; a human approves them.
+ * The canonical wording (`variants[0]`) is what the top textarea edits — the
+ * "question" the operator thinks in. Extra wordings live below as a list of
+ * synonyms; the AI drafts them into a local pool, and the operator picks the
+ * ones worth keeping before they land in `variants[]`.
  */
 export function QuestionFormDialog({
   open,
@@ -97,9 +117,17 @@ export function QuestionFormDialog({
   // choose for the user (and the schema default only applies to writes the
   // DTO never lets through).
   const [difficulty, setDifficulty] = useState<DifficultyLevel | "">("")
+  const [category, setCategory] = useState<QuestionCategory | "">("")
   const [tags, setTags] = useState<string[]>([])
   /** How many drafts to ask for. Fewer may come back — see the suggest call. */
   const [suggestCount, setSuggestCount] = useState(DEFAULT_SUGGEST_COUNT)
+  /**
+   * Pool of AI-drafted wordings the reviewer hasn't decided on yet — kept
+   * separate from `variants[]` so nothing is committed until "Add selected"
+   * fires. `sel` is the tick state, keyed by draft index.
+   */
+  const [drafts, setDrafts] = useState<string[]>([])
+  const [draftSel, setDraftSel] = useState<Record<number, boolean>>({})
 
   const isEdit = Boolean(question)
 
@@ -117,8 +145,15 @@ export function QuestionFormDialog({
         : [{ text: "", retired: false }]
     )
     setDifficulty(question?.difficultyLevel ?? "")
-    setTags(question?.tags ?? [])
+    setCategory(categoryFromTags(question?.tags))
+    // Strip any recognised category tag from the visible tag list so the
+    // dropdown owns it and it can't be edited from two places.
+    setTags(
+      (question?.tags ?? []).filter((t) => !CATEGORY_SET.has(t))
+    )
     setSuggestCount(DEFAULT_SUGGEST_COUNT)
+    setDrafts([])
+    setDraftSel({})
   }, [open, question])
 
   const patch = (index: number, next: Partial<VariantDraft>) =>
@@ -129,6 +164,7 @@ export function QuestionFormDialog({
   const saveMutation = useMutation({
     mutationFn: (drafts: VariantDraft[]) => {
       if (!difficulty) throw new Error("difficulty is required")
+      const outboundTags = withCategoryTag(tags, category)
       if (question) {
         return updateScreeningQuestion(question._id, {
           // Order and every existing _id are preserved — the backend 422s
@@ -139,7 +175,7 @@ export function QuestionFormDialog({
             retired: v.retired
           })),
           difficultyLevel: difficulty,
-          tags
+          tags: outboundTags
         })
       }
       return createScreeningQuestion({
@@ -147,7 +183,7 @@ export function QuestionFormDialog({
         // all live, and the UI doesn't offer the toggle before first save.
         variants: drafts.map((v) => v.text.trim()),
         difficultyLevel: difficulty,
-        tags
+        tags: outboundTags
       })
     },
     onSuccess: () => {
@@ -172,7 +208,10 @@ export function QuestionFormDialog({
   const maxSuggest = Math.min(VARIANT_SUGGEST_MAX, Math.max(room, 0))
   // Clamp for DISPLAY too, not just on send: a picked 5 that silently becomes
   // 2 because rows were added afterwards would look like the AI ignored them.
-  const askFor = Math.min(Math.max(suggestCount, VARIANT_SUGGEST_MIN), maxSuggest)
+  const askFor = Math.min(
+    Math.max(suggestCount, VARIANT_SUGGEST_MIN),
+    Math.max(maxSuggest, VARIANT_SUGGEST_MIN)
+  )
 
   const suggestMutation = useMutation({
     mutationFn: () =>
@@ -181,29 +220,47 @@ export function QuestionFormDialog({
         ...(difficulty ? { difficultyLevel: difficulty } : {}),
         count: askFor
       }),
-    onSuccess: (drafts) => {
-      // The server already drops drafts that echo the source, but it has
-      // never seen the wordings sitting unsaved in this dialog — dedupe
-      // against what's actually on screen.
-      const seen = new Set(variants.map((v) => normalize(v.text)))
-      const fresh = drafts
+    onSuccess: (fresh) => {
+      // Dedupe against wordings already committed AND against drafts already
+      // sitting in the pool — the server hasn't seen either.
+      const seen = new Set([
+        ...variants.map((v) => normalize(v.text)),
+        ...drafts.map(normalize)
+      ])
+      const kept = fresh
         .filter((text) => !seen.has(normalize(text)))
         .slice(0, room)
-      if (fresh.length === 0) {
+      if (kept.length === 0) {
         toast("No new wordings came back — try rephrasing the original.")
         return
       }
-      setVariants((prev) => [
-        ...prev,
-        ...fresh.map((text) => ({ text, retired: false }))
-      ])
+      setDrafts(kept)
+      setDraftSel({})
       toast.success(
-        `Added ${fresh.length} draft${fresh.length === 1 ? "" : "s"} — edit or delete any that miss the mark.`
+        `Drafted ${kept.length} wording${kept.length === 1 ? "" : "s"} — pick the ones worth keeping.`
       )
     },
     onError: (err) => toast.error(apiError(err, "Could not draft variants."))
   })
 
+  const acceptSelectedDrafts = () => {
+    const picked = drafts.filter((_, i) => draftSel[i])
+    if (picked.length === 0) {
+      toast("Tick at least one wording to add.")
+      return
+    }
+    setVariants((prev) => [
+      ...prev,
+      ...picked.slice(0, room).map((text) => ({ text, retired: false }))
+    ])
+    setDrafts([])
+    setDraftSel({})
+    toast.success(
+      `Added ${picked.length} wording${picked.length === 1 ? "" : "s"}.`
+    )
+  }
+
+  const extras = variants.slice(1)
   const filled = variants.filter((v) => v.text.trim().length > 0)
   const anyEmpty = variants.some((v) => v.text.trim().length === 0)
   const originalEmpty = (variants[0]?.text.trim().length ?? 0) === 0
@@ -227,6 +284,8 @@ export function QuestionFormDialog({
     saveMutation.mutate(variants)
   }
 
+  const questionText = variants[0]?.text ?? ""
+
   return (
     <Dialog
       open={open}
@@ -235,247 +294,236 @@ export function QuestionFormDialog({
         onOpenChange(next)
       }}
     >
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
-        <form onSubmit={handleSubmit}>
-          <DialogHeader>
-            <DialogTitle>
-              {isEdit ? "Edit question" : "Add question"}
-            </DialogTitle>
-            <DialogDescription>
-              Jobs draw their screening questions from this bank. Each
-              candidate is asked ONE of the wordings below, picked at random —
-              so they must all ask the same thing in different words.
-            </DialogDescription>
-          </DialogHeader>
+      <DialogContent
+        hideCloseButton
+        className="max-w-[580px] gap-0 border-line bg-surface p-0 sm:max-w-[580px]"
+      >
+        <form onSubmit={handleSubmit} className="flex flex-col">
+          {/* Head */}
+          <div className="flex items-start justify-between gap-4 px-6 pt-[22px] pb-[14px]">
+            <div>
+              <h3 className="text-[18px] font-semibold text-ink">
+                {isEdit ? "Edit question" : "Add question"}
+              </h3>
+              <p className="mt-1.5 text-[13px] leading-relaxed text-ink-muted">
+                Jobs draw their screening questions from this bank. Editing the
+                wording here never changes a job that already uses the question.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => !saveMutation.isPending && onOpenChange(false)}
+              className="inline-flex text-ink-muted hover:text-ink"
+              aria-label="Close"
+            >
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 20 20"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.7}
+                strokeLinecap="round"
+              >
+                <path d="M5 5l10 10M15 5 5 15" />
+              </svg>
+            </button>
+          </div>
 
-          <div className="flex flex-col gap-5 py-4">
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <Label>Wordings</Label>
-                <span className="text-xs tabular-nums text-muted-foreground">
-                  {variants.filter((v) => !v.retired).length} askable ·{" "}
-                  {variants.length}/{QUESTION_VARIANTS_MAX}
+          {/* Body */}
+          <div className="grid max-h-[70vh] gap-4 overflow-y-auto px-6 pb-5">
+            {/* Question textarea */}
+            <div>
+              <div className="mb-1.5 flex items-center justify-between">
+                <label
+                  htmlFor="q-canonical"
+                  className="text-[13px] font-semibold text-ink"
+                >
+                  Question
+                </label>
+                <span className="text-[12px] text-ink-subtle tabular-nums">
+                  {questionText.length}/{QUESTION_TEXT_MAX_LENGTH}
                 </span>
               </div>
+              <textarea
+                id="q-canonical"
+                value={questionText}
+                rows={3}
+                maxLength={QUESTION_TEXT_MAX_LENGTH}
+                placeholder="Walk me through how you would design a rate limiter for a public API."
+                onChange={(e) => {
+                  setTouched(true)
+                  patch(0, { text: e.target.value })
+                }}
+                aria-invalid={touched && originalEmpty}
+                className="w-full resize-y rounded-lg border border-[var(--field-border)] bg-surface px-3.5 py-3 text-[14px] text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)]"
+              />
+              <p className="mt-1.5 text-[12px] text-ink-muted">
+                The canonical wording. Each interview asks an AI-paraphrased
+                variant of it.
+              </p>
+            </div>
 
-              {variants.map((v, i) => (
-                <div
-                  key={v._id ?? `draft-${i}`}
-                  className={cn(
-                    "flex flex-col gap-2 rounded-md border p-3",
-                    v.retired && "bg-muted/40"
-                  )}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-medium">
-                        {i === 0 ? "Original" : `Wording ${i + 1}`}
-                      </span>
-                      {v.retired && (
-                        <Badge variant="secondary" className="text-[10px]">
-                          Retired
-                        </Badge>
-                      )}
-                      {!v._id && isEdit && (
-                        <Badge variant="outline" className="text-[10px]">
-                          New
-                        </Badge>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-1">
-                      {/* An existing wording can only be retired — some
-                          interview may reference it by id. An unsaved draft
-                          has no id yet, so it can just go. */}
-                      {v._id ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 text-xs"
-                          disabled={saveMutation.isPending}
-                          onClick={() => patch(i, { retired: !v.retired })}
-                        >
-                          {v.retired ? (
-                            <>
-                              <Undo2 className="h-3.5 w-3.5" />
-                              Restore
-                            </>
-                          ) : (
-                            "Retire"
-                          )}
-                        </Button>
-                      ) : (
-                        variants.length > 1 && (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 text-xs text-destructive"
-                            aria-label={`Delete wording ${i + 1}`}
-                            disabled={saveMutation.isPending}
-                            onClick={() =>
-                              setVariants((prev) =>
-                                prev.filter((_, j) => j !== i)
-                              )
-                            }
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        )
-                      )}
-                    </div>
-                  </div>
-
-                  <Textarea
-                    value={v.text}
-                    onChange={(e) => {
-                      setTouched(true)
-                      patch(i, { text: e.target.value })
-                    }}
-                    rows={i === 0 ? 4 : 3}
-                    maxLength={QUESTION_TEXT_MAX_LENGTH}
-                    placeholder={
-                      i === 0
-                        ? "Walk me through how you would design a rate limiter for a public API."
-                        : "Another way of asking exactly the same thing."
-                    }
-                    autoFocus={i === 0}
-                    disabled={v.retired}
-                    aria-label={i === 0 ? "Original wording" : `Wording ${i + 1}`}
-                    aria-invalid={touched && v.text.trim().length === 0}
-                  />
-                </div>
-              ))}
-
-              {touched && anyEmpty && (
-                <p className="text-xs text-destructive">
-                  Every wording needs text. Delete the ones you don't want.
-                </p>
-              )}
-              {duplicate && (
-                <p className="text-xs text-destructive">
-                  Two wordings are identical. Duplicates double one wording's
-                  odds of being picked while looking like variety.
-                </p>
-              )}
-              {allRetired && (
-                <p className="text-xs text-destructive">
-                  At least one wording must stay askable — a question with
-                  nothing to ask can't be served to a candidate.
-                </p>
-              )}
-
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={room <= 0 || saveMutation.isPending}
-                  onClick={() =>
-                    setVariants((prev) => [...prev, { text: "", retired: false }])
-                  }
-                >
-                  <Plus className="h-4 w-4" />
-                  Add wording
-                </Button>
-                <div className="flex items-center gap-1.5">
-                  <Select
-                    value={String(askFor)}
-                    onValueChange={(v) => setSuggestCount(Number(v))}
-                    disabled={
-                      room <= 0 ||
-                      suggestMutation.isPending ||
-                      saveMutation.isPending
-                    }
-                  >
-                    <SelectTrigger
-                      className="h-8 w-[4.25rem]"
-                      aria-label="How many wordings to draft"
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Array.from({ length: maxSuggest }, (_, i) => i + 1).map(
-                        (n) => (
-                          <SelectItem key={n} value={String(n)}>
-                            {n}
-                          </SelectItem>
-                        )
-                      )}
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={
-                      originalEmpty ||
-                      room <= 0 ||
-                      suggestMutation.isPending ||
-                      saveMutation.isPending
-                    }
-                    title={
-                      originalEmpty
-                        ? "Write the original wording first"
-                        : "Draft alternatives with AI — nothing is saved until you do"
-                    }
-                    onClick={() => suggestMutation.mutate()}
-                  >
-                    {suggestMutation.isPending ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Sparkles className="h-4 w-4" />
-                    )}
-                    {suggestMutation.isPending
-                      ? "Drafting…"
-                      : `Suggest ${askFor === 1 ? "a wording" : `${askFor} wordings`} with AI`}
-                  </Button>
-                </div>
-                {room <= 0 && (
-                  <span className="text-xs text-muted-foreground">
-                    Limit of {QUESTION_VARIANTS_MAX} wordings reached.
+            {/* Existing extra wordings (edit mode) — kept minimal so retire is
+                available without dominating the dialog. */}
+            {extras.length > 0 ? (
+              <div>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="text-[13px] font-semibold text-ink">
+                    Additional wordings{" "}
+                    <span className="font-normal text-ink-subtle">
+                      · {extras.length}/{QUESTION_VARIANTS_MAX - 1}
+                    </span>
                   </span>
-                )}
+                </div>
+                <div className="grid gap-2">
+                  {extras.map((v, idx) => {
+                    const i = idx + 1
+                    return (
+                      <div
+                        key={v._id ?? `extra-${i}`}
+                        className={`flex items-start gap-2 rounded-lg border border-line px-3 py-2.5 ${
+                          v.retired ? "bg-surface-2" : "bg-surface"
+                        }`}
+                      >
+                        <textarea
+                          value={v.text}
+                          rows={1}
+                          maxLength={QUESTION_TEXT_MAX_LENGTH}
+                          disabled={v.retired}
+                          onChange={(e) => {
+                            setTouched(true)
+                            patch(i, { text: e.target.value })
+                          }}
+                          aria-invalid={touched && v.text.trim().length === 0}
+                          className="min-h-9 flex-1 resize-y rounded-md border-none bg-transparent px-0 py-1 text-[13px] leading-snug text-ink outline-none disabled:text-ink-muted"
+                        />
+                        <div className="flex items-center gap-1">
+                          {v._id ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                patch(i, { retired: !v.retired })
+                              }
+                              disabled={saveMutation.isPending}
+                              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-semibold text-ink-muted hover:bg-surface-3"
+                            >
+                              {v.retired ? (
+                                <>
+                                  <Undo2
+                                    className="h-3.5 w-3.5"
+                                    strokeWidth={1.8}
+                                  />
+                                  Restore
+                                </>
+                              ) : (
+                                "Retire"
+                              )}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setVariants((prev) =>
+                                  prev.filter((_, j) => j !== i)
+                                )
+                              }
+                              disabled={saveMutation.isPending}
+                              aria-label={`Delete wording ${i + 1}`}
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-[var(--danger)] hover:bg-[var(--danger-soft)]"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" strokeWidth={1.8} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : null}
+
+            {/* Inline validation */}
+            {touched && anyEmpty ? (
+              <p className="-mt-2 text-[12px] text-[var(--danger)]">
+                Every wording needs text. Delete the ones you don't want.
+              </p>
+            ) : null}
+            {duplicate ? (
+              <p className="-mt-2 text-[12px] text-[var(--danger)]">
+                Two wordings are identical. Duplicates double one wording's odds
+                of being picked while looking like variety.
+              </p>
+            ) : null}
+            {allRetired ? (
+              <p className="-mt-2 text-[12px] text-[var(--danger)]">
+                At least one wording must stay askable — a question with nothing
+                to ask can't be served to a candidate.
+              </p>
+            ) : null}
+
+            {/* Category + Difficulty — 2-col row per the DevExcel design. */}
+            <div className="grid gap-3.5 sm:grid-cols-2">
+              <div>
+                <label className="mb-1.5 block text-[13px] font-semibold text-ink">
+                  Category{" "}
+                  <span className="font-normal text-ink-subtle">· optional</span>
+                </label>
+                <Select
+                  value={category || undefined}
+                  onValueChange={(v) => setCategory(v as QuestionCategory)}
+                >
+                  <SelectTrigger className="h-11">
+                    <SelectValue placeholder="Select a category…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CATEGORY_OPTIONS.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
-              <p className="text-xs text-muted-foreground">
-                {isEdit
-                  ? "Editing a wording changes what future interviews ask. Interviews already asked keep the exact words they used — which is why a wording is retired, never deleted."
-                  : "Add a few wordings so candidates for the same job don't all get identical questions."}{" "}
-                AI drafts are proposals: you may get fewer than you asked for
-                (any that drift in meaning or length are dropped), and nothing
-                is saved until you press {isEdit ? "Save changes" : "Create question"}.
-              </p>
+              <div>
+                <label className="mb-1.5 block text-[13px] font-semibold text-ink">
+                  Difficulty{" "}
+                  <span className="font-normal text-ink-subtle">
+                    · required
+                  </span>
+                </label>
+                <div className="flex gap-2">
+                  {DIFFICULTY_LEVELS.map((d) => {
+                    const active = difficulty === d
+                    return (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => setDifficulty(d)}
+                        className={`flex-1 rounded-lg border py-2.5 text-[13px] font-semibold transition-colors ${
+                          active
+                            ? "border-primary bg-accent text-primary"
+                            : "border-line-2 bg-surface text-ink-2 hover:bg-surface-3"
+                        }`}
+                      >
+                        {DIFFICULTY_LABELS[d]}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
             </div>
 
-            <div className="flex flex-col gap-2.5">
-              <Label htmlFor="q-difficulty">Difficulty</Label>
-              <Select
-                // `undefined` (not "") keeps Radix showing the placeholder —
-                // it forbids an empty-string value.
-                value={difficulty || undefined}
-                onValueChange={(v) => setDifficulty(v as DifficultyLevel)}
+            {/* Tags */}
+            <div>
+              <label
+                htmlFor="q-tags"
+                className="mb-1.5 block text-[13px] font-semibold text-ink"
               >
-                <SelectTrigger id="q-difficulty">
-                  <SelectValue placeholder="Select a difficulty" />
-                </SelectTrigger>
-                <SelectContent>
-                  {DIFFICULTY_LEVELS.map((d) => (
-                    <SelectItem key={d} value={d}>
-                      {DIFFICULTY_LABELS[d]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                Required — there is no default band. Every wording shares it: a
-                variant that changes the difficulty is a different question.
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-2.5">
-              <Label htmlFor="q-tags">Tags</Label>
+                Tags{" "}
+                <span className="font-normal text-ink-subtle">· optional</span>
+              </label>
               <TagsInput
                 id="q-tags"
                 value={tags}
@@ -483,36 +531,174 @@ export function QuestionFormDialog({
                 suggestions={tagSuggestions}
                 placeholder="Type a tag and press Enter"
               />
-              <p className="text-xs text-muted-foreground">
-                Optional labels (topic, role, round…) for filtering the bank.
+            </div>
+
+            {/* Generate synonyms */}
+            <div className="rounded-xl border border-line bg-surface-2 p-4">
+              <div className="mb-1 flex items-center gap-2">
+                <span className="inline-flex text-primary">
+                  <Sparkles className="h-[13px] w-[13px]" strokeWidth={1.8} />
+                </span>
+                <span className="text-[13.5px] font-semibold text-ink">
+                  Generate synonyms
+                </span>
+              </div>
+              <p className="mb-3 text-[12px] text-ink-muted">
+                Create reworded variants of this question. Pick the ones you
+                like and add them to the bank.
               </p>
+
+              <div className="flex flex-wrap items-center gap-2.5">
+                <span className="text-[13px] text-ink-2">How many?</span>
+                <div className="flex h-10 items-center overflow-hidden rounded-lg border border-[var(--field-border)]">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSuggestCount((n) =>
+                        Math.max(VARIANT_SUGGEST_MIN, n - 1)
+                      )
+                    }
+                    disabled={
+                      askFor <= VARIANT_SUGGEST_MIN ||
+                      suggestMutation.isPending ||
+                      saveMutation.isPending
+                    }
+                    aria-label="Fewer wordings"
+                    className="h-full w-[38px] cursor-pointer border-x border-line bg-surface-3 text-[16px] text-ink disabled:opacity-40"
+                  >
+                    <Minus
+                      className="mx-auto h-4 w-4"
+                      strokeWidth={2}
+                    />
+                  </button>
+                  <input
+                    value={askFor}
+                    readOnly
+                    className="mono h-full w-[44px] border-none bg-transparent text-center text-[14px] font-semibold text-ink outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSuggestCount((n) => Math.min(maxSuggest, n + 1))
+                    }
+                    disabled={
+                      askFor >= maxSuggest ||
+                      suggestMutation.isPending ||
+                      saveMutation.isPending
+                    }
+                    aria-label="More wordings"
+                    className="h-full w-[38px] cursor-pointer border-x border-line bg-surface-3 text-[16px] text-ink disabled:opacity-40"
+                  >
+                    <Plus className="mx-auto h-4 w-4" strokeWidth={2} />
+                  </button>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={drafts.length > 0 ? "secondary" : "default"}
+                  disabled={
+                    originalEmpty ||
+                    room <= 0 ||
+                    suggestMutation.isPending ||
+                    saveMutation.isPending
+                  }
+                  onClick={() => suggestMutation.mutate()}
+                  title={
+                    originalEmpty
+                      ? "Write the original wording first"
+                      : "Draft alternatives with AI — nothing is saved until you press Add selected variants"
+                  }
+                >
+                  {suggestMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-4 w-4" />
+                  )}
+                  {suggestMutation.isPending
+                    ? "Drafting…"
+                    : drafts.length > 0
+                      ? "Regenerate"
+                      : "Generate"}
+                </Button>
+                {room <= 0 ? (
+                  <span className="text-[12px] text-ink-muted">
+                    Limit of {QUESTION_VARIANTS_MAX} wordings reached.
+                  </span>
+                ) : null}
+              </div>
+
+              {drafts.length > 0 ? (
+                <>
+                  <div className="mt-3 grid gap-2">
+                    {drafts.map((s, i) => {
+                      const selected = !!draftSel[i]
+                      return (
+                        <label
+                          key={`${i}-${s.slice(0, 12)}`}
+                          className={`flex cursor-pointer items-start gap-2.5 rounded-lg border p-3 text-[13px] transition-colors ${
+                            selected
+                              ? "border-primary bg-accent"
+                              : "border-line bg-surface hover:bg-surface-3"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={() =>
+                              setDraftSel((prev) => ({
+                                ...prev,
+                                [i]: !prev[i]
+                              }))
+                            }
+                            className="mt-0.5 h-4 w-4 accent-primary"
+                          />
+                          <span className="flex-1 leading-relaxed text-ink">
+                            {s}
+                          </span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                  <div className="mt-3">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={acceptSelectedDrafts}
+                      disabled={saveMutation.isPending}
+                    >
+                      <Plus className="h-4 w-4" />
+                      Add selected variants
+                    </Button>
+                  </div>
+                </>
+              ) : null}
             </div>
           </div>
 
-          <DialogFooter>
+          {/* Foot */}
+          <div className="flex justify-end gap-2.5 border-t border-line px-6 py-4">
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
+              size="sm"
               onClick={() => onOpenChange(false)}
               disabled={saveMutation.isPending}
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={!canSubmit}>
+            <Button type="submit" size="sm" disabled={!canSubmit}>
               {saveMutation.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Save className="h-4 w-4" />
-              )}
+              ) : null}
               {saveMutation.isPending
                 ? isEdit
                   ? "Saving…"
                   : "Creating…"
                 : isEdit
-                  ? "Save changes"
+                  ? "Save question"
                   : "Create question"}
             </Button>
-          </DialogFooter>
+          </div>
         </form>
       </DialogContent>
     </Dialog>
