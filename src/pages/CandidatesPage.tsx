@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import {
+  AlertTriangle,
   ChevronLeft,
   ChevronRight,
   Columns3,
@@ -19,6 +20,7 @@ import {
   Loader2,
   MapPin,
   MoreVertical,
+  RefreshCw,
   Rows3,
   Search,
   Send,
@@ -117,6 +119,29 @@ function statusTintStyle(color: string | null | undefined) {
     backgroundColor: `color-mix(in oklch, ${color} 12%, transparent)`,
     color,
   };
+}
+
+/**
+ * Is the cv-parse/pre-screen pipeline still working on this row?
+ *
+ * `applied` alone can't answer it — the row sits at `applied` while the CV
+ * is being read AND after a hard parse failure parked it there, because the
+ * `applied → prescreened` transition only happens once the parse lands. So
+ * the three conditions together are the honest test:
+ *   - `applied`          — the worker hasn't moved it on yet,
+ *   - has a `cvKey`      — there is something to parse (no CV = nothing to
+ *                          wait for; the worker skips those),
+ *   - no `prescreenFailedAt` — it hasn't already given up.
+ *
+ * Without the last one a corrupt PDF would spin "Reading CV…" forever, which
+ * is exactly the lie a spinner must never tell.
+ */
+function isProcessing(row: CandidateListItem): boolean {
+  return (
+    row.currentStatusId?.key === "applied" &&
+    Boolean(row.cvKey) &&
+    !row.prescreenFailedAt
+  );
 }
 
 export function CandidatesPage() {
@@ -239,9 +264,21 @@ export function CandidatesPage() {
     // The board owns its own query; keep the table's off the wire while it's
     // hidden so a drag doesn't race a list refetch.
     enabled: view === "table",
+    // Overrides the global 30s. These rows change WITHOUT anyone touching
+    // this page — the cv-parse worker moves them from `applied` to
+    // invited/rejected seconds after an import. Under the global staleTime,
+    // navigating away and back inside 30s replays the cache, so the operator
+    // "refreshes" and sees the same stale rows, which reads as a broken
+    // pipeline rather than a warm cache.
+    staleTime: 0,
   });
 
   const rows = useMemo(() => data?.data ?? [], [data]);
+  /** Rows this page is knowingly showing a soon-to-be-stale status for. */
+  const processingCount = useMemo(
+    () => rows.filter(isProcessing).length,
+    [rows],
+  );
   const total = data?.count ?? 0;
   const totalPages = data?.totalPage ?? 0;
   const showingFrom = total === 0 ? 0 : (page - 1) * pageSize + 1;
@@ -652,6 +689,35 @@ export function CandidatesPage() {
                     Delete
                   </Button>
                 </div>
+              </div>
+            ) : null}
+
+            {/* Shown only while the worker is actually mid-flight. The table
+                does NOT poll, so these rows will change on the server with
+                nothing here to notice — say so plainly rather than let the
+                operator conclude the pipeline is stuck. It disappears by
+                itself once the last row lands. */}
+            {processingCount > 0 ? (
+              <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-6 py-2.5">
+                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
+                <p className="text-xs text-muted-foreground">
+                  <strong className="font-medium text-foreground">
+                    {processingCount} CV{processingCount === 1 ? " is" : "s are"} still
+                    being read.
+                  </strong>{" "}
+                  Their status updates once the AI finishes — this table won't update on
+                  its own, so hit Refresh in a moment to see the result.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="ml-auto h-7 shrink-0 text-xs"
+                  onClick={() => refetch()}
+                  disabled={isFetching}
+                >
+                  <RefreshCw className={cn("h-3 w-3", isFetching && "animate-spin")} />
+                  Refresh
+                </Button>
               </div>
             ) : null}
 
@@ -1068,9 +1134,29 @@ function CandidateRow({
       </TableCell>
       <TableCell>
         {status ? (
-          <Badge variant="outline" style={statusTintStyle(status.color)}>
-            {status.label}
-          </Badge>
+          <div className="flex flex-col items-start gap-1">
+            <Badge variant="outline" style={statusTintStyle(status.color)}>
+              {status.label}
+            </Badge>
+            {isProcessing(row) ? (
+              // `applied` means two different things — "the CV is being read
+              // right now" and "it was read and parked". The status alone
+              // can't say which, so this pill does.
+              <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Reading CV…
+              </span>
+            ) : null}
+            {row.prescreenError ? (
+              <span
+                className="inline-flex items-center gap-1 text-[11px] text-destructive"
+                title={row.prescreenError}
+              >
+                <AlertTriangle className="h-3 w-3 shrink-0" />
+                CV couldn't be read
+              </span>
+            ) : null}
+          </div>
         ) : (
           <span className="text-muted-foreground">—</span>
         )}
