@@ -19,26 +19,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { listBankQuestions } from "@/features/jobs/jobsApi"
+import { listScreeningQuestions } from "@/features/screening-questions/screeningQuestionsApi"
 import {
+  askableCount,
   DIFFICULTY_LABELS,
-  type BankQuestion,
+  difficultyVariant,
+  questionLabel,
   type DifficultyLevel,
-} from "@/features/jobs/types"
+  type ScreeningQuestion,
+} from "@/features/screening-questions/types"
 
 const ALL = "all"
 const PAGE_SIZE = 25
 
 const DIFFICULTIES = Object.keys(DIFFICULTY_LABELS) as DifficultyLevel[]
-
-const difficultyVariant: Record<
-  DifficultyLevel,
-  "success" | "warning" | "destructive"
-> = {
-  easy: "success",
-  medium: "warning",
-  hard: "destructive",
-}
 
 interface AddJobQuestionsDialogProps {
   open: boolean
@@ -46,7 +40,7 @@ interface AddJobQuestionsDialogProps {
   /** Already-attached bank ids — the same question twice is a 422. */
   attachedIds: string[]
   /** Appends the picks to the job's list, in the order they were selected. */
-  onAdd: (questions: BankQuestion[]) => void
+  onAdd: (questions: ScreeningQuestion[]) => void
   saving: boolean
 }
 
@@ -55,6 +49,9 @@ interface AddJobQuestionsDialogProps {
  * Already-attached rows are shown as disabled rather than hidden, so the
  * absence of a question you expected reads as "already on this job" instead
  * of a broken filter.
+ *
+ * Rows show the bank's FIRST wording. A candidate may be asked any of the
+ * question's variants — picking one here picks all of them.
  */
 export function AddJobQuestionsDialog({
   open,
@@ -67,7 +64,7 @@ export function AddJobQuestionsDialog({
   const [difficulty, setDifficulty] = useState<string>(ALL)
   const [page, setPage] = useState(1)
   // Ordered picks — they're appended to the script in this order.
-  const [selected, setSelected] = useState<BankQuestion[]>([])
+  const [selected, setSelected] = useState<ScreeningQuestion[]>([])
 
   useEffect(() => {
     if (!open) return
@@ -80,7 +77,7 @@ export function AddJobQuestionsDialog({
   const questionsQuery = useQuery({
     queryKey: ["screeningQuestions", { search, difficulty, page }],
     queryFn: () =>
-      listBankQuestions({
+      listScreeningQuestions({
         page,
         limit: PAGE_SIZE,
         search: search.trim() || undefined,
@@ -96,7 +93,7 @@ export function AddJobQuestionsDialog({
   const rows = questionsQuery.data?.data ?? []
   const total = questionsQuery.data?.count ?? 0
 
-  const toggle = (question: BankQuestion) =>
+  const toggle = (question: ScreeningQuestion) =>
     setSelected((prev) =>
       prev.some((q) => q._id === question._id)
         ? prev.filter((q) => q._id !== question._id)
@@ -208,7 +205,7 @@ export function AddJobQuestionsDialog({
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="line-clamp-2 block text-sm font-medium">
-                            {question.text}
+                            {questionLabel(question)}
                           </span>
                           <span className="mt-1 flex flex-wrap items-center gap-1.5">
                             <Badge
@@ -222,6 +219,11 @@ export function AddJobQuestionsDialog({
                                 {tag}
                               </Badge>
                             ))}
+                            <span className="text-xs text-muted-foreground">
+                              {askableCount(question) === 1
+                                ? "1 wording"
+                                : `${askableCount(question)} wordings`}
+                            </span>
                             {isAttached ? (
                               <span className="text-xs text-muted-foreground">
                                 Already attached
@@ -281,9 +283,9 @@ export function AddJobQuestionsDialog({
                     </span>
                     <span
                       className="truncate text-foreground/90"
-                      title={question.text}
+                      title={questionLabel(question)}
                     >
-                      {question.text}
+                      {questionLabel(question)}
                     </span>
                     <button
                       type="button"

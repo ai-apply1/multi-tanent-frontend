@@ -1,8 +1,6 @@
 import api from "@/lib/api"
 import type {
-  BankQuestion,
   CreateJobPayload,
-  DifficultyLevel,
   Job,
   JobListItem,
   JobQuestionItemPayload,
@@ -89,9 +87,9 @@ export async function setJobStatus(id: string, status: JobStatus) {
  * reweight are all "send the desired end state" (`items: []` detaches
  * everything).
  *
- * Every save re-freezes each slot's `textSnapshot` from the CURRENT bank
- * text (unless the slot has a `textOverride`) — so any edit here, even a
- * pure reorder, silently re-syncs drifted wording. The UI says so.
+ * No wording is sent or stored — only which questions, in what order, worth
+ * what percent. `weightPct` must total exactly 100 across `items`, so the
+ * caller cannot save one row in isolation: rebalance, then send the lot.
  */
 export async function setJobQuestions(
   id: string,
@@ -109,28 +107,6 @@ export async function deleteJob(id: string) {
   return data
 }
 
-/**
- * The question bank, for the attach picker. Lives here rather than in a
- * `questions` slice because that slice doesn't exist yet — move this when
- * it lands so there's one reader of `/admin/questions`.
- */
-export async function listBankQuestions(
-  params: {
-    page?: number
-    limit?: number
-    search?: string
-    difficultyLevel?: DifficultyLevel
-  } = {}
-) {
-  const { data } = await api.get<Paginated<BankQuestion>>("/admin/questions", {
-    params: {
-      page: params.page ?? 1,
-      limit: params.limit ?? 25,
-      ...(params.search ? { search: params.search } : {}),
-      ...(params.difficultyLevel
-        ? { difficultyLevel: params.difficultyLevel }
-        : {}),
-    },
-  })
-  return data
-}
+// The question bank is NOT read from here. `/admin/questions` has exactly one
+// reader — `listScreeningQuestions` in the screening-questions slice — and the
+// attach picker uses it. A second fetcher here drifts from it silently.

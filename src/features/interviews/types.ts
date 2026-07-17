@@ -153,7 +153,7 @@ export interface InterviewIntegrity {
  */
 export interface ScoredAnswer {
   questionId: string
-  /** The (AI-varied) question text that was actually asked. */
+  /** The wording that was actually asked (this candidate's variant). */
   text: string
   transcript: string
   /** Per-answer technical/substance correctness, 0–10. */
@@ -167,7 +167,10 @@ export interface ScoredAnswer {
   concision?: number
   /** Spoken length in seconds; null/absent when there was no audio. */
   durationSec?: number | null
-  /** The HR-set per-question weight the aggregator applied. */
+  /**
+   * The HR-set percent of the score the aggregator applied to this answer.
+   * Totals 100 across the interview's questions.
+   */
   weight?: number
 }
 
@@ -259,10 +262,19 @@ export interface InterviewRecording {
 export interface AdminInterviewQuestionItem {
   questionId: string
   orderIndex: number
-  /** The AI-varied wording actually asked. */
+  /**
+   * WHICH of the bank question's wordings this candidate drew. Two
+   * candidates for the same job differ here, never in `orderIndex`.
+   */
+  variantId: string
+  /**
+   * The exact words asked, snapshotted when the interview was prepared.
+   * Display this — never look the wording up from `variantId`, or an edit
+   * in the bank would rewrite what this transcript says we asked.
+   */
   text: string
-  /** The job's wording it was derived from (paraphraser audit). */
-  sourceText: string
+  /** This question's percent of the interview score, frozen from the job. */
+  weightPct: number
   transcript: string
   skipped: boolean
   /** Headline per-question blend, 0–10; null until scored. */

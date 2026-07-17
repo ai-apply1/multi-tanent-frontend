@@ -53,12 +53,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { VideoPlayer } from "@/components/ui/video-player";
 import {
   downloadInterviewAnswersAudio,
@@ -511,7 +505,6 @@ export function InterviewDetailDrawer({ sessionId, onOpenChange }: Props) {
         number: i + 1,
         questionId: q.questionId,
         asked: q.text,
-        sourceText: q.sourceText,
         answer: q.transcript,
         skipped: q.skipped,
         score: q.score,
@@ -1261,19 +1254,17 @@ export function InterviewDetailDrawer({ sessionId, onOpenChange }: Props) {
                     No questions recorded for this session yet.
                   </p>
                 ) : (
-                  <TooltipProvider delayDuration={200}>
-                    <ol className="space-y-3">
-                      {questions.map((q, i) => (
-                        <AnswerRow
-                          key={q.questionId || i}
-                          index={i}
-                          question={q}
-                          scored={scoredByQuestionId.get(q.questionId)}
-                          onJump={hlsReady ? jumpToRecording : undefined}
-                        />
-                      ))}
-                    </ol>
-                  </TooltipProvider>
+                  <ol className="space-y-3">
+                    {questions.map((q, i) => (
+                      <AnswerRow
+                        key={q.questionId || i}
+                        index={i}
+                        question={q}
+                        scored={scoredByQuestionId.get(q.questionId)}
+                        onJump={hlsReady ? jumpToRecording : undefined}
+                      />
+                    ))}
+                  </ol>
                 )}
               </section>
             </div>
@@ -1314,12 +1305,6 @@ function AnswerRow({
     question.transcript.trim() === SKIPPED_TRANSCRIPT_MARKER;
   const askedAtSec =
     typeof question.askedAtSec === "number" ? question.askedAtSec : null;
-  // The question wording is AI-varied per candidate, so it usually differs
-  // from the job's. Surface the source when it does — a reviewer comparing
-  // candidates needs to know they were asked the same underlying question.
-  const varied =
-    Boolean(question.sourceText) &&
-    question.sourceText.trim() !== question.text.trim();
 
   return (
     <li className="rounded-lg border border-border bg-card p-3">
@@ -1328,31 +1313,12 @@ function AnswerRow({
           {index + 1}
         </span>
         <div className="min-w-0 flex-1 space-y-2">
+          {/* The exact words this candidate was asked. There is no "source"
+              wording to compare against: every wording in the bank is one HR
+              approved, and this is simply the one they drew. Candidates for
+              the same job are comparable because the question and its
+              position are identical — only the words differ. */}
           <p className="text-sm font-medium leading-snug">{question.text}</p>
-
-          {varied ? (
-            <p className="flex min-w-0 items-baseline gap-1 text-[11px] leading-snug text-muted-foreground">
-              <span className="shrink-0 font-semibold uppercase tracking-wide">
-                Asked as a variation of:
-              </span>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  {/* A button, not the <p> itself, so the truncated wording is
-                      reachable by keyboard — otherwise the only way to read it
-                      would be to hover. */}
-                  <button
-                    type="button"
-                    className="min-w-0 flex-1 cursor-help truncate text-left underline decoration-dotted underline-offset-2"
-                  >
-                    {question.sourceText}
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-sm">
-                  <p className="text-xs leading-snug">{question.sourceText}</p>
-                </TooltipContent>
-              </Tooltip>
-            </p>
-          ) : null}
 
           {/* Recording position this question was asked at — clickable to
               jump the player there when the recording is streamable. */}

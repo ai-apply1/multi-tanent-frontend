@@ -57,9 +57,11 @@ import {
   listScreeningQuestions,
 } from "@/features/screening-questions/screeningQuestionsApi";
 import {
+  askableCount,
   DIFFICULTY_LABELS,
   DIFFICULTY_LEVELS,
   difficultyVariant,
+  questionLabel,
   type DifficultyLevel,
   type ScreeningQuestion,
 } from "@/features/screening-questions/types";
@@ -170,8 +172,8 @@ export function QuestionBankPage() {
             Question Bank
           </h1>
           <p className="text-sm text-muted-foreground">
-            The screening questions your jobs draw from. Attaching one to a job
-            freezes its wording there.
+            The screening questions your jobs draw from. Each one holds several
+            wordings, and every candidate is asked one of them at random.
           </p>
         </div>
         <Button onClick={openCreate}>
@@ -313,15 +315,33 @@ export function QuestionBankPage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  rows.map((row) => (
+                  rows.map((row) => {
+                    const askable = askableCount(row)
+                    return (
                     <TableRow key={row._id}>
                       <TableCell className="pl-6">
                         <p
                           className="line-clamp-2 max-w-xl leading-snug"
-                          title={row.text}
+                          title={questionLabel(row)}
                         >
-                          {row.text}
+                          {questionLabel(row)}
                         </p>
+                        {/* A question with one wording asks every candidate
+                            the same words — the one case worth nudging. */}
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="mt-1 inline-block text-xs text-muted-foreground">
+                              {askable === 1
+                                ? "1 wording"
+                                : `${askable} wordings`}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {askable === 1
+                              ? "Every candidate is asked these exact words. Add wordings so they can't compare notes."
+                              : `Each candidate is asked one of ${askable} wordings, picked at random.`}
+                          </TooltipContent>
+                        </Tooltip>
                       </TableCell>
                       <TableCell>
                         <Badge
@@ -359,7 +379,8 @@ export function QuestionBankPage() {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))
+                    )
+                  })
                 )}
               </TableBody>
             </Table>
@@ -449,14 +470,15 @@ export function QuestionBankPage() {
           // Spans, not divs: DialogDescription renders a <p>.
           <span className="block space-y-2">
             <span className="line-clamp-3 block rounded-md border border-border bg-muted/40 px-3 py-2 text-xs italic">
-              {deleteTarget?.text}
+              {deleteTarget ? questionLabel(deleteTarget) : ""}
             </span>
             {deleteError ? (
               <span className="block text-destructive">{deleteError}</span>
             ) : (
               <span className="block">
-                Removes it from the bank. Interviews that already asked it keep
-                their own copy of the wording. This cannot be undone.
+                Removes it and all of its wordings from the bank. Interviews
+                that already asked it keep the exact words they used. This
+                cannot be undone.
               </span>
             )}
           </span>

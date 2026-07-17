@@ -5,6 +5,7 @@ import type {
   ListScreeningQuestionsParams,
   ScreeningQuestion,
   ScreeningQuestionListResponse,
+  SuggestVariantsPayload,
   UpdateScreeningQuestionPayload
 } from "@/features/screening-questions/types"
 
@@ -52,12 +53,34 @@ export async function createScreeningQuestion(
   return data
 }
 
+/**
+ * PATCH. `variants` must carry every existing `_id` in its current order —
+ * the backend 422s on a delete or a reorder, because interviews reference
+ * the wording they asked by `_id`. Append at the end; retire, never remove.
+ */
 export async function updateScreeningQuestion(
   id: string,
   payload: UpdateScreeningQuestionPayload
 ) {
   const { data } = await api.patch<ScreeningQuestion>(
     `/admin/questions/${id}`,
+    payload
+  )
+  return data
+}
+
+/**
+ * AI-draft alternative wordings for review. Persists NOTHING — the caller
+ * saves the keepers through create/update, which is what gives a wording the
+ * `_id` an interview can reference.
+ *
+ * Takes free text, not a question id, so it works while the user is still
+ * typing a question that doesn't exist yet. May return FEWER than `count`
+ * (drafts that drift are dropped); 502 when the model is unreachable.
+ */
+export async function suggestQuestionVariants(payload: SuggestVariantsPayload) {
+  const { data } = await api.post<string[]>(
+    "/admin/questions/suggest-variants",
     payload
   )
   return data

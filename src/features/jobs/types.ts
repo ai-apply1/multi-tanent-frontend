@@ -97,25 +97,28 @@ export interface JobListItem extends JobBase {
 }
 
 /**
- * One attached question as the detail route presents it: the FROZEN slot
- * enriched with the bank row's current state, so drift is visible.
+ * One attached question as the detail route presents it: the slot enriched
+ * with the bank row it points at.
+ *
+ * There is no wording here and no drift to report — the job stores only a
+ * reference, so the bank IS the wording and a bank edit is simply live.
  */
 export interface JobQuestionView {
   questionId: string
   orderIndex: number
-  weight: number
-  textOverride: string | null
-  /** Frozen at attach time — what the interview paraphraser receives. */
-  textSnapshot: string
-  /** `textOverride ?? textSnapshot`. */
-  effectiveText: string
-  /** The bank row's CURRENT wording; `null` iff the bank row is gone. */
-  currentBankText: string | null
+  /** This slot's share of the interview score. Totals 100 across the array. */
+  weightPct: number
   /**
-   * The bank's wording changed since this job froze its snapshot. `null`
-   * when the job uses an override (the bank wording is then irrelevant).
+   * The wording that LABELS this slot — the bank's original (or the first
+   * still-askable one). NOT what any given candidate is asked: that is
+   * picked per candidate at prep time. `null` iff the bank row is gone.
    */
-  bankTextChanged: boolean | null
+  text: string | null
+  /**
+   * How many wordings a candidate could draw. `1` means every candidate
+   * hears identical words. `null` iff the bank row is gone.
+   */
+  variantCount: number | null
   difficultyLevel: DifficultyLevel | null
   tags: string[]
 }
@@ -174,31 +177,27 @@ export interface CreateJobPayload {
  */
 export type UpdateJobPayload = Partial<CreateJobPayload>
 
-/** One slot in `PUT /admin/jobs/:id/questions`. */
+/**
+ * One slot in `PUT /admin/jobs/:id/questions`.
+ *
+ * No wording: a job says WHICH question, in WHAT order, worth WHAT percent.
+ * A job-specific rewording is a new bank question, not a field here.
+ */
 export interface JobQuestionItemPayload {
   questionId: string
   /** 0-based; must be UNIQUE across the payload (422 otherwise). */
   orderIndex: number
-  /** Required — there is no server-side default here. 1 = neutral. */
-  weight: number
-  textOverride?: string
+  /**
+   * Percent of the interview score. Integer, and must total EXACTLY 100
+   * across the payload (422 otherwise) — so a single row can never be saved
+   * on its own; send the whole rebalanced list.
+   */
+  weightPct: number
 }
 
-// ── the question bank, as the attach picker needs it ───────────────────
-
-/**
- * A row from `GET /admin/questions`. Declared here (rather than imported
- * from a `questions` slice) only because the attach picker needs it and
- * that slice doesn't exist yet — fold this into it when it lands.
- */
-export interface BankQuestion {
-  _id: string
-  text: string
-  difficultyLevel: DifficultyLevel
-  tags: string[]
-  createdAt: string
-  updatedAt: string
-}
+// A bank row's type belongs to the bank: import `ScreeningQuestion` from
+// `@/features/screening-questions/types`. Re-declaring a narrower copy here
+// is how the two silently drift apart when the bank's shape changes.
 
 // ── display helpers ───────────────────────────────────────────────────
 
