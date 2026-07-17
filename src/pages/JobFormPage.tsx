@@ -1,7 +1,7 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Briefcase, Loader2, Plus, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, Briefcase, Loader2, Save } from "lucide-react";
 import toast from "react-hot-toast";
 import {
   Card,
@@ -33,7 +33,6 @@ import {
   type Job,
   type JobEligibilityPayload,
   type SeniorityLevel,
-  type VettingConfigPayload,
   type WorkMode,
 } from "@/features/jobs/types";
 import { useOrganization } from "@/features/organization/useOrganization";
@@ -51,15 +50,6 @@ const EMPLOYMENT_TYPES = Object.keys(
 ) as EmploymentType[];
 const WORK_MODES = Object.keys(WORK_MODE_LABELS) as WorkMode[];
 const SENIORITY_LEVELS = Object.keys(SENIORITY_LABELS) as SeniorityLevel[];
-
-/** A vetting-metric row. `key` is local only — it keeps React reconciliation
- *  stable while the name (the natural id) is still being typed. */
-interface MetricRow {
-  key: number;
-  name: string;
-  rule: string;
-  weight: string;
-}
 
 /** Parse a numeric field that is allowed to be blank. */
 const parseOptionalNumber = (raw: string): number | undefined => {
@@ -124,13 +114,6 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const custom = job?.eligibility.custom ?? null;
-  // Seeded rows take keys 1..n, so the counter starts at n.
-  const metricKey = useRef(custom?.metrics.length ?? 0);
-  const nextMetricKey = () => {
-    metricKey.current += 1;
-    return metricKey.current;
-  };
 
   // ── Basics
   const [title, setTitle] = useState(job?.title ?? "");
@@ -167,21 +150,7 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
       : String(job.eligibility.minYearsExperience),
   );
   const [requiredSkills, setRequiredSkills] = useState<string[]>(
-    custom?.requiredSkills ?? [],
-  );
-  const [metrics, setMetrics] = useState<MetricRow[]>(() =>
-    (custom?.metrics ?? []).map((m, i) => ({
-      key: i + 1,
-      name: m.name,
-      rule: m.rule,
-      weight: String(m.weight),
-    })),
-  );
-  const [acceptThreshold, setAcceptThreshold] = useState(
-    custom?.acceptThreshold == null ? "" : String(custom.acceptThreshold),
-  );
-  const [rejectThreshold, setRejectThreshold] = useState(
-    custom?.rejectThreshold == null ? "" : String(custom.rejectThreshold),
+    job?.eligibility.requiredSkills ?? [],
   );
 
   const { data: organization } = useOrganization();
@@ -215,74 +184,23 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
       ? "Enter 0 or more, or leave it empty."
       : "";
 
-  const parsedAccept = parseOptionalNumber(acceptThreshold);
-  const parsedReject = parseOptionalNumber(rejectThreshold);
-  const acceptRangeError =
-    acceptThreshold.trim() &&
-    (parsedAccept === undefined || parsedAccept < 0 || parsedAccept > 100)
-      ? "Enter a number between 0 and 100."
-      : "";
-  const rejectRangeError =
-    rejectThreshold.trim() &&
-    (parsedReject === undefined || parsedReject < 0 || parsedReject > 100)
-      ? "Enter a number between 0 and 100."
-      : "";
-  // The backend 422s on an inverted pair, and only checks it when BOTH are
-  // present — mirror that exactly rather than guessing at the missing one.
-  const thresholdOrderError =
-    parsedAccept !== undefined &&
-    parsedReject !== undefined &&
-    parsedAccept < parsedReject
-      ? "The accept line must be at or above the reject line — otherwise there is no review band."
-      : "";
-
-  const metricsError = metrics.some(
-    (m) =>
-      !m.name.trim() ||
-      !m.rule.trim() ||
-      parseOptionalNumber(m.weight) === undefined ||
-      (parseOptionalNumber(m.weight) ?? -1) < 0,
-  )
-    ? "Every metric needs a name, a rule and a weight of 0 or more."
-    : "";
-
   const hasErrors = Boolean(
     trimmedTitle.length === 0 ||
       rejectionError ||
       maxAttemptsError ||
-      minYearsError ||
-      acceptRangeError ||
-      rejectRangeError ||
-      thresholdOrderError ||
-      metricsError,
+      minYearsError,
   );
 
   // ── payload
-  const buildCustom = (): VettingConfigPayload | undefined => {
-    const custom: VettingConfigPayload = {};
-    if (metrics.length > 0) {
-      custom.metrics = metrics.map((m) => ({
-        name: m.name.trim(),
-        rule: m.rule.trim(),
-        weight: parseOptionalNumber(m.weight) ?? 0,
-      }));
-    }
-    if (requiredSkills.length > 0) custom.requiredSkills = requiredSkills;
-    if (parsedAccept !== undefined) custom.acceptThreshold = parsedAccept;
-    if (parsedReject !== undefined) custom.rejectThreshold = parsedReject;
-    // Nothing configured => no vetting config at all (stored as null), rather
-    // than an empty shell the engine would still have to reason about.
-    return Object.keys(custom).length > 0 ? custom : undefined;
-  };
-
   const buildEligibility = (): JobEligibilityPayload => {
     const eligibility: JobEligibilityPayload = {};
     if (city.trim()) eligibility.city = city.trim();
     if (parsedMinYears !== undefined) {
       eligibility.minYearsExperience = parsedMinYears;
     }
-    const custom = buildCustom();
-    if (custom) eligibility.custom = custom;
+    if (requiredSkills.length > 0) {
+      eligibility.requiredSkills = requiredSkills;
+    }
     return eligibility;
   };
 
@@ -672,186 +590,8 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
             />
             <p className="text-xs text-muted-foreground">
               A hard gate: every skill listed must appear in the CV, or the
-              candidate is rejected before any scoring happens.
+              candidate is auto-rejected. Leave empty for no skill gate.
             </p>
-          </div>
-
-          {/* Weighted metrics — the composite the accept/reject lines below
-              are compared against. */}
-          <div className="flex flex-col gap-2.5">
-            <div className="flex items-center justify-between">
-              <Label>Vetting metrics</Label>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  setMetrics((prev) => [
-                    ...prev,
-                    { key: nextMetricKey(), name: "", rule: "", weight: "1" },
-                  ])
-                }
-              >
-                <Plus className="h-4 w-4" />
-                Add metric
-              </Button>
-            </div>
-            {metrics.length === 0 ? (
-              <p className="rounded-lg border border-dashed border-border bg-muted/30 px-3 py-4 text-center text-xs text-muted-foreground">
-                No metrics yet. Without any, every CV that clears the hard gates
-                above scores the same.
-              </p>
-            ) : (
-              <div className="flex flex-col gap-2">
-                {metrics.map((metric, idx) => (
-                  <div
-                    key={metric.key}
-                    className="grid gap-2 rounded-lg border border-border bg-card p-3 sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)_5rem_auto]"
-                  >
-                    <Input
-                      value={metric.name}
-                      maxLength={200}
-                      aria-label={`Metric ${idx + 1} name`}
-                      placeholder="React depth"
-                      onChange={(e) =>
-                        setMetrics((prev) =>
-                          prev.map((m) =>
-                            m.key === metric.key
-                              ? { ...m, name: e.target.value }
-                              : m,
-                          ),
-                        )
-                      }
-                    />
-                    <Input
-                      value={metric.rule}
-                      maxLength={1000}
-                      aria-label={`Metric ${idx + 1} rule`}
-                      placeholder="3+ years building production React apps"
-                      onChange={(e) =>
-                        setMetrics((prev) =>
-                          prev.map((m) =>
-                            m.key === metric.key
-                              ? { ...m, rule: e.target.value }
-                              : m,
-                          ),
-                        )
-                      }
-                    />
-                    <Input
-                      type="number"
-                      min={0}
-                      value={metric.weight}
-                      aria-label={`Metric ${idx + 1} weight`}
-                      onChange={(e) =>
-                        setMetrics((prev) =>
-                          prev.map((m) =>
-                            m.key === metric.key
-                              ? { ...m, weight: e.target.value }
-                              : m,
-                          ),
-                        )
-                      }
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                      aria-label={`Remove metric ${idx + 1}`}
-                      onClick={() =>
-                        setMetrics((prev) =>
-                          prev.filter((m) => m.key !== metric.key),
-                        )
-                      }
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
-            {metricsError ? (
-              <p className="text-xs text-destructive">{metricsError}</p>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                Each metric is scored 0–100 against the CV; the composite is
-                their weighted average. A weight of 1 is neutral.
-              </p>
-            )}
-          </div>
-
-          <div className="flex flex-col gap-2.5">
-            <Label>Decision thresholds</Label>
-            {/* Spelling out the three bands is the whole point of this
-                section — HR cannot set these two numbers blind. */}
-            <p className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-              Once the composite is scored:{" "}
-              <strong className="font-semibold text-foreground">
-                at or above the accept line
-              </strong>{" "}
-              the candidate is auto-invited to interview;{" "}
-              <strong className="font-semibold text-foreground">
-                below the reject line
-              </strong>{" "}
-              they're auto-rejected; anything{" "}
-              <strong className="font-semibold text-foreground">
-                in between
-              </strong>{" "}
-              parks at Pre-screened for a human to decide. Set them equal to
-              remove the review band entirely.
-            </p>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="flex flex-col gap-2.5">
-                <Label
-                  htmlFor="job-accept"
-                  className="text-xs text-muted-foreground"
-                >
-                  Accept line
-                </Label>
-                <Input
-                  id="job-accept"
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={acceptThreshold}
-                  aria-invalid={Boolean(acceptRangeError || thresholdOrderError)}
-                  onChange={(e) => setAcceptThreshold(e.target.value)}
-                  placeholder="Engine default"
-                />
-                {acceptRangeError ? (
-                  <p className="text-xs text-destructive">{acceptRangeError}</p>
-                ) : null}
-              </div>
-              <div className="flex flex-col gap-2.5">
-                <Label
-                  htmlFor="job-reject"
-                  className="text-xs text-muted-foreground"
-                >
-                  Reject line
-                </Label>
-                <Input
-                  id="job-reject"
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={rejectThreshold}
-                  aria-invalid={Boolean(rejectRangeError || thresholdOrderError)}
-                  onChange={(e) => setRejectThreshold(e.target.value)}
-                  placeholder="Engine default"
-                />
-                {rejectRangeError ? (
-                  <p className="text-xs text-destructive">{rejectRangeError}</p>
-                ) : null}
-              </div>
-            </div>
-            {thresholdOrderError ? (
-              <p className="text-xs text-destructive">{thresholdOrderError}</p>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                Leave either empty to use the vetting engine's own default.
-              </p>
-            )}
           </div>
         </CardContent>
       </Card>

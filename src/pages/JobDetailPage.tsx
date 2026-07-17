@@ -194,7 +194,7 @@ const EMPTY = <span className="text-muted-foreground">—</span>;
 
 function JobSummaryCard({ job }: { job: Job }) {
   const { data: organization } = useOrganization();
-  const custom = job.eligibility.custom;
+  const requiredSkills = job.eligibility.requiredSkills;
 
   return (
     <Card>
@@ -246,9 +246,9 @@ function JobSummaryCard({ job }: { job: Job }) {
           <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Required skills
           </span>
-          {custom && custom.requiredSkills.length > 0 ? (
+          {requiredSkills.length > 0 ? (
             <div className="flex flex-wrap gap-1.5">
-              {custom.requiredSkills.map((skill) => (
+              {requiredSkills.map((skill) => (
                 <Badge key={skill} variant="secondary">
                   {skill}
                 </Badge>
@@ -259,67 +259,6 @@ function JobSummaryCard({ job }: { job: Job }) {
               None — no skill is a hard requirement.
             </span>
           )}
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Vetting metrics
-          </span>
-          {custom && custom.metrics.length > 0 ? (
-            <div className="flex flex-col gap-2">
-              {custom.metrics.map((metric) => (
-                <div
-                  key={metric.name}
-                  className="rounded-lg border border-border bg-muted/30 p-2.5"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium">{metric.name}</p>
-                    <Badge variant="outline">weight {metric.weight}</Badge>
-                  </div>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    {metric.rule}
-                  </p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <span className="text-sm text-muted-foreground">
-              None — every CV that clears the gates above scores the same.
-            </span>
-          )}
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Decision thresholds
-          </span>
-          <p className="text-sm text-muted-foreground">
-            {custom?.acceptThreshold === null ||
-            custom?.acceptThreshold === undefined ? (
-              "Accept line: engine default"
-            ) : (
-              <>
-                At or above{" "}
-                <strong className="font-semibold text-foreground">
-                  {custom.acceptThreshold}
-                </strong>{" "}
-                auto-invites.
-              </>
-            )}{" "}
-            {custom?.rejectThreshold === null ||
-            custom?.rejectThreshold === undefined ? (
-              "Reject line: engine default."
-            ) : (
-              <>
-                Below{" "}
-                <strong className="font-semibold text-foreground">
-                  {custom.rejectThreshold}
-                </strong>{" "}
-                auto-rejects.
-              </>
-            )}{" "}
-            Anything in between parks at Pre-screened for review.
-          </p>
         </div>
 
         <div className="flex flex-col gap-1.5">

@@ -38,30 +38,15 @@ export interface Paginated<T> {
 
 // ── the job document ──────────────────────────────────────────────────
 
-/** One weighted CV metric the pre-screen engine scores 0–100. */
-export interface VettingMetric {
-  name: string
-  /** The natural-language rule the engine evaluates against the parsed CV. */
-  rule: string
-  weight: number
-}
-
 /**
- * `eligibility.custom`, as persisted. The backend stores this as a Mixed
- * prop and normalizes omitted values, so thresholds read back as `null`
- * (= fall back to the engine's own defaults) rather than absent.
+ * The job's hard gates, as persisted. Every field is pass/fail against the
+ * parsed CV — clears them all → auto-invited, fails any → auto-rejected.
+ * There is no scoring layer, so there is nothing else to configure here.
  */
-export interface VettingConfig {
-  metrics: VettingMetric[]
-  acceptThreshold: number | null
-  rejectThreshold: number | null
-  requiredSkills: string[]
-}
-
 export interface JobEligibility {
   city: string | null
   minYearsExperience: number | null
-  custom: VettingConfig | null
+  requiredSkills: string[]
 }
 
 /** Fold weights for `scores.overall`. Always sum to exactly 100. */
@@ -130,17 +115,14 @@ export interface Job extends JobBase {
 
 // ── request payloads ──────────────────────────────────────────────────
 
-export interface VettingConfigPayload {
-  metrics?: VettingMetric[]
-  acceptThreshold?: number
-  rejectThreshold?: number
-  requiredSkills?: string[]
-}
-
+/**
+ * REPLACE semantics: sending `eligibility` swaps the whole block, so an
+ * omitted field clears that gate rather than leaving it unchanged.
+ */
 export interface JobEligibilityPayload {
   city?: string
   minYearsExperience?: number
-  custom?: VettingConfigPayload
+  requiredSkills?: string[]
 }
 
 /**
