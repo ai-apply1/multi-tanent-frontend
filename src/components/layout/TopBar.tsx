@@ -1,39 +1,21 @@
-import { useState } from "react"
-import { NavLink, useNavigate } from "react-router-dom"
+import { useEffect, useState } from "react"
+import type { ReactNode } from "react"
+import { useNavigate } from "react-router-dom"
 import toast from "react-hot-toast"
-import {
-  LogOut,
-  Menu,
-  Moon,
-  PanelLeftClose,
-  PanelLeftOpen,
-  ShieldCheck,
-  Sun
-} from "lucide-react"
-import { BrandLogo } from "@/components/BrandLogo"
-import { Button } from "@/components/ui/button"
+import { Bell, Clock, LogOut, Moon, Search, Sparkles, Sun, User } from "lucide-react"
+import { CommandPalette } from "@/components/layout/CommandPalette"
+import { MobileNavTrigger } from "@/components/layout/Sidebar"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuTrigger
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import {
-  Sheet,
-  SheetBody,
-  SheetContent,
-  SheetHeader,
-  SheetTitle
-} from "@/components/ui/sheet"
-import { cn } from "@/lib/utils"
+import { Sheet, SheetClose, SheetContent } from "@/components/ui/sheet"
 import { useAuth } from "@/features/auth/AuthContext"
-import { useOrganization } from "@/features/organization/useOrganization"
 import { useTheme } from "@/features/theme/ThemeContext"
 import { ROUTES } from "@/routes"
-import { navSections, visibleSections } from "@/components/layout/Sidebar"
 
 function initialsFor(name: string) {
   return (
@@ -42,223 +24,280 @@ function initialsFor(name: string) {
       .filter(Boolean)
       .slice(0, 2)
       .map((p) => p[0]?.toUpperCase() || "")
-      .join("") || "A"
+      .join("") || "U"
   )
 }
 
-interface TopBarProps {
-  onToggleSidebar?: () => void
-  sidebarCollapsed?: boolean
+type NotifKind = "success" | "info" | "warning" | "accent"
+
+interface Notif {
+  id: string
+  kind: NotifKind
+  icon: ReactNode
+  text: ReactNode
+  time: string
+  unread: boolean
 }
 
-export function TopBar({ onToggleSidebar, sidebarCollapsed = false }: TopBarProps) {
+// TODO: replace with real notification feed when the backend exposes one.
+const INITIAL_NOTIFS: Notif[] = [
+  {
+    id: "n1",
+    kind: "accent",
+    icon: <Sparkles className="h-4 w-4" strokeWidth={1.7} />,
+    text: (
+      <span>
+        <strong className="font-semibold">Grace Hopper</strong> completed the AI interview
+      </span>
+    ),
+    time: "8 min ago",
+    unread: true,
+  },
+  {
+    id: "n2",
+    kind: "warning",
+    icon: <Clock className="h-4 w-4" strokeWidth={1.7} />,
+    text: (
+      <span>
+        Ada Lovelace scored <strong className="font-semibold">91</strong> — awaiting your decision
+      </span>
+    ),
+    time: "1 h ago",
+    unread: true,
+  },
+  {
+    id: "n3",
+    kind: "info",
+    icon: <User className="h-4 w-4" strokeWidth={1.7} />,
+    text: (
+      <span>
+        New application for <strong className="font-semibold">Senior Frontend Engineer</strong>
+      </span>
+    ),
+    time: "3 h ago",
+    unread: false,
+  },
+]
+
+const NOTIF_TINT: Record<NotifKind, string> = {
+  success: "bg-[var(--success-soft)] text-[var(--success)]",
+  info: "bg-[var(--info-soft)] text-[var(--info)]",
+  warning: "bg-[var(--warning-soft)] text-[var(--warning)]",
+  accent: "bg-accent text-primary",
+}
+
+/**
+ * 60px sticky header: a wide search-pill "command palette" trigger on the
+ * left (real palette wiring omitted here — clicks it are a no-op), a
+ * notifications bell that opens a right-side drawer, and the profile
+ * avatar which opens a dropdown containing profile links, the theme
+ * toggle, and sign-out. Below `lg:` the search pill hides and the
+ * hamburger drawer becomes the primary navigation surface.
+ */
+export function TopBar() {
   const { user, logout } = useAuth()
-  const { data: organization, isLoading: isOrgLoading } = useOrganization()
   const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
+  const displayName = user?.fullName || user?.email || "Admin"
+  const email = user?.email || ""
+  const rolePill = user?.role === "org_admin" ? "Org admin" : "HR"
 
-  // Mobile / tablet: a slide-in left drawer holds the same nav
-  // sections the desktop sidebar renders. The desktop `<aside>`
-  // itself is gated on `lg:flex` and therefore invisible below
-  // 1024px, so without this drawer an admin on a phone would have
-  // zero way to reach the rest of the app.
-  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false)
+  const [notifOpen, setNotifOpen] = useState(false)
+  const [notifs, setNotifs] = useState<Notif[]>(INITIAL_NOTIFS)
+  const [paletteOpen, setPaletteOpen] = useState(false)
 
-  const sections = visibleSections(navSections, user?.role)
-  const displayName = user?.fullName || user?.email || ""
+  // Global ⌘K / Ctrl+K listener. Runs at the window level rather than being
+  // owned by the search pill so the palette opens from anywhere in the app —
+  // including inside modal dialogs — the way Cmd+K users expect.
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault()
+        setPaletteOpen((v) => !v)
+      }
+    }
+    window.addEventListener("keydown", handleKey)
+    return () => window.removeEventListener("keydown", handleKey)
+  }, [])
 
-  const handleLogout = async () => {
+  const handleMarkAllRead = () => {
+    setNotifs((prev) => prev.map((n) => ({ ...n, unread: false })))
+  }
+
+  const handleSignOut = async () => {
     try {
       await logout()
       toast.success("Signed out.")
     } catch {
-      // `AuthContext.logout` tears the session down in its own `finally`, so
-      // the admin IS signed out locally and ProtectedRoute redirects either
-      // way. Say so rather than inviting a retry that /login can't offer.
       toast.error("Signed out locally, but the server session may still be active.")
     } finally {
-      // Must follow the teardown, not the happy path — the error branch would
-      // otherwise skip the redirect entirely.
       navigate(ROUTES.LOGIN, { replace: true })
     }
   }
 
+  const themeLabel = theme === "dark" ? "Switch to light mode" : "Switch to dark mode"
+
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur sm:px-6 lg:px-8">
-      <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-        {/* Mobile / tablet hamburger. Opens the same nav sections
-            the desktop sidebar shows. Hidden at `lg:` where the
-            permanent left rail is visible. */}
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setIsMobileNavOpen(true)}
-          aria-label="Open menu"
-          aria-expanded={isMobileNavOpen}
-          aria-controls="admin-mobile-nav"
-          className="lg:hidden"
-        >
-          <Menu className="h-5 w-5" />
-        </Button>
+    <header className="sticky top-0 z-30 flex h-[60px] shrink-0 items-center gap-3 border-b border-line bg-surface px-4 sm:px-5 lg:px-6">
+      <MobileNavTrigger />
 
-        {onToggleSidebar && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onToggleSidebar}
-            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className="hidden lg:inline-flex"
+      <button
+        type="button"
+        onClick={() => setPaletteOpen(true)}
+        aria-label="Open command palette"
+        className="hidden h-[38px] max-w-[380px] flex-1 items-center gap-2.5 rounded-[9px] border border-line bg-surface-3 px-3.5 text-[13px] text-ink-muted transition hover:border-line-2 lg:flex"
+      >
+        <Search className="h-[15px] w-[15px]" strokeWidth={1.7} />
+        <span className="flex-1 text-left">Search candidates, jobs…</span>
+        <span className="mono rounded-[5px] border border-line-2 px-1.5 py-0.5 text-[11px]">⌘K</span>
+      </button>
+
+      {/* Mobile shortcut — the wide search pill hides on small screens, so
+          expose a tiny 38x38 button that opens the same palette. */}
+      <button
+        type="button"
+        onClick={() => setPaletteOpen(true)}
+        aria-label="Open command palette"
+        className="flex h-[38px] w-[38px] items-center justify-center rounded-[9px] border border-line bg-surface text-ink-2 transition hover:bg-surface-3 lg:hidden"
+      >
+        <Search className="h-[17px] w-[17px]" strokeWidth={1.7} />
+      </button>
+
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+
+      <div className="flex-1 lg:hidden" />
+
+      <div className="ml-auto flex items-center gap-2">
+        <Sheet open={notifOpen} onOpenChange={setNotifOpen}>
+          <button
+            type="button"
+            onClick={() => setNotifOpen(true)}
+            className="relative flex h-[38px] w-[38px] items-center justify-center rounded-[9px] border border-line bg-surface text-ink-2 hover:bg-surface-3"
+            aria-label="Notifications"
           >
-            {sidebarCollapsed ? (
-              <PanelLeftOpen className="h-4 w-4" />
-            ) : (
-              <PanelLeftClose className="h-4 w-4" />
-            )}
-          </Button>
-        )}
+            <Bell className="h-[17px] w-[17px]" strokeWidth={1.7} />
+            {notifs.some((n) => n.unread) ? (
+              <span className="absolute right-[9px] top-[9px] h-[7px] w-[7px] rounded-full bg-[var(--danger)] ring-2 ring-surface" />
+            ) : null}
+          </button>
 
-        {/* The tenant's identity, not ours. The fixed `h-8` reserves the row
-            before the org resolves, so swapping in a logo of any aspect ratio
-            can't reflow the header — and while it's in flight we render
-            nothing rather than flashing the platform mark at an org that has
-            its own. `isLoading` (not `isPending`) is the right signal: the
-            query is disabled without a session, and a disabled query stays
-            pending forever, which would hide the fallback on the login-
-            adjacent renders.
+          <SheetContent
+            side="right"
+            hideCloseButton
+            className="flex w-[380px] max-w-[92%] flex-col border-l border-line bg-surface p-0 sm:max-w-[380px]"
+          >
+            <div className="flex items-center justify-between border-b border-line px-5 py-4">
+              <div className="text-[16px] font-semibold text-ink">Notifications</div>
+              <div className="flex items-center gap-1">
+                {notifs.some((n) => n.unread) ? (
+                  <button
+                    type="button"
+                    onClick={handleMarkAllRead}
+                    className="rounded-md px-2 py-1 text-[12px] font-medium text-ink-muted transition hover:bg-surface-3 hover:text-ink"
+                  >
+                    Mark all read
+                  </button>
+                ) : null}
+                <SheetClose
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition hover:bg-surface-3 hover:text-ink"
+                  aria-label="Close notifications"
+                >
+                  <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round">
+                    <path d="M5 5l10 10M15 5 5 15" />
+                  </svg>
+                </SheetClose>
+              </div>
+            </div>
 
-            An org with NO logo shows its own NAME as the mark, never the
-            platform's: their brand IS the name. The platform mark is only for
-            the case where no org resolved at all. The secondary name label
-            below is then suppressed, or the name would appear twice. */}
-        <div className="flex h-8 min-w-0 items-center gap-2">
-          {organization?.logoUrl ? (
-            <img
-              src={organization.logoUrl}
-              alt={organization.name}
-              className="h-8 w-auto max-w-36 shrink-0 object-contain"
-              draggable={false}
-            />
-          ) : organization?.name ? (
-            <span
-              className="max-w-56 truncate text-base font-semibold"
-              title={organization.name}
-            >
-              {organization.name}
-            </span>
-          ) : isOrgLoading ? null : (
-            <BrandLogo size="md" />
-          )}
-          {organization?.logoUrl && organization?.name ? (
-            <span
-              className="hidden max-w-48 truncate text-sm font-semibold sm:block"
-              title={organization.name}
-            >
-              {organization.name}
-            </span>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="ml-auto flex shrink-0 items-center gap-2">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={toggleTheme}
-          aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-        >
-          {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-        </Button>
+            <div className="scroll flex-1 overflow-auto">
+              {notifs.length === 0 ? (
+                <div className="px-5 py-14 text-center">
+                  <div className="text-[13px] text-ink-muted">You're all caught up.</div>
+                  <div className="mt-1 text-[12px] text-ink-subtle">No new notifications</div>
+                </div>
+              ) : (
+                notifs.map((n) => (
+                  <div
+                    key={n.id}
+                    className={
+                      "flex cursor-pointer gap-3 border-b border-line px-5 py-3.5 transition last:border-b-0 hover:bg-hover " +
+                      (n.unread ? "bg-[var(--accent-softer)]" : "")
+                    }
+                  >
+                    <span
+                      className={
+                        "flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[9px] " +
+                        NOTIF_TINT[n.kind]
+                      }
+                    >
+                      {n.icon}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13px] leading-snug text-ink">{n.text}</div>
+                      <div className="mt-1 text-[11.5px] text-ink-subtle">{n.time}</div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </SheetContent>
+        </Sheet>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="flex items-center gap-2 rounded-full p-1 transition hover:bg-accent">
-              <Avatar>
-                <AvatarFallback>{displayName ? initialsFor(displayName) : "A"}</AvatarFallback>
-              </Avatar>
-              <div className="hidden text-left text-xs sm:block">
-                <p className="font-medium leading-tight">{user?.fullName || "Administrator"}</p>
-                <p className="text-muted-foreground">{user?.email}</p>
-              </div>
+            <button
+              type="button"
+              className="flex h-[38px] items-center gap-2 rounded-[9px] px-1.5 transition hover:bg-surface-3"
+              aria-label="Open profile menu"
+            >
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-accent text-[11px] font-bold text-primary">
+                {initialsFor(displayName)}
+              </span>
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-64">
-            <DropdownMenuLabel>Signed in as</DropdownMenuLabel>
-            <div className="px-2 pb-2 text-sm">
-              <p className="font-medium">{user?.fullName}</p>
-              <p className="truncate text-xs text-muted-foreground">{user?.email}</p>
+            <div className="px-3 py-2.5">
+              <div className="truncate text-[13.5px] font-semibold text-ink">{displayName}</div>
+              {email ? <div className="truncate text-[12px] text-ink-muted">{email}</div> : null}
+              <span className="mt-1.5 inline-block rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-primary">
+                {rolePill}
+              </span>
             </div>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={handleLogout}>
-              <LogOut className="h-4 w-4" />
+            <DropdownMenuItem onSelect={(event) => event.preventDefault()}>
+              <User className="h-3.5 w-3.5" strokeWidth={1.7} />
+              Your profile
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => navigate(ROUTES.ORG_SETTINGS)}>
+              <Bell className="h-3.5 w-3.5" strokeWidth={1.7} />
+              Notification settings
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={(event) => {
+                event.preventDefault()
+                toggleTheme()
+              }}
+            >
+              {theme === "dark" ? (
+                <Sun className="h-3.5 w-3.5" strokeWidth={1.7} />
+              ) : (
+                <Moon className="h-3.5 w-3.5" strokeWidth={1.7} />
+              )}
+              {themeLabel}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={(event) => {
+                event.preventDefault()
+                void handleSignOut()
+              }}
+            >
+              <LogOut className="h-3.5 w-3.5" strokeWidth={1.7} />
               Sign out
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-
-      {/* Mobile / tablet navigation drawer. Mirrors the desktop
-          sidebar's `navSections` (single source of truth lives in
-          `Sidebar.tsx`), including its `requiresRole` gating — a nav
-          item hidden on the rail must not reappear here. Closes on
-          backdrop tap, Esc, the close button, OR when a NavLink is
-          tapped — that last bit means tapping a section takes the
-          admin to the page AND collapses the drawer in one motion. */}
-      <Sheet open={isMobileNavOpen} onOpenChange={setIsMobileNavOpen}>
-        <SheetContent
-          id="admin-mobile-nav"
-          side="left"
-          className="bg-sidebar text-sidebar-foreground p-0 sm:max-w-xs"
-        >
-          <SheetHeader className="border-sidebar-border">
-            <div className="flex min-w-0 items-center gap-2">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                <ShieldCheck className="h-5 w-5" aria-hidden />
-              </div>
-              <SheetTitle className="truncate text-base">
-                {organization?.name || "Dashboard"}
-              </SheetTitle>
-            </div>
-          </SheetHeader>
-          <SheetBody className="px-3 py-4">
-            <nav className="space-y-4">
-              {sections.map((section, sectionIdx) => (
-                <div key={section.label ?? sectionIdx} className="space-y-1">
-                  {section.label ? (
-                    <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      {section.label}
-                    </p>
-                  ) : null}
-                  {section.items.map((item) => (
-                    <NavLink
-                      key={item.to}
-                      to={item.to}
-                      end={item.end ?? true}
-                      onClick={() => setIsMobileNavOpen(false)}
-                      className={({ isActive }) =>
-                        cn(
-                          "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                          isActive
-                            ? "bg-primary/10 text-primary"
-                            : "text-foreground/80 hover:bg-accent hover:text-accent-foreground"
-                        )
-                      }
-                    >
-                      <item.icon className="h-4 w-4 shrink-0" aria-hidden />
-                      <span className="truncate">{item.label}</span>
-                      {item.badge ? (
-                        <span className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold leading-none text-primary-foreground">
-                          {item.badge > 99 ? "99+" : item.badge}
-                        </span>
-                      ) : null}
-                    </NavLink>
-                  ))}
-                </div>
-              ))}
-            </nav>
-          </SheetBody>
-        </SheetContent>
-      </Sheet>
     </header>
   )
 }

@@ -68,9 +68,10 @@ const applyFavicon = (href: string): void => {
       Object.assign(document.createElement("link"), { rel: "icon" }),
     )
   link.href = href
-  // The static icon is `type="image/svg+xml"`; an org's may be a .png or .ico.
-  // A stale type attribute is a rendering coin flip, so let the server's
-  // Content-Type decide instead of asserting the wrong one.
+  // An org's icon may be a .png, .svg or .ico, and we do not know which from
+  // the URL. A wrong `type` is a rendering coin flip, so assert nothing and let
+  // the server's Content-Type decide. (`index.html` omits it for the same
+  // reason.)
   link.removeAttribute("type")
 }
 

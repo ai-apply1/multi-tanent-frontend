@@ -3,6 +3,7 @@ import api from "@/lib/api"
 import type {
   BulkConfirmResult,
   BulkConfirmRow,
+  BulkExtractRow,
   BulkPresignFile,
   CandidateDetail,
   CandidateStatus,
@@ -167,6 +168,25 @@ export async function bulkPresignCvs(jobId: string, files: BulkPresignFile[]) {
     { files }
   )
   return data.files
+}
+
+/**
+ * Step 1.5: read name/email/phone/city off CVs whose PUTs have landed.
+ *
+ * Reads only — no candidate rows are created, so abandoning the dialog here
+ * costs nothing but orphaned S3 objects (swept by the prefix delete, same
+ * as an abandoned presign).
+ *
+ * Send at most `BULK_EXTRACT_BATCH` keys per call; the server rejects more.
+ * Per-CV outcomes ride in each row's `error` — the call itself only throws
+ * on a real transport/auth failure.
+ */
+export async function bulkExtractCvs(jobId: string, cvKeys: string[]) {
+  const { data } = await api.post<{ rows: BulkExtractRow[] }>(
+    `/admin/jobs/${jobId}/candidates/bulk-extract`,
+    { cvKeys }
+  )
+  return data.rows
 }
 
 /**

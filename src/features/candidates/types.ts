@@ -101,8 +101,10 @@ export interface CandidateBase {
   jobId: string
   fullName: string
   email: string
-  phone: string | null
-  city: string | null
+  /** Required at every write path — never empty on a row created since. */
+  phone: string
+  /** Required at every write path. Stored lowercased; re-case for display. */
+  city: string
   /** S3 key, never a URL. `null` ⇒ no CV on file ⇒ the Open-CV action is hidden. */
   cvKey: string | null
   /** Computed from the parsed CV's work history; `null` until the parse lands. */
@@ -177,8 +179,10 @@ export interface KanbanCard {
   _id: string
   fullName: string
   email: string
-  phone: string | null
-  city: string | null
+  /** Required at every write path — never empty on a row created since. */
+  phone: string
+  /** Required at every write path. Stored lowercased; re-case for display. */
+  city: string
   yearsOfExperience: number | null
   attemptCount: number
   latestInterviewId: string | null
@@ -251,9 +255,46 @@ export interface PresignedCvUpload {
 export interface BulkConfirmRow {
   fullName: string
   email: string
-  phone?: string
-  city?: string
+  /** Required server-side (`@IsNotEmpty`) — an empty string is a 400. */
+  phone: string
+  /** Required server-side: the job's city gate compares against it. */
+  city: string
   cvKey: string
+}
+
+/**
+ * `POST /admin/jobs/:jobId/candidates/bulk-extract` — reads name/email/
+ * phone/city off CVs already in S3, so the review table starts pre-filled
+ * instead of asking a human to type 50 emails.
+ *
+ * Max keys PER CALL. The server caps this too (`BULK_EXTRACT_MAX_KEYS`);
+ * keep the two in step. It's small on purpose — one LLM call per CV runs
+ * while the admin watches, so a 50-CV ZIP goes out as ~10 short requests
+ * that report progress, rather than one that flirts with the proxy timeout.
+ */
+export const BULK_EXTRACT_BATCH = 5
+
+/** Why one CV couldn't be read. `null` = read fine. */
+export type BulkExtractError = "invalid_cv_key" | "unreadable"
+
+export const EXTRACT_ERROR_LABELS: Record<BulkExtractError, string> = {
+  invalid_cv_key: "Upload didn't complete",
+  unreadable: "Couldn't read this file",
+}
+
+/**
+ * One extracted row. Every field can be `""` — that is NOT a failure, it
+ * means the CV didn't state it (or the extractor wasn't confident enough
+ * to guess, which is deliberate: a wrong email reaches a real stranger).
+ * An empty `email` is what the dialog blocks the import on.
+ */
+export interface BulkExtractRow {
+  cvKey: string
+  fullName: string
+  email: string
+  phone: string
+  city: string
+  error: BulkExtractError | string | null
 }
 
 /** Why one row of a bulk-confirm didn't become a candidate. */

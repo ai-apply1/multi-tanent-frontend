@@ -9,6 +9,7 @@ export const ROUTES = {
   JOB_CANDIDATES: "/dashboard/jobs/:jobId/candidates",
   CANDIDATES: "/dashboard/candidates",
   QUESTIONS: "/dashboard/questions",
+  PIPELINE: "/dashboard/pipeline",
   ORG_SETTINGS: "/dashboard/settings",
   TEAM: "/dashboard/team",
 } as const;

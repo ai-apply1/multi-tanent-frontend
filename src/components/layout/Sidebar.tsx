@@ -1,71 +1,64 @@
-import { NavLink } from "react-router-dom";
+import { useState } from "react";
+import { NavLink, useLocation } from "react-router-dom";
 import {
   Briefcase,
-  Inbox,
-  LayoutDashboard,
-  ListChecks,
+  GitBranch,
+  LayoutGrid,
+  Library,
+  LogOut,
+  Menu,
   Settings,
-  ShieldCheck,
-  Users,
+  Users2,
+  UserSquare2,
+  X,
   type LucideIcon,
 } from "lucide-react";
+import toast from "react-hot-toast";
+import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { ROUTES } from "@/routes";
 import { useAuth } from "@/features/auth/AuthContext";
 import { useOrganization } from "@/features/organization/useOrganization";
 import type { UserRole } from "@/features/auth/types";
+import { PLATFORM_NAME } from "@/lib/platform";
 
-export interface NavItem {
+interface NavItem {
   label: string;
   to: string;
   icon: LucideIcon;
-  /** Hide the item unless the signed-in user holds this role. */
   requiresRole?: UserRole;
-  /** Optional count pill (a dot when the rail is collapsed). */
-  badge?: number;
-  /**
-   * `false` keeps the item highlighted on child routes — Jobs must stay
-   * active on `/dashboard/jobs/:id/edit`. Defaults to exact matching,
-   * without which `/dashboard/jobs` would light up on every child route
-   * of every sibling that nests under it.
-   */
   end?: boolean;
 }
 
-export interface NavSection {
+interface NavSection {
   label?: string;
   items: NavItem[];
 }
 
-/**
- * Single source of truth for the navigation. Exported so the mobile
- * hamburger drawer (in `TopBar.tsx`) can render the same sections without
- * going through the desktop-only `<aside>` (which is gated on `lg:flex`
- * and therefore invisible on phones / tablets). Both consumers must honour
- * `requiresRole`.
- */
 export const navSections: NavSection[] = [
   {
-    items: [{ label: "Overview", to: ROUTES.OVERVIEW, icon: LayoutDashboard }],
-  },
-  {
-    label: "Recruiting",
     items: [
+      { label: "Overview", to: ROUTES.OVERVIEW, icon: LayoutGrid },
       { label: "Jobs", to: ROUTES.JOBS, icon: Briefcase, end: false },
-      { label: "Candidates", to: ROUTES.CANDIDATES, icon: Inbox },
-      { label: "Question Bank", to: ROUTES.QUESTIONS, icon: ListChecks },
+      { label: "Candidates", to: ROUTES.CANDIDATES, icon: Users2 },
+      { label: "Question bank", to: ROUTES.QUESTIONS, icon: Library },
     ],
   },
   {
-    label: "Organization",
+    label: "Workspace",
     items: [
-      { label: "Settings", to: ROUTES.ORG_SETTINGS, icon: Settings },
-      { label: "Team", to: ROUTES.TEAM, icon: Users, requiresRole: "org_admin" },
+      { label: "Pipeline", to: ROUTES.PIPELINE, icon: GitBranch },
+      { label: "Organization", to: ROUTES.ORG_SETTINGS, icon: Settings },
+      {
+        label: "Team",
+        to: ROUTES.TEAM,
+        icon: UserSquare2,
+        requiresRole: "org_admin",
+      },
     ],
   },
 ];
 
-/** Drop the items the signed-in role may not see. Shared with `TopBar`. */
 export function visibleSections(
   sections: NavSection[],
   role: UserRole | undefined,
@@ -80,95 +73,293 @@ export function visibleSections(
     .filter((section) => section.items.length > 0);
 }
 
-interface SidebarProps {
-  collapsed?: boolean;
+function initialsFor(name: string) {
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((p) => p[0]?.toUpperCase() || "")
+      .join("") || "U"
+  );
 }
 
-export function Sidebar({ collapsed = false }: SidebarProps) {
-  const { user } = useAuth();
+/**
+ * DevExcel org portal sidebar. 236px wide, white surface with a right
+ * border. Active item highlight is `accent-soft` bg + `accent` text with
+ * a 3px accent rail extending -12px into the row's negative-left margin.
+ * Mobile: hidden behind a hamburger drawer exposed via `<MobileNavTrigger>`
+ * (rendered inside the TopBar).
+ */
+export function Sidebar() {
+  const { user, logout } = useAuth();
   const { data: organization } = useOrganization();
+  const navigate = useNavigate();
   const sections = visibleSections(navSections, user?.role);
 
+  // NOT a hardcoded org name. The design branch had `|| "DevExcel"` here, which
+  // ships one customer's name to every other customer's sidebar — the exact
+  // white-label failure the branding work exists to prevent, and worse than
+  // showing the platform's own name because it names a competitor.
+  //
+  // `PLATFORM_NAME` is the honest fallback: it only ever shows when no org
+  // resolved at all (the query is disabled without a session), and it is a
+  // neutral placeholder rather than anyone's brand.
+  const orgName = organization?.name || PLATFORM_NAME;
+  const orgInitials = initialsFor(orgName);
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      toast.success("Signed out.");
+    } catch {
+      toast.error(
+        "Signed out locally, but the server session may still be active.",
+      );
+    } finally {
+      navigate(ROUTES.LOGIN, { replace: true });
+    }
+  };
+
   return (
-    <aside
-      className={cn(
-        "hidden shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex",
-        // Desktop only: pin the rail to the viewport so it stays in view as
-        // the page/table scrolls (it's `hidden` on mobile, where the TopBar
-        // hamburger drawer is used instead). `h-screen` + `self-start` stops
-        // the flex row from stretching it, `overflow-y-auto` lets the nav
-        // scroll internally if it ever exceeds the viewport height.
-        "lg:sticky lg:top-0 lg:h-screen lg:self-start lg:overflow-y-auto",
-        "transition-[width] duration-200 ease-out",
-        collapsed ? "w-16" : "w-64",
-      )}
-    >
-      <div
-        className={cn(
-          "flex h-16 items-center gap-2 border-b border-sidebar-border",
-          collapsed ? "justify-center px-2" : "px-5",
-        )}
-      >
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-          <ShieldCheck className="h-5 w-5" aria-hidden />
-        </div>
-        {!collapsed && (
-          <div className="min-w-0">
-            {/* The org's name, not a product name — this rail is the tenant's.
-                The non-breaking space holds the line's height while the org
-                resolves, so the brand block never reflows (and never flashes
-                a placeholder name that isn't theirs). `truncate` because org
-                names are free text and the rail is only 16rem. */}
-            <p
-              className="truncate text-sm font-semibold leading-tight"
-              title={organization?.name}
-            >
-              {organization?.name || " "}
-            </p>
-          </div>
+    <aside className="hidden w-[236px] shrink-0 flex-col border-r border-line bg-surface lg:flex">
+      <div className="flex h-[60px] items-center gap-2.5 border-b border-line px-4">
+        {organization?.logoUrl ? (
+          // Dark-mode legibility: orgs upload ONE logo (usually dark ink on a
+          // transparent background), so on the dark theme we render it on a
+          // small white plate. Zero visual change in light mode where the
+          // sidebar surface is already white.
+          <span className="inline-flex items-center rounded-md dark:bg-white dark:px-2 dark:py-1">
+            <img
+              src={organization.logoUrl}
+              alt={orgName}
+              title={orgName}
+              className="h-8 w-auto max-w-[180px] object-contain dark:h-7"
+              draggable={false}
+            />
+          </span>
+        ) : (
+          <span
+            title={orgName}
+            className="flex h-[30px] w-[30px] items-center justify-center rounded-lg bg-primary text-[14px] font-bold text-primary-foreground"
+          >
+            {orgInitials}
+          </span>
         )}
       </div>
 
-      <nav className={cn("flex-1 space-y-4 py-4", collapsed ? "px-2" : "px-3")}>
+      <nav className="scroll flex-1 overflow-auto px-3 pt-2.5 pb-1">
         {sections.map((section, sectionIdx) => (
-          <div key={section.label ?? sectionIdx} className="space-y-1">
-            {!collapsed && section.label ? (
-              <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <div
+            key={section.label ?? sectionIdx}
+            className={sectionIdx > 0 ? "mt-2" : undefined}
+          >
+            {section.label ? (
+              <div className="px-2.5 pt-3 pb-1.5 text-[10.5px] font-bold uppercase tracking-[0.07em] text-ink-subtle">
                 {section.label}
-              </p>
+              </div>
             ) : null}
             {section.items.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
                 end={item.end ?? true}
-                title={collapsed ? item.label : undefined}
                 className={({ isActive }) =>
                   cn(
-                    "relative flex items-center rounded-md text-sm font-medium transition-colors",
-                    collapsed ? "justify-center p-2" : "gap-2 px-3 py-2",
+                    "group relative mb-0.5 flex items-center gap-3 rounded-[10px] px-2.5 py-2.5 text-[13.5px] font-medium transition-colors",
                     isActive
-                      ? "bg-primary/10 text-primary"
-                      : "text-foreground/80 hover:bg-accent hover:text-accent-foreground",
+                      ? "bg-accent text-primary"
+                      : "text-ink-2 hover:bg-hover",
                   )
                 }
               >
-                <item.icon className="h-4 w-4 shrink-0" aria-hidden />
-                {!collapsed && <span className="truncate">{item.label}</span>}
-                {item.badge ? (
-                  collapsed ? (
-                    <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-primary" />
-                  ) : (
-                    <span className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold leading-none text-primary-foreground">
-                      {item.badge > 99 ? "99+" : item.badge}
-                    </span>
-                  )
-                ) : null}
+                {({ isActive }) => (
+                  <>
+                    {isActive ? (
+                      <span className="absolute -left-3 top-2.5 bottom-2.5 w-[3px] rounded-full bg-primary" />
+                    ) : null}
+                    <item.icon
+                      className="h-[17px] w-[17px] shrink-0"
+                      strokeWidth={1.7}
+                    />
+                    <span className="flex-1 truncate">{item.label}</span>
+                  </>
+                )}
               </NavLink>
             ))}
           </div>
         ))}
       </nav>
+
+      <div className="flex items-center gap-2.5 border-t border-line px-3.5 py-3">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-[12px] font-bold text-primary">
+          {initialsFor(user?.fullName || user?.email || "U")}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[12.5px] font-semibold">
+            {user?.fullName || "User"}
+          </div>
+          <div className="truncate text-[11px] text-ink-muted">
+            {user?.role === "org_admin" ? "Org admin" : "Recruiter"}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={handleLogout}
+          title="Sign out"
+          className="flex h-[30px] w-[30px] items-center justify-center rounded-lg text-ink-muted transition hover:bg-accent hover:text-primary"
+        >
+          <LogOut className="h-[17px] w-[17px]" />
+        </button>
+      </div>
     </aside>
+  );
+}
+
+/**
+ * Compact hamburger button + slide-in drawer for mobile. Rendered from
+ * the TopBar; keeps its own open state so the TopBar can stay a
+ * near-empty header shell.
+ */
+export function MobileNavTrigger() {
+  const { user, logout } = useAuth();
+  const { data: organization } = useOrganization();
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const location = useLocation();
+  const sections = visibleSections(navSections, user?.role);
+
+  // Same rule as the desktop sidebar above: never a hardcoded org name.
+  const orgName = organization?.name || PLATFORM_NAME;
+  const orgInitials = initialsFor(orgName);
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      toast.success("Signed out.");
+    } catch {
+      toast.error(
+        "Signed out locally, but the server session may still be active.",
+      );
+    } finally {
+      navigate(ROUTES.LOGIN, { replace: true });
+    }
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label="Open menu"
+        className="flex h-9 w-9 items-center justify-center rounded-md border border-line bg-surface text-ink-2 hover:bg-surface-3 lg:hidden"
+      >
+        <Menu className="h-4 w-4" />
+      </button>
+
+      {open ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 bg-black/35"
+          style={{ animation: "om-fade .12s ease" }}
+          onClick={() => setOpen(false)}
+        >
+          <div
+            className="absolute inset-y-0 left-0 flex w-[236px] max-w-[92%] flex-col bg-surface"
+            style={{ animation: "om-slide .2s cubic-bezier(.2,.7,.2,1)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex h-[60px] items-center gap-2.5 border-b border-line px-4">
+              {organization?.logoUrl ? (
+                <span className="inline-flex items-center rounded-md dark:bg-white dark:px-2 dark:py-1">
+                  <img
+                    src={organization.logoUrl}
+                    alt={orgName}
+                    title={orgName}
+                    className="h-9 w-auto max-w-[160px] object-contain dark:h-7"
+                    draggable={false}
+                  />
+                </span>
+              ) : (
+                <span
+                  title={orgName}
+                  className="flex h-[30px] w-[30px] items-center justify-center rounded-lg bg-primary text-[14px] font-bold text-primary-foreground"
+                >
+                  {orgInitials}
+                </span>
+              )}
+              <span className="flex-1" />
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded-md p-1 text-ink-muted hover:text-ink"
+                aria-label="Close menu"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <nav className="scroll flex-1 overflow-auto px-3 pt-2.5">
+              {sections.map((section, idx) => (
+                <div
+                  key={section.label ?? idx}
+                  className={idx > 0 ? "mt-2" : undefined}
+                >
+                  {section.label ? (
+                    <div className="px-2.5 pt-3 pb-1.5 text-[10.5px] font-bold uppercase tracking-[0.07em] text-ink-subtle">
+                      {section.label}
+                    </div>
+                  ) : null}
+                  {section.items.map((item) => {
+                    const active = location.pathname.startsWith(item.to);
+                    return (
+                      <NavLink
+                        key={item.to}
+                        to={item.to}
+                        end={item.end ?? true}
+                        onClick={() => setOpen(false)}
+                        className={cn(
+                          "mb-0.5 flex items-center gap-3 rounded-[10px] px-2.5 py-2.5 text-[13.5px] font-medium",
+                          active
+                            ? "bg-accent text-primary"
+                            : "text-ink-2 hover:bg-hover",
+                        )}
+                      >
+                        <item.icon
+                          className="h-[17px] w-[17px]"
+                          strokeWidth={1.7}
+                        />
+                        <span className="flex-1 truncate">{item.label}</span>
+                      </NavLink>
+                    );
+                  })}
+                </div>
+              ))}
+            </nav>
+            <div className="flex items-center gap-2.5 border-t border-line px-3.5 py-3">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-[12px] font-bold text-primary">
+                {initialsFor(user?.fullName || user?.email || "U")}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[12.5px] font-semibold">
+                  {user?.fullName || "User"}
+                </div>
+                <div className="truncate text-[11px] text-ink-muted">
+                  {user?.role === "org_admin" ? "Org admin" : "Recruiter"}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleLogout}
+                title="Sign out"
+                className="flex h-[30px] w-[30px] items-center justify-center rounded-lg text-ink-muted hover:bg-accent hover:text-primary"
+              >
+                <LogOut className="h-[17px] w-[17px]" />
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }

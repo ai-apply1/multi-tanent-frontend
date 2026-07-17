@@ -19,7 +19,7 @@
  * replaced, whereas someone else's brand sitting in the fallback slot looks
  * intentional and survives for years.
  */
-export const PLATFORM_NAME =
+export const PLATFORM_NAME: string =
   (import.meta.env.VITE_PLATFORM_NAME ?? "").trim() || "Talent Portal"
 
 /**

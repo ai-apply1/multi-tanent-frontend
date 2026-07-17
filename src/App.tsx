@@ -9,6 +9,7 @@ import { JobDetailPage } from "@/pages/JobDetailPage";
 import { CandidatesPage } from "@/pages/CandidatesPage";
 import { QuestionBankPage } from "@/pages/QuestionBankPage";
 import { OrgSettingsPage } from "@/pages/OrgSettingsPage";
+import { PipelinePage } from "@/pages/PipelinePage";
 import { TeamPage } from "@/pages/TeamPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
 import { ROUTES } from "@/routes";
@@ -63,6 +64,7 @@ export default function App() {
 
         <Route path={ROUTES.CANDIDATES} element={<CandidatesPage key="org-wide" />} />
         <Route path={ROUTES.QUESTIONS} element={<QuestionBankPage />} />
+        <Route path={ROUTES.PIPELINE} element={<PipelinePage />} />
         <Route path={ROUTES.ORG_SETTINGS} element={<OrgSettingsPage />} />
         <Route path={ROUTES.TEAM} element={<TeamPage />} />
       </Route>

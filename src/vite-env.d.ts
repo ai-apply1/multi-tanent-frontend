@@ -23,6 +23,18 @@ interface ImportMetaEnv {
   readonly VITE_API_BASIC_AUTH_PASS?: string
   /** Fallback: plaintext basic-auth client marker (the third attribute). */
   readonly VITE_API_BASIC_AUTH_MARKER?: string
+  /**
+   * The platform's own display name, shown only when no tenant resolves.
+   * See `src/lib/platform.ts`. Defaults to "Talent Portal" when unset.
+   */
+  readonly VITE_PLATFORM_NAME?: string
+  /**
+   * DEV ONLY. Lets `?tenant=<domain>` pick which org this build renders as.
+   * Default OFF. A hint, never a grant: the backend has its own
+   * `DEV_TENANT_QUERY_ENABLED` switch and ignores the param in production
+   * entirely, so this alone does nothing. See `src/lib/devTenant.ts`.
+   */
+  readonly VITE_DEV_TENANT_QUERY_ENABLED?: string
 }
 
 interface ImportMeta {
