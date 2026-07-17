@@ -36,3 +36,11 @@ export const PLATFORM_LOGO = {
   /** White ink, for the dark theme. */
   dark: "/platform-logo.svg",
 } as const
+
+/**
+ * The browser-tab icon shown when no tenant resolves. Matches the static
+ * `<link rel="icon">` in `index.html`; `DocumentBranding` swaps back to this
+ * when an org has no favicon of its own. A file in `public/` rather than an
+ * inlined data URI so it can be replaced without a rebuild.
+ */
+export const PLATFORM_FAVICON = "/favicon.ico"

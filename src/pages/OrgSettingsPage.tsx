@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ImageOff,
@@ -15,8 +21,10 @@ import { Combobox } from "@/components/ui/combobox";
 import { useOrganization } from "@/features/organization/useOrganization";
 import { EmailDomainCard } from "@/features/organization/components/EmailDomainCard";
 import {
+  presignFavicon,
   presignLogo,
   updateOrganization,
+  uploadFaviconToPresignedUrl,
   uploadLogoToPresignedUrl,
 } from "@/features/organization/organizationApi";
 import type {
@@ -102,6 +110,23 @@ const ALLOWED_LOGO_TYPES = [
 const MAX_LOGO_BYTES = 2 * 1024 * 1024;
 const LOGO_ACCEPT = ALLOWED_LOGO_TYPES.join(",");
 
+/**
+ * Mirrors the backend's `ALLOWED_FAVICON_CONTENT_TYPES` / `MAX_FAVICON_BYTES`.
+ * Narrower than the logo's and for a reason: a favicon is drawn by a browser
+ * (so SVG and .ico are in, JPEG and WebP are out) and cached hard, so it is
+ * capped far smaller. The `accept` string also lists `.ico` because some
+ * browsers report an .ico file's type only from its extension.
+ */
+const ALLOWED_FAVICON_TYPES = [
+  "image/png",
+  "image/x-icon",
+  "image/vnd.microsoft.icon",
+  "image/svg+xml",
+] as const;
+const MAX_FAVICON_BYTES = 512 * 1024;
+const FAVICON_ACCEPT =
+  ".ico,image/x-icon,image/vnd.microsoft.icon,image/png,image/svg+xml";
+
 const toInt = (value: string) => {
   const n = Number(value);
   return Number.isInteger(n) ? n : NaN;
@@ -120,6 +145,279 @@ const inputBase =
   "h-11 w-full rounded-lg border border-[var(--field-border)] bg-surface px-3.5 text-[14px] text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)] disabled:cursor-not-allowed disabled:bg-ink-faint disabled:text-ink-muted";
 const labelBase = "mb-1.5 block text-[13px] font-semibold text-ink";
 
+interface ImageUploadRowProps {
+  /** DOM id for the hidden file input; also its stable handle. */
+  idBase: string;
+  label: string;
+  description: ReactNode;
+  canWrite: boolean;
+  /** The image the server currently has, or "" for none. */
+  serverUrl: string;
+  alt: string;
+  allowedTypes: readonly string[];
+  maxBytes: number;
+  /** `accept` attribute for the file input. */
+  accept: string;
+  /** The hint under the drop zone, e.g. "PNG, JPG · up to 2 MB". */
+  acceptHint: string;
+  typeErrorText: string;
+  sizeErrorText: string;
+  /** Shown when the server's own image fails to load. */
+  brokenText: ReactNode;
+  presign: (payload: {
+    contentType: string;
+    sizeBytes: number;
+    fileName: string;
+  }) => Promise<{ uploadUrl: string; key: string; contentType: string }>;
+  upload: (
+    uploadUrl: string,
+    file: File,
+    contentType: string,
+    onProgress?: (pct: number) => void,
+  ) => Promise<void>;
+  /** null = untouched, "" = clear on save, string = new key. */
+  onKeyChange: (key: string | null) => void;
+  onUploadingChange: (uploading: boolean) => void;
+}
+
+/**
+ * One "drag & drop or click to upload" image field: a fixed 72px preview tile,
+ * a drop zone, an inline progress bar, and Replace / Remove actions.
+ *
+ * Fully self-contained. It owns the whole pick → validate → presign → S3 PUT
+ * lifecycle and every piece of transient state that goes with it, and talks to
+ * the page through exactly two callbacks (`onKeyChange`, `onUploadingChange`)
+ * plus one convention: the page remounts it via its React `key` to snap back to
+ * `serverUrl` and forget a pending pick. The logo and the favicon are both
+ * instances of this, so the two upload experiences cannot drift apart.
+ */
+function ImageUploadRow({
+  idBase,
+  label,
+  description,
+  canWrite,
+  serverUrl,
+  alt,
+  allowedTypes,
+  maxBytes,
+  accept,
+  acceptHint,
+  typeErrorText,
+  sizeErrorText,
+  brokenText,
+  presign,
+  upload,
+  onKeyChange,
+  onUploadingChange,
+}: ImageUploadRowProps) {
+  // null = untouched, "" = remove on save, string = uploaded (not yet saved).
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
+  // Object URL for the file just picked, so the preview updates before the save
+  // round-trips. Falls back to `serverUrl` whenever there's no pending pick.
+  const [localPreview, setLocalPreview] = useState<string | null>(null);
+  const [uploadPct, setUploadPct] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [broken, setBroken] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const isUploading = uploadPct !== null;
+
+  // If the row unmounts mid-upload (a form reset while the PUT is in flight),
+  // clear the page's "uploading" flag so Save can't stay blocked forever.
+  useEffect(() => {
+    return () => onUploadingChange(false);
+  }, [onUploadingChange]);
+
+  useEffect(() => {
+    setBroken(false);
+  }, [serverUrl, localPreview]);
+
+  // Object URLs leak until revoked; this one outlives its <img> on every
+  // re-pick and on unmount (which a form reset triggers via the row's key).
+  useEffect(() => {
+    if (!localPreview) return;
+    return () => URL.revokeObjectURL(localPreview);
+  }, [localPreview]);
+
+  /**
+   * Pick → validate → presign → PUT straight to S3. The key is only reported
+   * up; the org doesn't point at it until Save. An abandoned upload just
+   * orphans an object under this org's own prefix.
+   */
+  const handleFile = async (file: File) => {
+    setError(null);
+    if (!allowedTypes.includes(file.type)) {
+      setError(typeErrorText);
+      return;
+    }
+    if (file.size > maxBytes) {
+      setError(sizeErrorText);
+      return;
+    }
+
+    setUploadPct(0);
+    onUploadingChange(true);
+    try {
+      const presigned = await presign({
+        contentType: file.type,
+        sizeBytes: file.size,
+        fileName: file.name,
+      });
+      await upload(presigned.uploadUrl, file, presigned.contentType, setUploadPct);
+      setPendingKey(presigned.key);
+      onKeyChange(presigned.key);
+      setLocalPreview(URL.createObjectURL(file));
+    } catch (err) {
+      setError(apiError(err, "Could not upload that image."));
+    } finally {
+      setUploadPct(null);
+      onUploadingChange(false);
+      // Let the same file be re-picked after a failure — without this the
+      // input's value is unchanged and onChange never fires again.
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  };
+
+  const remove = () => {
+    setPendingKey("");
+    onKeyChange("");
+    setLocalPreview(null);
+    setError(null);
+  };
+
+  const previewUrl = localPreview ?? (pendingKey === "" ? "" : serverUrl);
+
+  return (
+    <div>
+      <label className={labelBase}>{label}</label>
+      <p className="mb-3 text-[12px] text-ink-muted">{description}</p>
+
+      <div className="flex items-center gap-4">
+        {/* Fixed-size 72px tile so the row never reflows between the empty,
+            uploading and loaded states. */}
+        <div className="relative flex h-[72px] w-[72px] shrink-0 items-center justify-center overflow-hidden rounded-[14px] border border-line-2 bg-surface-3 text-ink-subtle">
+          {isUploading ? (
+            <Loader2 className="h-5 w-5 animate-spin text-ink-muted" />
+          ) : previewUrl && !broken ? (
+            <img
+              src={previewUrl}
+              alt={alt}
+              className="h-full w-full object-contain p-2"
+              onError={() => setBroken(true)}
+            />
+          ) : (
+            <ImageOff className="h-6 w-6" strokeWidth={1.6} />
+          )}
+        </div>
+
+        <div
+          onDragOver={(e) => {
+            if (!canWrite || isUploading) return;
+            e.preventDefault();
+            setIsDragging(true);
+          }}
+          onDragLeave={(e) => {
+            // Fires when crossing into a CHILD too, which would flicker the
+            // highlight — only clear when the cursor has actually left the
+            // drop zone's subtree.
+            if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+            setIsDragging(false);
+          }}
+          onDrop={(e) => {
+            if (!canWrite || isUploading) return;
+            e.preventDefault();
+            setIsDragging(false);
+            const file = e.dataTransfer.files?.[0];
+            if (file) void handleFile(file);
+          }}
+          onClick={() => {
+            if (!canWrite || isUploading) return;
+            inputRef.current?.click();
+          }}
+          className={cn(
+            "flex-1 rounded-[12px] border-2 border-dashed px-5 py-4 text-center transition-colors",
+            canWrite && !isUploading
+              ? "cursor-pointer bg-surface-2"
+              : "bg-surface-2",
+            isDragging
+              ? "border-primary bg-accent"
+              : "border-line-2 hover:border-primary/50",
+          )}
+        >
+          {isUploading ? (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between text-[12px]">
+                <span className="font-semibold text-ink">Uploading…</span>
+                <span className="mono text-ink-muted">{uploadPct}%</span>
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-3">
+                <div
+                  className="h-full rounded-full bg-primary transition-[width] duration-200"
+                  style={{ width: `${uploadPct ?? 0}%` }}
+                />
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="text-[13.5px] font-semibold text-ink">
+                Drag &amp; drop or click to upload
+              </div>
+              <p className="mt-1 text-[12px] text-ink-muted">{acceptHint}</p>
+            </>
+          )}
+        </div>
+
+        <input
+          ref={inputRef}
+          id={idBase}
+          type="file"
+          accept={accept}
+          className="sr-only"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void handleFile(file);
+          }}
+        />
+      </div>
+
+      {canWrite && previewUrl && !isUploading ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => inputRef.current?.click()}
+          >
+            <Upload className="h-4 w-4" strokeWidth={1.9} />
+            Replace
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="text-ink-muted hover:text-[var(--danger)]"
+            onClick={remove}
+          >
+            <Trash2 className="h-4 w-4" strokeWidth={1.9} />
+            Remove
+          </Button>
+        </div>
+      ) : null}
+
+      {error ? (
+        <p className="mt-2 text-[12px] text-[var(--danger)]">{error}</p>
+      ) : pendingKey !== null && !isUploading ? (
+        <p className="mt-2 text-[12px] font-semibold text-[var(--warning)]">
+          Not saved yet, hit Save changes.
+        </p>
+      ) : broken ? (
+        <p className="mt-2 text-[12px] text-ink-muted">{brokenText}</p>
+      ) : null}
+    </div>
+  );
+}
+
 export function OrgSettingsPage() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -135,26 +433,26 @@ export function OrgSettingsPage() {
   // A fresh page never opens covered in red — errors appear once a field has
   // been edited (which also covers a saved timezone this browser doesn't know).
   const [touched, setTouched] = useState<Record<string, boolean>>({});
-  const [logoBroken, setLogoBroken] = useState(false);
 
   /**
-   * The logo is an upload, not a text field, so it doesn't follow the
-   * "edit → compare to profile" shape of the others:
+   * The logo and favicon are uploads, not text fields, so they don't follow the
+   * "edit → compare to profile" shape of the others. Each `<ImageUploadRow>`
+   * owns its own pick / preview / progress state; this page holds only the two
+   * things it needs at save time:
    *
-   * - `logoKey === null` means untouched; the PATCH omits it entirely.
-   * - a string means pending — either a fresh key (uploaded, not yet saved)
-   *   or `""` (remove on save).
+   * - the PENDING KEY reported up by the row (`null` = untouched, so the PATCH
+   *   omits it; a string = a fresh key, or `""` to clear), and
+   * - whether the row is mid-upload, so Save waits until S3 has the bytes.
    *
-   * `localPreview` is an object URL for the file just picked, so the preview
-   * updates before the save round-trips. Falls back to the server's
-   * `org.logoUrl` whenever there's no pending change.
+   * `formVersion` is the rows' React `key`. Bumping it on (re)load and on Reset
+   * remounts them onto the server's current image and drops any pending pick in
+   * one move, which is why there's no per-row reset plumbing here.
    */
   const [logoKey, setLogoKey] = useState<string | null>(null);
-  const [localPreview, setLocalPreview] = useState<string | null>(null);
-  const [uploadPct, setUploadPct] = useState<number | null>(null);
-  const [logoError, setLogoError] = useState<string | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [faviconKey, setFaviconKey] = useState<string | null>(null);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [faviconUploading, setFaviconUploading] = useState(false);
+  const [formVersion, setFormVersion] = useState(0);
 
   // Seed once the profile lands, and re-seed after a save so the form's
   // baseline is whatever the server last confirmed.
@@ -166,19 +464,9 @@ export function OrgSettingsPage() {
     setTimezone(org.settings.timezone);
     setTouched({});
     setLogoKey(null);
-    setLogoError(null);
+    setFaviconKey(null);
+    setFormVersion((v) => v + 1);
   }, [org]);
-
-  useEffect(() => {
-    setLogoBroken(false);
-  }, [org?.logoUrl, localPreview]);
-
-  // Object URLs leak until revoked, and this one outlives its <img> on every
-  // re-pick and on unmount.
-  useEffect(() => {
-    if (!localPreview) return;
-    return () => URL.revokeObjectURL(localPreview);
-  }, [localPreview]);
 
   const saveMutation = useMutation({
     mutationFn: (payload: UpdateOrganizationPayload) =>
@@ -192,57 +480,6 @@ export function OrgSettingsPage() {
     onError: (err) =>
       toast.error(apiError(err, "Could not update organization.")),
   });
-
-  /**
-   * Pick → validate → presign → PUT straight to S3. The key is only held in
-   * state; the org doesn't point at it until Save. An abandoned upload just
-   * orphans an object under this org's own logo prefix.
-   */
-  const handleLogoFile = async (file: File) => {
-    setLogoError(null);
-
-    if (!(ALLOWED_LOGO_TYPES as readonly string[]).includes(file.type)) {
-      setLogoError("Use a PNG, JPEG, SVG or WebP image.");
-      return;
-    }
-    if (file.size > MAX_LOGO_BYTES) {
-      setLogoError("That image is over 2 MB — use a smaller one.");
-      return;
-    }
-
-    setUploadPct(0);
-    try {
-      const presigned = await presignLogo({
-        contentType: file.type,
-        sizeBytes: file.size,
-        fileName: file.name,
-      });
-      await uploadLogoToPresignedUrl(
-        presigned.uploadUrl,
-        file,
-        presigned.contentType,
-        setUploadPct,
-      );
-      setLogoKey(presigned.key);
-      setLocalPreview(URL.createObjectURL(file));
-    } catch (err) {
-      setLogoError(apiError(err, "Could not upload that image."));
-    } finally {
-      setUploadPct(null);
-      // Let the same file be re-picked after a failure — without this the
-      // input's value is unchanged and onChange never fires again.
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
-  };
-
-  const removeLogo = () => {
-    setLogoKey("");
-    setLocalPreview(null);
-    setLogoError(null);
-  };
-
-  const previewUrl = localPreview ?? (logoKey === "" ? "" : (org?.logoUrl ?? ""));
-  const isUploading = uploadPct !== null;
 
   const nameError = name.trim().length === 0 ? "A name is required." : null;
   const attemptsValue = toInt(maxAttempts);
@@ -274,9 +511,10 @@ export function OrgSettingsPage() {
     const patch: UpdateOrganizationPayload = {};
     if (name.trim() !== profile.name) patch.name = name.trim();
     // null = untouched. Any string (including "" for removal) is a change —
-    // there's no `logoKey` on the profile to diff against, since responses
-    // carry the resolved URL instead.
+    // there's no `logoKey`/`faviconKey` on the profile to diff against, since
+    // responses carry the resolved URL instead.
     if (logoKey !== null) patch.logoKey = logoKey;
+    if (faviconKey !== null) patch.faviconKey = faviconKey;
     const settings: Partial<OrganizationSettings> = {};
     if (attemptsValue !== profile.settings.maxInterviewAttempts) {
       settings.maxInterviewAttempts = attemptsValue;
@@ -294,7 +532,12 @@ export function OrgSettingsPage() {
   const patch = org ? buildPatch(org) : {};
   const isDirty = Object.keys(patch).length > 0;
   const canSave =
-    canWrite && isDirty && !hasErrors && !isUploading && !saveMutation.isPending;
+    canWrite &&
+    isDirty &&
+    !hasErrors &&
+    !logoUploading &&
+    !faviconUploading &&
+    !saveMutation.isPending;
 
   const reset = () => {
     if (!org) return;
@@ -304,8 +547,8 @@ export function OrgSettingsPage() {
     setTimezone(org.settings.timezone);
     setTouched({});
     setLogoKey(null);
-    setLocalPreview(null);
-    setLogoError(null);
+    setFaviconKey(null);
+    setFormVersion((v) => v + 1);
   };
 
   const submit = (e: FormEvent) => {
@@ -418,140 +661,59 @@ export function OrgSettingsPage() {
         ) : null}
       </div>
 
-      <div>
-        <label className={labelBase}>Organization logo</label>
-        <p className="mb-3 text-[12px] text-ink-muted">
-          Goes out on every candidate invite email and heads the screening page
-          candidates take their interview on — for most candidates it&apos;s the
-          only branding they ever see.
-        </p>
+      <ImageUploadRow
+        key={`logo-${formVersion}`}
+        idBase="org-logo"
+        label="Organization logo"
+        description={
+          <>
+            Goes out on every candidate invite email and heads the screening
+            page candidates take their interview on. For most candidates it&apos;s
+            the only branding they ever see.
+          </>
+        }
+        canWrite={canWrite}
+        serverUrl={org.logoUrl}
+        alt={`${name || "Organization"} logo`}
+        allowedTypes={ALLOWED_LOGO_TYPES}
+        maxBytes={MAX_LOGO_BYTES}
+        accept={LOGO_ACCEPT}
+        acceptHint="PNG, JPG, SVG or WebP · up to 2 MB"
+        typeErrorText="Use a PNG, JPEG, SVG or WebP image."
+        sizeErrorText="That image is over 2 MB. Use a smaller one."
+        brokenText={`That image didn't load. Candidates would see the ${PLATFORM_NAME} mark.`}
+        presign={presignLogo}
+        upload={uploadLogoToPresignedUrl}
+        onKeyChange={setLogoKey}
+        onUploadingChange={setLogoUploading}
+      />
 
-        <div className="flex items-center gap-4">
-          {/* Fixed-size 72px tile so the row never reflows between the empty,
-              uploading and loaded states. */}
-          <div className="relative flex h-[72px] w-[72px] shrink-0 items-center justify-center overflow-hidden rounded-[14px] border border-line-2 bg-surface-3 text-ink-subtle">
-            {isUploading ? (
-              <Loader2 className="h-5 w-5 animate-spin text-ink-muted" />
-            ) : previewUrl && !logoBroken ? (
-              <img
-                src={previewUrl}
-                alt={`${name || "Organization"} logo`}
-                className="h-full w-full object-contain p-2"
-                onError={() => setLogoBroken(true)}
-              />
-            ) : (
-              <ImageOff className="h-6 w-6" strokeWidth={1.6} />
-            )}
-          </div>
-
-          <div
-            onDragOver={(e) => {
-              if (!canWrite || isUploading) return;
-              e.preventDefault();
-              setIsDragging(true);
-            }}
-            onDragLeave={(e) => {
-              // Fires when crossing into a CHILD too, which would flicker
-              // the highlight — only clear when the cursor has actually
-              // left the drop zone's subtree.
-              if (e.currentTarget.contains(e.relatedTarget as Node)) return;
-              setIsDragging(false);
-            }}
-            onDrop={(e) => {
-              if (!canWrite || isUploading) return;
-              e.preventDefault();
-              setIsDragging(false);
-              const file = e.dataTransfer.files?.[0];
-              if (file) void handleLogoFile(file);
-            }}
-            onClick={() => {
-              if (!canWrite || isUploading) return;
-              fileInputRef.current?.click();
-            }}
-            className={cn(
-              "flex-1 rounded-[12px] border-2 border-dashed px-5 py-4 text-center transition-colors",
-              canWrite && !isUploading
-                ? "cursor-pointer bg-surface-2"
-                : "bg-surface-2",
-              isDragging
-                ? "border-primary bg-accent"
-                : "border-line-2 hover:border-primary/50",
-            )}
-          >
-            {isUploading ? (
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center justify-between text-[12px]">
-                  <span className="font-semibold text-ink">Uploading…</span>
-                  <span className="mono text-ink-muted">{uploadPct}%</span>
-                </div>
-                <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-3">
-                  <div
-                    className="h-full rounded-full bg-primary transition-[width] duration-200"
-                    style={{ width: `${uploadPct ?? 0}%` }}
-                  />
-                </div>
-              </div>
-            ) : (
-              <>
-                <div className="text-[13.5px] font-semibold text-ink">
-                  Drag &amp; drop or click to upload
-                </div>
-                <p className="mt-1 text-[12px] text-ink-muted">
-                  PNG, JPG or SVG · up to 2 MB
-                </p>
-              </>
-            )}
-          </div>
-
-          <input
-            ref={fileInputRef}
-            id="org-logo"
-            type="file"
-            accept={LOGO_ACCEPT}
-            className="sr-only"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void handleLogoFile(file);
-            }}
-          />
-        </div>
-
-        {canWrite && previewUrl && !isUploading ? (
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <Upload className="h-4 w-4" strokeWidth={1.9} />
-              Replace
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="text-ink-muted hover:text-[var(--danger)]"
-              onClick={removeLogo}
-            >
-              <Trash2 className="h-4 w-4" strokeWidth={1.9} />
-              Remove
-            </Button>
-          </div>
-        ) : null}
-
-        {logoError ? (
-          <p className="mt-2 text-[12px] text-[var(--danger)]">{logoError}</p>
-        ) : logoKey !== null && !isUploading ? (
-          <p className="mt-2 text-[12px] font-semibold text-[var(--warning)]">
-            Not saved yet — hit Save changes.
-          </p>
-        ) : logoBroken ? (
-          <p className="mt-2 text-[12px] text-ink-muted">
-            {`That image didn't load — candidates would see the ${PLATFORM_NAME} mark.`}
-          </p>
-        ) : null}
-      </div>
+      <ImageUploadRow
+        key={`favicon-${formVersion}`}
+        idBase="org-favicon"
+        label="Browser favicon"
+        description={
+          <>
+            The small icon in the browser tab on your careers and apply pages. A
+            square mark reads best at this size. Leave it empty to use the
+            platform icon.
+          </>
+        }
+        canWrite={canWrite}
+        serverUrl={org.faviconUrl}
+        alt={`${name || "Organization"} favicon`}
+        allowedTypes={ALLOWED_FAVICON_TYPES}
+        maxBytes={MAX_FAVICON_BYTES}
+        accept={FAVICON_ACCEPT}
+        acceptHint="ICO, PNG or SVG · up to 512 KB"
+        typeErrorText="Use an ICO, PNG or SVG icon."
+        sizeErrorText="That icon is over 512 KB. Use a smaller one."
+        brokenText="That icon didn't load. The browser tab would show the platform icon."
+        presign={presignFavicon}
+        upload={uploadFaviconToPresignedUrl}
+        onKeyChange={setFaviconKey}
+        onUploadingChange={setFaviconUploading}
+      />
 
       {/* EmailDomainCard mounts on Identity — same PATCH surface (org profile)
           as the fields above, and the domain is part of the org's identity. */}

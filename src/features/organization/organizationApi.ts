@@ -1,6 +1,8 @@
 import axios from "axios"
 import api from "@/lib/api"
 import type {
+  FaviconPresignPayload,
+  FaviconPresignResult,
   LogoPresignPayload,
   LogoPresignResult,
   OrgEmailDomain,
@@ -53,6 +55,51 @@ export async function presignLogo(payload: LogoPresignPayload) {
  * Same contract as `candidatesApi.uploadCvToPresignedUrl` — keep them in step.
  */
 export async function uploadLogoToPresignedUrl(
+  uploadUrl: string,
+  file: File,
+  contentType: string,
+  onProgress?: (pct: number) => void
+) {
+  await axios.put(uploadUrl, file, {
+    headers: {
+      "Content-Type": contentType,
+      "x-amz-server-side-encryption": "AES256"
+    },
+    withCredentials: false,
+    onUploadProgress: (event) => {
+      if (event.total && onProgress) {
+        onProgress(Math.round((event.loaded / event.total) * 100))
+      }
+    }
+  })
+}
+
+// ---------------------------------------------------------------------
+// Favicon upload — mirrors the logo pair exactly, different endpoint + prefix
+// ---------------------------------------------------------------------
+
+/**
+ * Step 1: mint a presigned PUT for a new org favicon. `org_admin` only. Like
+ * the logo, the returned `key` is inert until a PATCH stores it as
+ * `faviconKey`; an abandoned upload just orphans an object under this org's
+ * favicon prefix.
+ */
+export async function presignFavicon(payload: FaviconPresignPayload) {
+  const { data } = await api.post<FaviconPresignResult>(
+    "/admin/organization/favicon/presign",
+    payload
+  )
+  return data
+}
+
+/**
+ * Step 2: direct browser PUT to S3. Byte-for-byte the same contract as
+ * `uploadLogoToPresignedUrl` (fresh axios, no crypto/cookie interceptors,
+ * explicit AES256, `Content-Type` matching the signed value); kept as its own
+ * function so the favicon path reads end to end without a shared "asset"
+ * abstraction that would hide which prefix is being written.
+ */
+export async function uploadFaviconToPresignedUrl(
   uploadUrl: string,
   file: File,
   contentType: string,

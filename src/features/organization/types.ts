@@ -84,6 +84,16 @@ export interface OrgProfile {
    * hasn't uploaded one — the shell falls back to `<BrandLogo>`.
    */
   logoUrl: string
+  /**
+   * READ-ONLY, like `logoUrl`, and written back as `faviconKey` (see
+   * `UpdateOrganizationPayload`).
+   *
+   * A permanent public URL for the icon shown on the org's careers and apply
+   * pages. Empty when the org hasn't uploaded one, in which case the portal
+   * falls back to the platform favicon. Separate from the logo on purpose: a
+   * wide wordmark scaled to 32x32 is an unreadable smudge.
+   */
+  faviconUrl: string
   name: string
   slug: string
   status: "active" | "inactive"
@@ -111,6 +121,13 @@ export interface OrgProfile {
 export interface UpdateOrganizationPayload {
   name?: string
   logoKey?: string
+  /**
+   * The key handed back by `presignFavicon()` after the file is in S3. Same
+   * READ-`faviconUrl` / WRITE-`faviconKey` asymmetry as the logo; the backend
+   * re-checks it against this org's own favicon prefix and rejects anything
+   * else. `""` clears the favicon.
+   */
+  faviconKey?: string
   settings?: Partial<OrganizationSettings>
 }
 
@@ -127,6 +144,26 @@ export interface LogoPresignPayload {
  * `key` is what goes back on the profile PATCH as `logoKey`.
  */
 export interface LogoPresignResult {
+  fileName: string
+  uploadUrl: string
+  key: string
+  contentType: string
+  expiresIn: number
+}
+
+/**
+ * Body of `POST /admin/organization/favicon/presign`. Same shape as the logo's,
+ * but the backend accepts a NARROWER set of content types (`.ico`/`.png`/`.svg`,
+ * no JPEG or WebP) because a favicon is drawn by a browser and cached hard.
+ */
+export interface FaviconPresignPayload {
+  contentType: string
+  sizeBytes: number
+  fileName: string
+}
+
+/** Its response — identical contract to `LogoPresignResult`. */
+export interface FaviconPresignResult {
   fileName: string
   uploadUrl: string
   key: string

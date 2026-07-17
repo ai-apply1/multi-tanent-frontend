@@ -6,6 +6,7 @@ import { Toaster } from "react-hot-toast"
 import App from "@/App"
 import { AuthProvider } from "@/features/auth/AuthContext"
 import { TenantBrandingProvider } from "@/features/tenant/TenantBrandingContext"
+import { DocumentBranding } from "@/features/tenant/DocumentBranding"
 import { DevTenantSync } from "@/features/tenant/DevTenantSync"
 import { ThemeProvider } from "@/features/theme/ThemeContext"
 import { ensureCryptoReady } from "@/lib/crypto"
@@ -46,6 +47,10 @@ createRoot(root).render(
           <DevTenantSync />
           <TenantBrandingProvider>
               <AuthProvider>
+              {/* The single writer of the tab title, favicon and theme. Inside
+                  AuthProvider so it can prefer the AUTHENTICATED org over the
+                  host's public branding once someone signs in. */}
+              <DocumentBranding />
               <App />
               <Toaster
                 position="top-right"
