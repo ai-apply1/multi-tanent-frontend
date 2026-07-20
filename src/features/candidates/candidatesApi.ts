@@ -178,10 +178,10 @@ export async function updateCandidateStatus(
 
 /**
  * HR-triggered manual invite — the escape hatch for candidates the vetting
- * engine parked at `prescreened` for human review.
+ * engine parked at `needs_review` for human review.
  *
  * Guarded server-side, all before any side effect: 409 `INVALID_STATUS`
- * unless the candidate is exactly `prescreened`, 422 when the job isn't open,
+ * unless the candidate is exactly `needs_review`, 422 when the job isn't open,
  * 409 `MAX_ATTEMPTS` when the attempt cap is spent. Each carries a message
  * naming the actual state, so callers should surface it verbatim via
  * `errorMessage()` rather than flattening all three into one generic string.
