@@ -20,7 +20,9 @@ import { ROUTES } from "@/routes";
 import { useAuth } from "@/features/auth/AuthContext";
 import { useOrganization } from "@/features/organization/useOrganization";
 import type { UserRole } from "@/features/auth/types";
+import { USER_ROLE_LABELS } from "@/features/users/types";
 import { PLATFORM_NAME } from "@/lib/platform";
+import { titleCase } from "@/lib/text";
 import { OrgLogo } from "@/components/common/OrgLogo";
 
 interface NavItem {
@@ -188,10 +190,10 @@ export function Sidebar() {
         </span>
         <div className="min-w-0 flex-1">
           <div className="truncate text-[12.5px] font-semibold">
-            {user?.fullName || "User"}
+            {titleCase(user?.fullName || "User")}
           </div>
           <div className="truncate text-[11px] text-ink-muted">
-            {user?.role === "org_admin" ? "Org admin" : "Recruiter"}
+            {user?.role ? USER_ROLE_LABELS[user.role as UserRole] ?? "" : ""}
           </div>
         </div>
         <button
@@ -319,10 +321,10 @@ export function MobileNavTrigger() {
               </span>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[12.5px] font-semibold">
-                  {user?.fullName || "User"}
+                  {titleCase(user?.fullName || "User")}
                 </div>
                 <div className="truncate text-[11px] text-ink-muted">
-                  {user?.role === "org_admin" ? "Org admin" : "Recruiter"}
+                  {user?.role ? USER_ROLE_LABELS[user.role as UserRole] ?? "" : ""}
                 </div>
               </div>
               <button

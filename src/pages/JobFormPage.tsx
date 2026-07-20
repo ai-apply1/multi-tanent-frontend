@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -288,10 +288,12 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
     setMaxStep((prev) => Math.max(prev, next));
   };
 
+  const isFinalStep = step === STEPS.length - 1;
+
   const onContinue = () => {
     if (step === 0) setTitleTouched(true);
     if (!stepValid[step]) return;
-    if (step < STEPS.length - 1) {
+    if (!isFinalStep) {
       goToStep(step + 1);
       return;
     }
@@ -299,6 +301,17 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
     setTitleTouched(true);
     if (hasErrors || busy) return;
     mutation.mutate();
+  };
+
+  // Any submit attempt from a non-final step falls back to "advance"; only the
+  // final step's explicit type="submit" button can reach the mutation.
+  const onSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!isFinalStep) {
+      if (stepValid[step]) goToStep(step + 1);
+      return;
+    }
+    onContinue();
   };
 
   const onBack = () => {
@@ -315,12 +328,7 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
 
   return (
     <div className="mx-auto max-w-[1080px] px-6 py-6 lg:px-8 lg:py-8">
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          onContinue();
-        }}
-      >
+      <form onSubmit={onSubmit}>
         {/* Header row */}
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>

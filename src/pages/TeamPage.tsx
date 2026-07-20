@@ -43,6 +43,7 @@ import { useAuth } from "@/features/auth/AuthContext";
 import type { UserRole } from "@/features/auth/types";
 import { formatDateTime } from "@/lib/date";
 import { errorMessage as apiError } from "@/lib/errors";
+import { titleCase } from "@/lib/text";
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 const DEFAULT_PAGE_SIZE = 20;
@@ -311,7 +312,7 @@ export function TeamPage() {
                 >
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="truncate font-semibold text-ink">
-                      {row.fullName}
+                      {titleCase(row.fullName)}
                     </span>
                     {isSelf ? (
                       <span className="shrink-0 rounded-full bg-surface-3 px-1.5 py-0.5 text-[10.5px] font-semibold text-ink-muted">
@@ -320,7 +321,7 @@ export function TeamPage() {
                     ) : null}
                   </div>
                   <div className="mono truncate text-[12.5px] text-ink-muted">
-                    {row.userName}
+                    {titleCase(row.userName)}
                   </div>
                   <div className="truncate text-[13px] text-ink-2">
                     {row.email}

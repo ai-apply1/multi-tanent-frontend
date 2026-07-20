@@ -170,7 +170,7 @@ const TABS: Array<{ id: SettingsTab; label: string; saves: boolean }> = [
   { id: "video", label: "Apply video", saves: false },
   { id: "defaults", label: "Interview defaults", saves: true },
   { id: "platform", label: "Platform", saves: false },
-  { id: "notifications", label: "My notifications", saves: false },
+  { id: "notifications", label: "My notifications", saves: true },
 ];
 
 /** Tabs whose edits go through the shared org PATCH + Save bar. */
@@ -563,11 +563,35 @@ export function OrgSettingsPage() {
       // Write straight into the cache the shell reads, so the TopBar logo and
       // the sidebar name change with the form instead of after a 5min stale tick.
       queryClient.setQueryData<OrgProfile>(["organization"], updated);
-      toast.success("Organization updated.");
     },
-    onError: (err) =>
-      toast.error(apiError(err, "Could not update organization.")),
   });
+
+  // Notification prefs live at page level so the shared Save bar can flush them
+  // in the same submit as the org PATCH. Both writes are independent — they run
+  // in parallel and each surfaces its own toast on error.
+  const prefsQuery = useQuery({
+    queryKey: ["notificationPrefs"],
+    queryFn: getNotificationPrefs,
+  });
+  const [prefs, setPrefs] = useState<NotificationPrefs | null>(null);
+  useEffect(() => {
+    if (prefsQuery.data) setPrefs(prefsQuery.data);
+  }, [prefsQuery.data]);
+  const prefsMutation = useMutation({
+    mutationFn: (payload: NotificationPrefs) => updateNotificationPrefs(payload),
+    onSuccess: (updated) => {
+      queryClient.setQueryData<NotificationPrefs>(
+        ["notificationPrefs"],
+        updated,
+      );
+    },
+  });
+  const prefsIsDirty = Boolean(
+    prefsQuery.data &&
+      prefs &&
+      (prefs.interviewCompleted !== prefsQuery.data.interviewCompleted ||
+        prefs.statusChange !== prefsQuery.data.statusChange),
+  );
 
   const nameError = name.trim().length === 0 ? "A name is required." : null;
   const attemptsValue = toInt(maxAttempts);
@@ -664,14 +688,16 @@ export function OrgSettingsPage() {
   };
 
   const patch = org ? buildPatch(org) : {};
-  const isDirty = Object.keys(patch).length > 0;
+  const orgDirty = Object.keys(patch).length > 0;
+  const isDirty = orgDirty || prefsIsDirty;
+  const isSaving = saveMutation.isPending || prefsMutation.isPending;
   const canSave =
     canWrite &&
     isDirty &&
     !hasErrors &&
     !logoUploading &&
     !faviconUploading &&
-    !saveMutation.isPending;
+    !isSaving;
 
   const reset = () => {
     if (!org) return;
@@ -684,6 +710,7 @@ export function OrgSettingsPage() {
     setLogoKey(null);
     setFaviconKey(null);
     setFormVersion((v) => v + 1);
+    if (prefsQuery.data) setPrefs(prefsQuery.data);
   };
 
   const submit = (e: FormEvent) => {
@@ -695,7 +722,17 @@ export function OrgSettingsPage() {
       timezone: true,
     });
     if (!canSave || !org) return;
-    saveMutation.mutate(patch);
+
+    const jobs: Array<Promise<unknown>> = [];
+    if (orgDirty) jobs.push(saveMutation.mutateAsync(patch));
+    if (prefsIsDirty && prefs) jobs.push(prefsMutation.mutateAsync(prefs));
+    if (jobs.length === 0) return;
+
+    Promise.all(jobs)
+      .then(() => toast.success("Settings saved."))
+      .catch((err) =>
+        toast.error(apiError(err, "Could not save settings.")),
+      );
   };
 
   const header = (
@@ -728,7 +765,7 @@ export function OrgSettingsPage() {
             variant="secondary"
             size="sm"
             onClick={reset}
-            disabled={!isDirty || saveMutation.isPending}
+            disabled={!isDirty || isSaving}
           >
             Reset
           </Button>
@@ -738,7 +775,7 @@ export function OrgSettingsPage() {
             form="org-settings-form"
             disabled={!canSave}
           >
-            {saveMutation.isPending ? (
+            {isSaving ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Saving…
@@ -1141,7 +1178,16 @@ export function OrgSettingsPage() {
             {activeTab === "video" ? videoBody : null}
             {activeTab === "defaults" ? defaultsBody : null}
             {activeTab === "platform" ? platformBody : null}
-            {activeTab === "notifications" ? <NotificationPrefsBody /> : null}
+            {activeTab === "notifications" ? (
+              <NotificationPrefsBody
+                prefs={prefs}
+                onChange={setPrefs}
+                isLoading={prefsQuery.isLoading}
+                isError={prefsQuery.isError}
+                onRetry={() => prefsQuery.refetch()}
+                disabled={prefsMutation.isPending}
+              />
+            ) : null}
           </div>
         </div>
       </form>
@@ -1198,8 +1244,8 @@ function SettingsSkeleton() {
 
 /**
  * Loading placeholder for the notifications tab — two toggle-row cards (title,
- * helper line, a checkbox) and the trailing Save button, matching the real
- * `NotificationPrefsBody` layout below.
+ * helper line, a checkbox). Prefs share the header's Save/Reset bar, so this
+ * skeleton has no trailing button placeholder to mirror.
  */
 function NotificationPrefsSkeleton() {
   return (
@@ -1216,51 +1262,32 @@ function NotificationPrefsSkeleton() {
           <Skeleton className="mt-0.5 h-4 w-4 rounded" />
         </div>
       ))}
-      <div className="mt-1 flex justify-end">
-        <Skeleton className="h-8 w-36 rounded-lg" />
-      </div>
     </div>
   );
 }
 
 /**
- * Self-scoped preferences (`/admin/users/me/...`), so this sits inside the
- * Settings page rather than on the org_admin-only Team page — otherwise `hr`
- * could never reach their own notification settings.
+ * Self-scoped preferences (`/admin/users/me/...`). State lives on the parent
+ * so the shared Save/Reset bar in the header flushes prefs the same way it
+ * flushes the org PATCH — one button, one dirty flag.
  */
-function NotificationPrefsBody() {
-  const queryClient = useQueryClient();
-  const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ["notificationPrefs"],
-    queryFn: getNotificationPrefs,
-  });
+interface NotificationPrefsBodyProps {
+  prefs: NotificationPrefs | null;
+  onChange: (prefs: NotificationPrefs) => void;
+  isLoading: boolean;
+  isError: boolean;
+  onRetry: () => void;
+  disabled?: boolean;
+}
 
-  const [prefs, setPrefs] = useState<NotificationPrefs | null>(null);
-
-  useEffect(() => {
-    if (data) setPrefs(data);
-  }, [data]);
-
-  const mutation = useMutation({
-    mutationFn: (payload: NotificationPrefs) => updateNotificationPrefs(payload),
-    onSuccess: (updated) => {
-      queryClient.setQueryData<NotificationPrefs>(
-        ["notificationPrefs"],
-        updated,
-      );
-      toast.success("Notification preferences saved.");
-    },
-    onError: (err) =>
-      toast.error(apiError(err, "Could not save notification preferences.")),
-  });
-
-  const isDirty = Boolean(
-    data &&
-      prefs &&
-      (prefs.interviewCompleted !== data.interviewCompleted ||
-        prefs.statusChange !== data.statusChange),
-  );
-
+function NotificationPrefsBody({
+  prefs,
+  onChange,
+  isLoading,
+  isError,
+  onRetry,
+  disabled,
+}: NotificationPrefsBodyProps) {
   if (isLoading) {
     return <NotificationPrefsSkeleton />;
   }
@@ -1271,7 +1298,7 @@ function NotificationPrefsBody() {
         <p className="text-[13.5px] text-[var(--danger)]">
           Could not load preferences.
         </p>
-        <Button variant="secondary" size="sm" onClick={() => refetch()}>
+        <Button variant="secondary" size="sm" onClick={onRetry}>
           Retry
         </Button>
       </div>
@@ -1280,9 +1307,6 @@ function NotificationPrefsBody() {
 
   return (
     <div className="grid gap-3">
-      {/* A <label> wrapper would be safe here — `Checkbox` renders a
-          <button>, which is interactive content, so label activation bails
-          when the box itself is clicked. */}
       <div className="flex items-start gap-3 rounded-xl border border-line p-4">
         <div className="min-w-0 flex-1">
           <div className="text-[13.5px] font-semibold text-ink">
@@ -1295,9 +1319,9 @@ function NotificationPrefsBody() {
         <Checkbox
           checked={prefs.interviewCompleted}
           onCheckedChange={(checked) =>
-            setPrefs({ ...prefs, interviewCompleted: checked })
+            onChange({ ...prefs, interviewCompleted: checked })
           }
-          disabled={mutation.isPending}
+          disabled={disabled}
           className="mt-0.5"
           aria-label="Email me when a candidate submits an interview"
         />
@@ -1315,30 +1339,12 @@ function NotificationPrefsBody() {
         <Checkbox
           checked={prefs.statusChange}
           onCheckedChange={(checked) =>
-            setPrefs({ ...prefs, statusChange: checked })
+            onChange({ ...prefs, statusChange: checked })
           }
-          disabled={mutation.isPending}
+          disabled={disabled}
           className="mt-0.5"
           aria-label="Email me when a candidate moves to a different stage"
         />
-      </div>
-
-      <div className="mt-1 flex justify-end">
-        <Button
-          type="button"
-          size="sm"
-          onClick={() => prefs && mutation.mutate(prefs)}
-          disabled={!isDirty || mutation.isPending}
-        >
-          {mutation.isPending ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Saving…
-            </>
-          ) : (
-            "Save preferences"
-          )}
-        </Button>
       </div>
     </div>
   );

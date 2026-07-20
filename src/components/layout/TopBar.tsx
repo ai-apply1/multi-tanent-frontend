@@ -1,8 +1,19 @@
-import { useEffect, useState } from "react"
-import type { ReactNode } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import toast from "react-hot-toast"
-import { Bell, Clock, LogOut, Moon, Search, Sparkles, Sun, User } from "lucide-react"
+import {
+  Bell,
+  Briefcase,
+  CheckCircle2,
+  LogOut,
+  Moon,
+  Search,
+  Sun,
+  User,
+  Users,
+  UserPlus,
+} from "lucide-react"
 import { CommandPalette } from "@/components/layout/CommandPalette"
 import { MobileNavTrigger } from "@/components/layout/Sidebar"
 import {
@@ -15,6 +26,17 @@ import {
 import { Sheet, SheetClose, SheetContent } from "@/components/ui/sheet"
 import { useAuth } from "@/features/auth/AuthContext"
 import { useTheme } from "@/features/theme/ThemeContext"
+import { USER_ROLE_LABELS } from "@/features/users/types"
+import type { UserRole } from "@/features/auth/types"
+import {
+  listNotifications,
+  markAllNotificationsRead,
+} from "@/features/notifications/notificationsApi"
+import type {
+  Notification,
+  NotificationEvent,
+} from "@/features/notifications/types"
+import { titleCase } from "@/lib/text"
 import { ROUTES } from "@/routes"
 
 function initialsFor(name: string) {
@@ -28,87 +50,80 @@ function initialsFor(name: string) {
   )
 }
 
-type NotifKind = "success" | "info" | "warning" | "accent"
-
-interface Notif {
-  id: string
-  kind: NotifKind
-  icon: ReactNode
-  text: ReactNode
-  time: string
-  unread: boolean
+const EVENT_STYLES: Record<
+  NotificationEvent,
+  { icon: typeof Bell; tint: string }
+> = {
+  interview_completed: {
+    icon: CheckCircle2,
+    tint: "bg-accent text-primary",
+  },
+  candidate_status_changed: {
+    icon: Users,
+    tint: "bg-[var(--info-soft)] text-[var(--info)]",
+  },
+  team_member_added: {
+    icon: UserPlus,
+    tint: "bg-[var(--success-soft)] text-[var(--success)]",
+  },
+  job_created: {
+    icon: Briefcase,
+    tint: "bg-[var(--warning-soft)] text-[var(--warning)]",
+  },
 }
 
-// TODO: replace with real notification feed when the backend exposes one.
-const INITIAL_NOTIFS: Notif[] = [
-  {
-    id: "n1",
-    kind: "accent",
-    icon: <Sparkles className="h-4 w-4" strokeWidth={1.7} />,
-    text: (
-      <span>
-        <strong className="font-semibold">Grace Hopper</strong> completed the AI interview
-      </span>
-    ),
-    time: "8 min ago",
-    unread: true,
-  },
-  {
-    id: "n2",
-    kind: "warning",
-    icon: <Clock className="h-4 w-4" strokeWidth={1.7} />,
-    text: (
-      <span>
-        Ada Lovelace scored <strong className="font-semibold">91</strong> — awaiting your decision
-      </span>
-    ),
-    time: "1 h ago",
-    unread: true,
-  },
-  {
-    id: "n3",
-    kind: "info",
-    icon: <User className="h-4 w-4" strokeWidth={1.7} />,
-    text: (
-      <span>
-        New application for <strong className="font-semibold">Senior Frontend Engineer</strong>
-      </span>
-    ),
-    time: "3 h ago",
-    unread: false,
-  },
-]
-
-const NOTIF_TINT: Record<NotifKind, string> = {
-  success: "bg-[var(--success-soft)] text-[var(--success)]",
-  info: "bg-[var(--info-soft)] text-[var(--info)]",
-  warning: "bg-[var(--warning-soft)] text-[var(--warning)]",
-  accent: "bg-accent text-primary",
+function relativeTime(iso: string): string {
+  const then = new Date(iso).getTime()
+  const now = Date.now()
+  const seconds = Math.max(1, Math.round((now - then) / 1000))
+  if (seconds < 60) return `${seconds}s ago`
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes} min ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours} h ago`
+  const days = Math.round(hours / 24)
+  if (days < 30) return `${days} d ago`
+  return new Date(iso).toLocaleDateString()
 }
 
 /**
- * 60px sticky header: a wide search-pill "command palette" trigger on the
- * left (real palette wiring omitted here — clicks it are a no-op), a
- * notifications bell that opens a right-side drawer, and the profile
- * avatar which opens a dropdown containing profile links, the theme
- * toggle, and sign-out. Below `lg:` the search pill hides and the
- * hamburger drawer becomes the primary navigation surface.
+ * 60px sticky header: command-palette trigger, dark-mode toggle,
+ * notification bell, and the profile dropdown.
  */
 export function TopBar() {
   const { user, logout } = useAuth()
   const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
-  const displayName = user?.fullName || user?.email || "Admin"
+  const queryClient = useQueryClient()
+
+  const rawDisplayName = user?.fullName || user?.email || "Admin"
+  const displayName = titleCase(rawDisplayName) || rawDisplayName
   const email = user?.email || ""
-  const rolePill = user?.role === "org_admin" ? "Org admin" : "HR"
+  const rolePill = user?.role ? USER_ROLE_LABELS[user.role as UserRole] ?? "" : ""
 
   const [notifOpen, setNotifOpen] = useState(false)
-  const [notifs, setNotifs] = useState<Notif[]>(INITIAL_NOTIFS)
   const [paletteOpen, setPaletteOpen] = useState(false)
 
-  // Global ⌘K / Ctrl+K listener. Runs at the window level rather than being
-  // owned by the search pill so the palette opens from anywhere in the app —
-  // including inside modal dialogs — the way Cmd+K users expect.
+  // Poll every 60s while the tab is visible; a stale-for-30s window means
+  // dropdown opens after a notification fires don't wait a full poll cycle.
+  const notifsQuery = useQuery({
+    queryKey: ["notifications"],
+    queryFn: () => listNotifications({ limit: 25 }),
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+    staleTime: 30_000,
+  })
+  const items: Notification[] = notifsQuery.data?.items ?? []
+  const unreadCount = notifsQuery.data?.unreadCount ?? 0
+
+  const markAllRead = useMutation({
+    mutationFn: markAllNotificationsRead,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["notifications"] })
+    },
+  })
+
+  // Global ⌘K / Ctrl+K listener.
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -119,10 +134,6 @@ export function TopBar() {
     window.addEventListener("keydown", handleKey)
     return () => window.removeEventListener("keydown", handleKey)
   }, [])
-
-  const handleMarkAllRead = () => {
-    setNotifs((prev) => prev.map((n) => ({ ...n, unread: false })))
-  }
 
   const handleSignOut = async () => {
     try {
@@ -135,7 +146,18 @@ export function TopBar() {
     }
   }
 
-  const themeLabel = theme === "dark" ? "Switch to light mode" : "Switch to dark mode"
+  const rendered = useMemo(
+    () =>
+      items.map((n) => {
+        const style = EVENT_STYLES[n.event] ?? {
+          icon: Bell,
+          tint: "bg-accent text-primary",
+        }
+        const Icon = style.icon
+        return { n, Icon, tint: style.tint }
+      }),
+    [items],
+  )
 
   return (
     <header className="sticky top-0 z-30 flex h-[60px] shrink-0 items-center gap-3 border-b border-line bg-surface px-4 sm:px-5 lg:px-6">
@@ -152,8 +174,6 @@ export function TopBar() {
         <span className="mono rounded-[5px] border border-line-2 px-1.5 py-0.5 text-[11px]">⌘K</span>
       </button>
 
-      {/* Mobile shortcut — the wide search pill hides on small screens, so
-          expose a tiny 38x38 button that opens the same palette. */}
       <button
         type="button"
         onClick={() => setPaletteOpen(true)}
@@ -168,6 +188,20 @@ export function TopBar() {
       <div className="flex-1 lg:hidden" />
 
       <div className="ml-auto flex items-center gap-2">
+        <button
+          type="button"
+          onClick={toggleTheme}
+          className="flex h-[38px] w-[38px] items-center justify-center rounded-[9px] border border-line bg-surface text-ink-2 transition hover:bg-surface-3"
+          aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+        >
+          {theme === "dark" ? (
+            <Sun className="h-[17px] w-[17px]" strokeWidth={1.7} />
+          ) : (
+            <Moon className="h-[17px] w-[17px]" strokeWidth={1.7} />
+          )}
+        </button>
+
         <Sheet open={notifOpen} onOpenChange={setNotifOpen}>
           <button
             type="button"
@@ -176,7 +210,7 @@ export function TopBar() {
             aria-label="Notifications"
           >
             <Bell className="h-[17px] w-[17px]" strokeWidth={1.7} />
-            {notifs.some((n) => n.unread) ? (
+            {unreadCount > 0 ? (
               <span className="absolute right-[9px] top-[9px] h-[7px] w-[7px] rounded-full bg-[var(--danger)] ring-2 ring-surface" />
             ) : null}
           </button>
@@ -189,11 +223,12 @@ export function TopBar() {
             <div className="flex items-center justify-between border-b border-line px-5 py-4">
               <div className="text-[16px] font-semibold text-ink">Notifications</div>
               <div className="flex items-center gap-1">
-                {notifs.some((n) => n.unread) ? (
+                {unreadCount > 0 ? (
                   <button
                     type="button"
-                    onClick={handleMarkAllRead}
-                    className="rounded-md px-2 py-1 text-[12px] font-medium text-ink-muted transition hover:bg-surface-3 hover:text-ink"
+                    onClick={() => markAllRead.mutate()}
+                    disabled={markAllRead.isPending}
+                    className="rounded-md px-2 py-1 text-[12px] font-medium text-ink-muted transition hover:bg-surface-3 hover:text-ink disabled:opacity-50"
                   >
                     Mark all read
                   </button>
@@ -210,31 +245,40 @@ export function TopBar() {
             </div>
 
             <div className="scroll flex-1 overflow-auto">
-              {notifs.length === 0 ? (
+              {notifsQuery.isLoading ? (
+                <div className="px-5 py-14 text-center text-[13px] text-ink-muted">
+                  Loading…
+                </div>
+              ) : rendered.length === 0 ? (
                 <div className="px-5 py-14 text-center">
-                  <div className="text-[13px] text-ink-muted">You're all caught up.</div>
+                  <div className="text-[13px] text-ink-muted">You&apos;re all caught up.</div>
                   <div className="mt-1 text-[12px] text-ink-subtle">No new notifications</div>
                 </div>
               ) : (
-                notifs.map((n) => (
+                rendered.map(({ n, Icon, tint }) => (
                   <div
                     key={n.id}
                     className={
                       "flex cursor-pointer gap-3 border-b border-line px-5 py-3.5 transition last:border-b-0 hover:bg-hover " +
-                      (n.unread ? "bg-[var(--accent-softer)]" : "")
+                      (!n.isRead ? "bg-[var(--accent-softer)]" : "")
                     }
                   >
                     <span
                       className={
                         "flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[9px] " +
-                        NOTIF_TINT[n.kind]
+                        tint
                       }
                     >
-                      {n.icon}
+                      <Icon className="h-4 w-4" strokeWidth={1.7} />
                     </span>
                     <div className="min-w-0 flex-1">
-                      <div className="text-[13px] leading-snug text-ink">{n.text}</div>
-                      <div className="mt-1 text-[11.5px] text-ink-subtle">{n.time}</div>
+                      <div className="text-[13px] font-semibold leading-snug text-ink">{n.title}</div>
+                      {n.content ? (
+                        <div className="mt-0.5 text-[12.5px] leading-snug text-ink-2">{n.content}</div>
+                      ) : null}
+                      <div className="mt-1 text-[11.5px] text-ink-subtle">
+                        {relativeTime(n.createdAt)}
+                      </div>
                     </div>
                   </div>
                 ))
@@ -271,19 +315,6 @@ export function TopBar() {
             <DropdownMenuItem onSelect={() => navigate(ROUTES.SETTINGS)}>
               <Bell className="h-3.5 w-3.5" strokeWidth={1.7} />
               Notification settings
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={(event) => {
-                event.preventDefault()
-                toggleTheme()
-              }}
-            >
-              {theme === "dark" ? (
-                <Sun className="h-3.5 w-3.5" strokeWidth={1.7} />
-              ) : (
-                <Moon className="h-3.5 w-3.5" strokeWidth={1.7} />
-              )}
-              {themeLabel}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem

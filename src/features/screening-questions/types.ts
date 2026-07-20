@@ -70,6 +70,8 @@ export interface ScreeningQuestion {
   organizationId: string
   variants: QuestionVariant[]
   difficultyLevel: DifficultyLevel
+  /** Primary category id (from `/admin/question-categories`). Null on legacy rows. */
+  categoryId: string | null
   tags: string[]
   createdBy: string | null
   updatedBy: string | null
@@ -104,6 +106,8 @@ export const askableCount = (q: { variants: QuestionVariant[] }): number =>
 export interface CreateScreeningQuestionPayload {
   variants: string[]
   difficultyLevel: DifficultyLevel
+  /** Primary category id — sourced from `/admin/question-categories`. */
+  categoryId?: string
   tags?: string[]
 }
 
@@ -127,7 +131,13 @@ export interface UpdateQuestionVariantPayload {
 export interface UpdateScreeningQuestionPayload {
   variants?: UpdateQuestionVariantPayload[]
   difficultyLevel?: DifficultyLevel
+  /** Send `null` to clear the category. Absent leaves it unchanged. */
+  categoryId?: string | null
   tags?: string[]
+}
+
+export interface ListScreeningQuestionsParamsWithCategory {
+  categoryId?: string
 }
 
 /** Body for `POST /admin/questions/suggest-variants` — drafts only, saves nothing. */

@@ -7,6 +7,7 @@ import {
   Loader2,
   Pencil,
   Search,
+  Share2,
   Star,
   Upload,
   User,
@@ -32,6 +33,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { JobQuestionsManager } from "@/features/jobs/components/JobQuestionsManager";
+import { JobShareDialog } from "@/features/jobs/components/JobShareDialog";
 import { getJob, setJobStatus } from "@/features/jobs/jobsApi";
 import {
   EMPLOYMENT_TYPE_LABELS,
@@ -100,6 +102,7 @@ export function JobDetailPage() {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<TabId>("overview");
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   // The drawer is keyed by `publicSessionId`, but candidate rows only ship
   // the interview's raw ObjectId — so opening the drawer is a two-step:
   // remember the candidate, read the detail, hand the drawer the resolved
@@ -267,6 +270,14 @@ export function JobDetailPage() {
           <Button
             variant="secondary"
             size="sm"
+            onClick={() => setShareOpen(true)}
+          >
+            <Share2 className="h-4 w-4" strokeWidth={1.9} />
+            Share
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => navigate(jobEdit(job._id))}
           >
             <Pencil className="h-4 w-4" strokeWidth={1.9} />
@@ -278,6 +289,8 @@ export function JobDetailPage() {
           </Button>
         </div>
       </div>
+
+      <JobShareDialog jobId={job._id} open={shareOpen} onOpenChange={setShareOpen} />
 
       {/* KPI strip. Candidate counts have no matching API here, so the tiles
           show a dash rather than fabricating a zero. */}

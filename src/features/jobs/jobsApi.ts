@@ -107,6 +107,49 @@ export async function deleteJob(id: string) {
   return data
 }
 
+// ── Share link + email invites ──────────────────────────────────────────
+
+export interface JobShareLink {
+  url: string
+  jobId: string
+  jobTitle: string
+  status: string
+}
+
+export interface JobInvite {
+  id: string
+  email: string
+  used: boolean
+  invitedAt: string | null
+  lastSentAt: string | null
+  sendCount: number
+  url: string
+}
+
+export async function getJobShareLink(jobId: string) {
+  const { data } = await api.get<JobShareLink>(`/admin/jobs/${jobId}/share-link`)
+  return data
+}
+
+export async function listJobInvites(jobId: string) {
+  const { data } = await api.get<{ invites: JobInvite[] }>(
+    `/admin/jobs/${jobId}/invites`
+  )
+  return data.invites
+}
+
+export async function sendJobInvites(jobId: string, emails: string[]) {
+  const { data } = await api.post<{
+    message: string
+    invites: JobInvite[]
+  }>(`/admin/jobs/${jobId}/invites`, { emails })
+  return data
+}
+
+export async function deleteJobInvite(jobId: string, inviteId: string) {
+  await api.delete(`/admin/jobs/${jobId}/invites/${inviteId}`)
+}
+
 // The question bank is NOT read from here. `/admin/questions` has exactly one
 // reader — `listScreeningQuestions` in the screening-questions slice — and the
 // attach picker uses it. A second fetcher here drifts from it silently.
