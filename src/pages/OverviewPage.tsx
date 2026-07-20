@@ -556,8 +556,16 @@ export function OverviewPage() {
                 ) : (
                   metricStats.map((stat, i) => {
                     const color = FUNNEL_COLORS[i % FUNNEL_COLORS.length];
+                    /*
+                     * The 6% floor keeps a real-but-tiny bar visible (1 of
+                     * 900 rounds to 0%), but it must not apply to ZERO — a
+                     * stub of colour on an empty stage reads as "a few", which
+                     * is the one thing a funnel must never imply. Guarding on
+                     * `stat.count > 0` is what separates "too small to draw"
+                     * from "nothing to draw".
+                     */
                     const pct =
-                      funnelMax > 0
+                      funnelMax > 0 && stat.count > 0
                         ? Math.max(
                             6,
                             Math.round((stat.count / funnelMax) * 100),
