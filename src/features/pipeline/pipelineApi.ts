@@ -62,3 +62,26 @@ export async function deleteStatusColumn(statusId: string) {
   )
   return data
 }
+
+/**
+ * Persist a drag-and-drop reorder in ONE atomic request.
+ *
+ * Send the COMPLETE catalog in its new order — not just the rows that
+ * moved, and no `stageOrder` values. The server derives the numbering
+ * (10, 20, 30 …) and applies the whole board in a single transaction, so
+ * the catalog is never observable in a half-renumbered state.
+ *
+ * Sending the whole list is also the concurrency check: a 409 means a
+ * column was added or deleted since the drag began, and the correct
+ * response is to refetch rather than to retry.
+ *
+ * Returns the reordered catalog, so the caller can drop it straight into
+ * the query cache without a follow-up read.
+ */
+export async function reorderStatusColumns(statusIds: string[]) {
+  const { data } = await api.patch<CandidateStatus[]>(
+    "/admin/statuses/reorder",
+    { statusIds },
+  )
+  return data
+}

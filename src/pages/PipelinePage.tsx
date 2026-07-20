@@ -1,14 +1,42 @@
-import { useMemo, useState } from "react"
+import { useMemo, useState, type CSSProperties } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import toast from "react-hot-toast"
-import { GitBranch, Lock, Pencil, Plus, RotateCw, Trash2 } from "lucide-react"
+import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core"
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable"
+import { CSS } from "@dnd-kit/utilities"
+import {
+  GitBranch,
+  GripVertical,
+  Loader2,
+  Lock,
+  Pencil,
+  Plus,
+  RotateCw,
+  Trash2,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   deleteStatusColumn,
   listCandidateStatuses,
+  reorderStatusColumns,
 } from "@/features/pipeline/pipelineApi"
 import type { CandidateStatus } from "@/features/candidates/types"
 import { StatusDialog } from "@/features/pipeline/components/StatusDialog"
+import { STAGE_ORDER_STEP } from "@/features/pipeline/types"
 import { errorMessage } from "@/lib/errors"
 
 const FALLBACK_COLOR = "#64748B"
@@ -28,6 +56,12 @@ const FALLBACK_COLOR = "#64748B"
  *   - built-in rows cannot be deleted (403), and no row can be deleted
  *     while a candidate still sits in it (409). Both messages are shown
  *     verbatim rather than flattened into a generic failure.
+ *
+ * Reordering is drag-and-drop over `stageOrder`. The drop writes the new
+ * order straight into the query cache so the row settles where it was
+ * dropped, then sends the whole ordered catalog to
+ * `PATCH /admin/statuses/reorder` — one atomic request whose response is
+ * the confirmed board.
  */
 export function PipelinePage() {
   const queryClient = useQueryClient()
@@ -35,7 +69,7 @@ export function PipelinePage() {
   const [editTarget, setEditTarget] = useState<CandidateStatus | null>(null)
 
   const {
-    data: statuses = [],
+    data: statuses,
     isLoading,
     error,
     refetch,
@@ -46,12 +80,38 @@ export function PipelinePage() {
   })
 
   // The backend already returns board order, but sorting here keeps the page
-  // correct if that ever changes and makes a just-edited stageOrder land in
-  // the right place on the optimistic refetch.
+  // correct if that ever changes and re-sorts the optimistic reorder below.
   const ordered = useMemo(
-    () => [...statuses].sort((a, b) => a.stageOrder - b.stageOrder),
+    () => [...(statuses ?? [])].sort((a, b) => a.stageOrder - b.stageOrder),
     [statuses],
   )
+
+  const sensors = useSensors(
+    // 6px before a drag starts, so a click on Edit/Delete inside the row is
+    // never swallowed as a micro-drag.
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  )
+
+  const reorderMutation = useMutation({
+    mutationFn: reorderStatusColumns,
+    onSuccess: (saved) => {
+      // The endpoint returns the reordered catalog, so this is the final
+      // truth — no invalidate, no refetch round trip.
+      queryClient.setQueryData(["candidateStatuses"], saved)
+      toast.success("Order saved.")
+    },
+    onError: (err) => {
+      // The write is atomic, so nothing landed — but the 409 case means the
+      // catalog itself moved under us (a column added or deleted mid-drag),
+      // and only a refetch resolves that. Refetching also restores the
+      // pre-drag order after any other failure.
+      toast.error(errorMessage(err, "Could not save the new order."))
+      queryClient.invalidateQueries({ queryKey: ["candidateStatuses"] })
+    },
+  })
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => deleteStatusColumn(id),
@@ -65,6 +125,37 @@ export function PipelinePage() {
       toast.error(errorMessage(err, "Could not delete status."))
     },
   })
+
+  const busy = reorderMutation.isPending || deleteMutation.isPending
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIndex = ordered.findIndex((s) => s._id === active.id)
+    const newIndex = ordered.findIndex((s) => s._id === over.id)
+    if (oldIndex < 0 || newIndex < 0) return
+
+    // Mirror the server's numbering (10/20/30…) locally so the optimistic
+    // list below sorts into the shape the response will confirm.
+    const moved = arrayMove(ordered, oldIndex, newIndex).map(
+      (status, index) => ({
+        ...status,
+        stageOrder: (index + 1) * STAGE_ORDER_STEP,
+      }),
+    )
+
+    // Optimistic write into the query cache itself — no local draft mirror
+    // to keep in sync, and the Candidates page's filter (same query key)
+    // reorders with it. `cancelQueries` first so an in-flight background
+    // refetch can't land on top of this and snap the row back.
+    void queryClient.cancelQueries({ queryKey: ["candidateStatuses"] })
+    queryClient.setQueryData(["candidateStatuses"], moved)
+
+    // The WHOLE catalog, in order — the server derives every stageOrder and
+    // rejects a set that no longer matches its own (a column added or
+    // deleted mid-drag).
+    reorderMutation.mutate(moved.map((s) => s._id))
+  }
 
   const openCreate = () => {
     setEditTarget(null)
@@ -101,9 +192,9 @@ export function PipelinePage() {
             </h1>
           </div>
           <p className="mt-1.5 max-w-[620px] text-[13.5px] text-ink-muted">
-            The candidate board's columns, in order. Rename, recolour and
-            reorder any column — including the built-ins — or add your own.
-            A column's key is permanent, because the hiring automations
+            The candidate board's columns, in order. Drag to reorder, rename
+            and recolour any column — including the built-ins — or add your
+            own. A column's key is permanent, because the hiring automations
             reference it.
           </p>
         </div>
@@ -128,19 +219,37 @@ export function PipelinePage() {
             <span className="text-[12.5px] font-semibold uppercase tracking-wide text-ink-subtle">
               {ordered.length} columns
             </span>
+            {reorderMutation.isPending ? (
+              <span className="inline-flex items-center gap-1.5 text-[12.5px] text-ink-muted">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
+                Saving order…
+              </span>
+            ) : null}
           </div>
-          {ordered.map((status) => (
-            <StatusRow
-              key={status._id}
-              status={status}
-              onEdit={() => openEdit(status)}
-              onDelete={() => handleDelete(status)}
-              deleting={
-                deleteMutation.isPending &&
-                deleteMutation.variables === status._id
-              }
-            />
-          ))}
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={ordered.map((s) => s._id)}
+              strategy={verticalListSortingStrategy}
+            >
+              {ordered.map((status) => (
+                <SortableStatusRow
+                  key={status._id}
+                  status={status}
+                  disabled={busy}
+                  onEdit={() => openEdit(status)}
+                  onDelete={() => handleDelete(status)}
+                  deleting={
+                    deleteMutation.isPending &&
+                    deleteMutation.variables === status._id
+                  }
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
         </div>
       )}
 
@@ -160,15 +269,86 @@ export function PipelinePage() {
 
 interface StatusRowProps {
   status: CandidateStatus
+  disabled: boolean
   onEdit: () => void
   onDelete: () => void
   deleting: boolean
 }
 
-function StatusRow({ status, onEdit, onDelete, deleting }: StatusRowProps) {
+/** Sortable wrapper: feeds dnd-kit's refs/listeners into the visual row. */
+function SortableStatusRow(props: StatusRowProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: props.status._id, disabled: props.disabled })
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    // Lift the dragged row above its neighbours; without it the rows below
+    // paint over it as they shift.
+    zIndex: isDragging ? 1 : undefined,
+    position: isDragging ? "relative" : undefined,
+  }
+  return (
+    <StatusRow
+      {...props}
+      sortableRef={setNodeRef}
+      style={style}
+      isDragging={isDragging}
+      dragHandleRef={setActivatorNodeRef}
+      dragHandleListeners={listeners}
+      dragHandleAttributes={attributes}
+    />
+  )
+}
+
+interface StatusRowViewProps extends StatusRowProps {
+  sortableRef?: (node: HTMLElement | null) => void
+  style?: CSSProperties
+  isDragging?: boolean
+  dragHandleRef?: (node: HTMLElement | null) => void
+  dragHandleListeners?: ReturnType<typeof useSortable>["listeners"]
+  dragHandleAttributes?: ReturnType<typeof useSortable>["attributes"]
+}
+
+function StatusRow({
+  status,
+  disabled,
+  onEdit,
+  onDelete,
+  deleting,
+  sortableRef,
+  style,
+  isDragging,
+  dragHandleRef,
+  dragHandleListeners,
+  dragHandleAttributes,
+}: StatusRowViewProps) {
   const color = status.color ?? FALLBACK_COLOR
   return (
-    <div className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3.5 last:border-b-0">
+    <div
+      ref={sortableRef}
+      style={style}
+      className={`flex flex-wrap items-center gap-3 border-b border-line bg-surface px-5 py-3.5 last:border-b-0 ${
+        isDragging ? "rounded-lg shadow-lg" : ""
+      }`}
+    >
+      <button
+        type="button"
+        ref={dragHandleRef}
+        {...dragHandleAttributes}
+        {...dragHandleListeners}
+        disabled={disabled}
+        aria-label={`Reorder ${status.label}`}
+        className="inline-flex h-7 w-5 shrink-0 cursor-grab items-center justify-center text-ink-subtle hover:text-ink-muted disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        <GripVertical className="h-4 w-4" strokeWidth={1.8} />
+      </button>
       <span className="w-9 shrink-0 text-[12.5px] tabular-nums text-ink-subtle">
         {status.stageOrder}
       </span>
@@ -211,7 +391,7 @@ function StatusRow({ status, onEdit, onDelete, deleting }: StatusRowProps) {
         <button
           type="button"
           onClick={onDelete}
-          disabled={deleting}
+          disabled={deleting || disabled}
           aria-label={`Delete ${status.label}`}
           className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--line-2)] bg-surface text-[var(--danger)] hover:bg-[var(--danger-soft)] disabled:opacity-50"
         >
@@ -237,6 +417,7 @@ function LoadingSkeleton() {
           key={i}
           className="flex items-center gap-3 border-b border-line px-5 py-3.5 last:border-b-0"
         >
+          <div className="h-4 w-4 rounded bg-surface-3" />
           <div className="h-3 w-6 rounded bg-surface-3" />
           <div className="h-6 w-28 rounded-full bg-surface-3" />
           <div className="h-4 w-20 rounded bg-surface-3" />

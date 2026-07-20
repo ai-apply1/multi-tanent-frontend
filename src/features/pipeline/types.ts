@@ -66,6 +66,14 @@ export interface UpdateStatusPayload {
 }
 
 /**
+ * Gap between adjacent columns when a drag-and-drop reorder renumbers the
+ * board. Matches the builtins' own 10/20/…/80 spacing, so a reordered
+ * catalog stays readable and a later hand-typed position still has room to
+ * slot between two neighbours.
+ */
+export const STAGE_ORDER_STEP = 10
+
+/**
  * Derive a legal `key` from a label: "Reference check" → "reference-check".
  * The dialog seeds the key field with this while the user is still typing
  * the label, and stops the moment they edit the key by hand.
