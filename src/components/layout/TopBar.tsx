@@ -308,10 +308,10 @@ export function TopBar() {
               </span>
             </div>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={(event) => event.preventDefault()}>
+            {/* <DropdownMenuItem onSelect={(event) => event.preventDefault()}>
               <User className="h-3.5 w-3.5" strokeWidth={1.7} />
               Your profile
-            </DropdownMenuItem>
+            </DropdownMenuItem> */}
             <DropdownMenuItem onSelect={() => navigate(ROUTES.SETTINGS)}>
               <Bell className="h-3.5 w-3.5" strokeWidth={1.7} />
               Notification settings
