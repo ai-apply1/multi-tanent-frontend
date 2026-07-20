@@ -49,6 +49,7 @@ import {
   listCandidateStatuses,
   listCandidates,
 } from "@/features/candidates/candidatesApi";
+import { invalidateCandidateData } from "@/features/candidates/candidatesCache";
 import type {
   CandidateListItem,
   CandidateStatus,
@@ -107,7 +108,13 @@ export function JobDetailPage() {
     null,
   );
 
-  const { data: job, isLoading, isError, error, refetch } = useQuery({
+  const {
+    data: job,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
     queryKey: ["job", jobId],
     queryFn: () => getJob(jobId!),
     enabled: Boolean(jobId),
@@ -150,10 +157,7 @@ export function JobDetailPage() {
     setDrawerCandidateId(null);
   }, [detailQuery.isError, detailQuery.error]);
 
-  const invalidateCandidates = () => {
-    queryClient.invalidateQueries({ queryKey: ["candidates"] });
-    queryClient.invalidateQueries({ queryKey: ["candidateKanban"] });
-  };
+  const invalidateCandidates = () => invalidateCandidateData(queryClient);
 
   if (isLoading) {
     return <JobDetailSkeleton />;
@@ -410,7 +414,8 @@ function OverviewTab({ job }: { job: Job }) {
           <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
             <MetaCell label="Score split">
               <span className="mono">
-                {job.scoringWeights.technical}% / {job.scoringWeights.communication}%
+                {job.scoringWeights.technical}% /{" "}
+                {job.scoringWeights.communication}%
               </span>
             </MetaCell>
             <MetaCell label="Threshold">
@@ -472,7 +477,7 @@ function OverviewTab({ job }: { job: Job }) {
           past — the top offset is the 60px TopBar height + a small breathing
           gap. Falls back to normal flow on narrow layouts where the columns
           stack. */}
-      <div className="grid gap-4 lg:sticky lg:top-[76px] lg:self-start">
+      <div className="grid gap-4 lg:sticky lg:top-3 lg:self-start">
         <FunnelCard />
       </div>
     </div>
@@ -631,10 +636,7 @@ function CandidatesTab({
       ) : isError ? (
         <div className="flex flex-col items-center gap-2 px-6 py-16 text-center text-[13px] text-[var(--danger)]">
           Could not load candidates.
-          <button
-            onClick={() => refetch()}
-            className="text-primary underline"
-          >
+          <button onClick={() => refetch()} className="text-primary underline">
             Retry
           </button>
         </div>
@@ -724,7 +726,10 @@ function CandidateJobRow({
         </span>
       </div>
 
-      <span className="min-w-0 truncate text-[13px] text-ink-2" title={jobTitle}>
+      <span
+        className="min-w-0 truncate text-[13px] text-ink-2"
+        title={jobTitle}
+      >
         {jobTitle || "This job"}
       </span>
 

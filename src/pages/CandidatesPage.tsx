@@ -59,6 +59,7 @@ import {
   sendCandidateInvite,
   updateCandidateStatus,
 } from "@/features/candidates/candidatesApi";
+import { invalidateCandidateData } from "@/features/candidates/candidatesCache";
 import {
   INVITABLE_STATUS_KEY,
   type CandidateListItem,
@@ -359,10 +360,7 @@ export function CandidatesPage() {
 
   // ── mutations ───────────────────────────────────────────────────────
 
-  const invalidateCandidates = () => {
-    queryClient.invalidateQueries({ queryKey: ["candidates"] });
-    queryClient.invalidateQueries({ queryKey: ["candidateKanban"] });
-  };
+  const invalidateCandidates = () => invalidateCandidateData(queryClient);
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => deleteCandidate(id),
