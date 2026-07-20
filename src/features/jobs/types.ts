@@ -76,9 +76,17 @@ export interface JobBase {
   updatedAt: string
 }
 
-/** A row from `GET /admin/jobs` — questions folded down to a count. */
+/**
+ * A row from `GET /admin/jobs` — questions folded down to a count, plus how
+ * many candidates the job has.
+ *
+ * `applicantCount` is EVERY candidate on the job, whatever column they sit
+ * in: the table asks how many people applied, and a rejected applicant still
+ * applied. The backend counts them in one aggregation for the whole page.
+ */
 export interface JobListItem extends JobBase {
   questionCount: number
+  applicantCount: number
 }
 
 /**

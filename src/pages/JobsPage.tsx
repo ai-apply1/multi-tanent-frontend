@@ -280,7 +280,15 @@ export function JobsPage() {
                 <div>
                   <JobClassification job={row} />
                 </div>
-                <div className="mono text-right text-ink-subtle">—</div>
+                <div
+                  className={
+                    row.applicantCount > 0
+                      ? "mono text-right font-semibold text-ink"
+                      : "mono text-right text-ink-subtle"
+                  }
+                >
+                  {row.applicantCount}
+                </div>
                 <div className="mono text-right font-semibold text-ink">
                   {row.questionCount}
                 </div>

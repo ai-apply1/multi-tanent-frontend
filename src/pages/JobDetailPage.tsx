@@ -171,20 +171,22 @@ export function JobDetailPage() {
    */
   const kpi = useMemo(() => {
     const columns = boardQuery.data?.columns;
-    const tile = (key: string, fallbackLabel: string) => {
+    // `count: null` means NOT LOADED, which the renderers show as a dash.
+    // Distinct from 0 on purpose: "no applicants" and "we do not know yet"
+    // are different claims, and a job page that flashes zeroes on every open
+    // reads as an empty funnel.
+    const stage = (key: string, fallbackLabel: string) => {
       const column = columns?.find((c) => c.key === key);
       return {
         label: column?.label || fallbackLabel,
-        value: column ? String(column.count) : "—",
+        count: column ? column.count : null,
       };
     };
     return {
-      total: columns
-        ? String(columns.reduce((sum, c) => sum + c.count, 0))
-        : "—",
-      shortlisted: tile("shortlisted", "Shortlisted"),
-      finalRejected: tile("final_rejected", "Final Rejection"),
-      hired: tile("hired", "Finalized"),
+      total: columns ? columns.reduce((sum, c) => sum + c.count, 0) : null,
+      shortlisted: stage("shortlisted", "Shortlisted"),
+      finalRejected: stage("final_rejected", "Final Rejection"),
+      hired: stage("hired", "Finalized"),
     };
   }, [boardQuery.data]);
   // Resolve `publicSessionId` for the drawer target.
@@ -357,25 +359,25 @@ export function JobDetailPage() {
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard
           label="Applied"
-          value={kpi.total}
+          value={countLabel(kpi.total)}
           icon={<User className="h-4 w-4" strokeWidth={1.9} />}
           tint="var(--stage-applied)"
         />
         <KpiCard
           label={kpi.shortlisted.label}
-          value={kpi.shortlisted.value}
+          value={countLabel(kpi.shortlisted.count)}
           icon={<Star className="h-4 w-4" strokeWidth={1.9} />}
           tint="var(--stage-shortlisted)"
         />
         <KpiCard
           label={kpi.finalRejected.label}
-          value={kpi.finalRejected.value}
+          value={countLabel(kpi.finalRejected.count)}
           icon={<XIcon className="h-4 w-4" strokeWidth={2.1} />}
           tint="var(--danger)"
         />
         <KpiCard
           label={kpi.hired.label}
-          value={kpi.hired.value}
+          value={countLabel(kpi.hired.count)}
           icon={<UserCheck className="h-4 w-4" strokeWidth={1.9} />}
           tint="var(--success)"
         />
@@ -404,7 +406,7 @@ export function JobDetailPage() {
       </div>
 
       {tab === "overview" ? (
-        <OverviewTab job={job} />
+        <OverviewTab job={job} kpi={kpi} />
       ) : tab === "questions" ? (
         <JobQuestionsManager job={job} />
       ) : (
@@ -442,7 +444,7 @@ export function JobDetailPage() {
 
 // ── Overview tab ─────────────────────────────────────────────────────
 
-function OverviewTab({ job }: { job: Job }) {
+function OverviewTab({ job, kpi }: { job: Job; kpi: JobKpi }) {
   const { data: organization } = useOrganization();
   const requiredSkills = job.eligibility.requiredSkills;
 
@@ -551,7 +553,7 @@ function OverviewTab({ job }: { job: Job }) {
           gap. Falls back to normal flow on narrow layouts where the columns
           stack. */}
       <div className="grid gap-4 lg:sticky lg:top-3 lg:self-start">
-        <FunnelCard />
+        <FunnelCard kpi={kpi} />
       </div>
     </div>
   );
@@ -1059,15 +1061,41 @@ function Dash() {
   return <span className="text-ink-subtle">—</span>;
 }
 
-// ── Share / invite / funnel stubs ────────────────────────────────────
-// No matching backend endpoints exist for candidate invites on this page,
-// so the UI is present but limited to copy-to-clipboard on the share link.
+// ── Share / invite ───────────────────────────────────────────────────
+// No matching backend endpoint exists for candidate invites on this page,
+// so that part of the UI is limited to copy-to-clipboard on the share link.
 
-function FunnelCard() {
-  const rows: { label: string; tint: string }[] = [
-    { label: "Shortlisted", tint: "var(--stage-shortlisted)" },
-    { label: "Rejected", tint: "var(--danger)" },
-    { label: "Hired", tint: "var(--success)" },
+/**
+ * Per-stage counts for one job, shared by the KPI tiles and the funnel card
+ * so the two can never disagree. `count: null` = not loaded yet.
+ */
+type JobKpi = {
+  total: number | null;
+  shortlisted: { label: string; count: number | null };
+  finalRejected: { label: string; count: number | null };
+  hired: { label: string; count: number | null };
+};
+
+/** A count, or a dash while the board is still loading. Never a placeholder 0. */
+function countLabel(count: number | null): string {
+  return count === null ? "—" : String(count);
+}
+
+/**
+ * This job's funnel: how many of its applicants reached each outcome.
+ *
+ * Was a stub with three hardcoded dashes and 0%-wide bars, under a comment
+ * saying no endpoint existed. One does — the same board read that feeds the
+ * KPI tiles above, passed in rather than fetched again so the card and the
+ * tiles can never show different numbers for the same job.
+ *
+ * Labels come from the catalog, so a renamed column renames the row.
+ */
+function FunnelCard({ kpi }: { kpi: JobKpi }) {
+  const rows = [
+    { ...kpi.shortlisted, tint: "var(--stage-shortlisted)" },
+    { ...kpi.finalRejected, tint: "var(--danger)" },
+    { ...kpi.hired, tint: "var(--success)" },
   ];
   return (
     <div className="rounded-2xl border border-line bg-surface p-5 sm:p-6">
@@ -1075,23 +1103,40 @@ function FunnelCard() {
         <span className="text-[13.5px] font-bold text-ink">
           Funnel · Applied
         </span>
-        <span className="mono text-[14px] font-bold text-ink">—</span>
+        <span className="mono text-[14px] font-bold text-ink">
+          {countLabel(kpi.total)}
+        </span>
       </div>
       <div className="grid gap-3">
-        {rows.map((r) => (
-          <div key={r.label}>
-            <div className="mb-1.5 flex justify-between text-[12.5px]">
-              <span className="font-medium text-ink-2">{r.label}</span>
-              <span className="mono font-bold text-ink-muted">—</span>
+        {rows.map((r) => {
+          /*
+           * Share of all applicants. The 6% floor keeps a real-but-tiny bar
+           * visible (1 of 900 rounds to 0%) and must NOT apply to zero — a
+           * stub of colour on an empty stage reads as "a few", which is the
+           * one thing a funnel must never imply. Same rule as the overview
+           * funnel; they are separate components but must not disagree.
+           */
+          const pct =
+            kpi.total && r.count
+              ? Math.max(6, Math.round((r.count / kpi.total) * 100))
+              : 0;
+          return (
+            <div key={r.label}>
+              <div className="mb-1.5 flex justify-between text-[12.5px]">
+                <span className="font-medium text-ink-2">{r.label}</span>
+                <span className="mono font-bold text-ink-muted">
+                  {countLabel(r.count)}
+                </span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-surface-3">
+                <div
+                  className="h-full rounded-full"
+                  style={{ width: `${pct}%`, background: r.tint }}
+                />
+              </div>
             </div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-surface-3">
-              <div
-                className="h-full rounded-full"
-                style={{ width: "0%", background: r.tint }}
-              />
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
