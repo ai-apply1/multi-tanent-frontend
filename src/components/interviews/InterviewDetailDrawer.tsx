@@ -79,6 +79,7 @@ import {
 import {
   deleteCandidate,
   getCandidate,
+  listCandidateStatuses,
   sendCandidateInvite,
   updateCandidateStatus,
 } from "@/features/candidates/candidatesApi";
@@ -392,57 +393,89 @@ function AiScoreCard({
 
 // ── Pipeline Card ──────────────────────────────────────────────────────
 
-const PIPELINE_STEPS: Array<{
-  key: string;
-  label: string;
-  desc: string;
-}> = [
-  { key: "applied", label: "Applied", desc: "Application received" },
-  { key: "interviewing", label: "Interviewing", desc: "AI interview in progress" },
-  { key: "reviewing", label: "Reviewing", desc: "Awaiting your decision" },
-  { key: "shortlisted", label: "Shortlisted", desc: "Advanced to final round" },
-];
+/**
+ * One-line hints for the BUILTIN columns.
+ *
+ * Keyed rather than positional, and consulted only as decoration: the LABEL
+ * always comes from the catalog, because an org can rename any column and this
+ * card must not argue with the board about what a stage is called. A custom
+ * column simply has no hint, which is honest — we cannot invent a description
+ * for a stage the customer defined.
+ */
+const STAGE_HINTS: Record<string, string> = {
+  applied: "Application received",
+  needs_review: "Awaiting your decision to invite",
+  invited: "Invitation sent, waiting on the candidate",
+  interviewing: "AI interview in progress",
+  scored: "Awaiting your decision",
+  shortlisted: "Advanced to final round",
+  rejected: "CV did not meet the job's requirements",
+  final_rejected: "Interviewed, not moving forward",
+  hired: "Offer accepted",
+};
 
-/** Map a candidate statusKey onto the visible pipeline stepper index. */
-function pipelineIndexFor(statusKey: string | undefined): number {
-  switch (statusKey) {
-    case "applied":
-    case "needs_review":
-    case "invited":
-      return 0;
-    case "interviewing":
-      return 1;
-    case "scored":
-      return 2;
-    case "shortlisted":
-      return 3;
-    case "hired":
-      return 4;
-    // An INITIAL rejection never reached an interview, so it belongs at
-    // the first step; a FINAL rejection happened at the review step.
-    case "rejected":
-      return 0;
-    case "final_rejected":
-      return 2;
-    default:
-      return 0;
-  }
+/**
+ * The stages to draw, and where this candidate sits among them.
+ *
+ * ── Why this is derived and not a constant ────────────────────────────
+ *
+ * It used to be four hardcoded steps plus a hand-written key → index switch.
+ * That made the card wrong in three separate ways for any org that touched its
+ * board: a renamed column still showed the stock label, a CUSTOM column was
+ * invisible (its candidates silently rendered at step 0, indistinguishable from
+ * "Applied"), and the invented step "Reviewing" matched no key in the catalog
+ * at all. `candidatesApi.listCandidateStatuses` already says the filter and the
+ * change-status menu are built from the catalog "and never from a hard-coded
+ * list" — this card was the one place that didn't comply.
+ *
+ * The PATH is every non-terminal column in board order. Terminal columns are
+ * outcomes rather than steps everyone passes through, so the board's three or
+ * four of them are not all drawn; only the one this candidate actually reached
+ * is, slotted in by its OWN `stageOrder`.
+ *
+ * Slotted, NOT appended, and the difference is a correctness one. An INITIAL
+ * rejection sits at stageOrder 30 — after "Needs Review", before "Invited" —
+ * because that candidate's CV never qualified and they were never interviewed.
+ * Appending it to the end would tick Invited, Interviewing and Scored as
+ * completed for someone who did none of them. (The old hardcoded switch got
+ * this right by pinning `rejected` to index 0 and said so; deriving the
+ * position from `stageOrder` keeps that truth without hardcoding a key.)
+ *
+ * Everything compares on `stageOrder`, the same field the board sorts by, so a
+ * reordered or renamed board reorders and renames this too.
+ */
+function buildPipeline(
+  statuses: CandidateStatus[],
+  current: CandidateStatus | null | undefined,
+): { steps: CandidateStatus[]; currentIndex: number } {
+  const relevant = statuses.filter(
+    (s) => !s.isTerminal || (current != null && s._id === current._id),
+  );
+  const steps = relevant.sort((a, b) => a.stageOrder - b.stageOrder);
+  const currentIndex = current
+    ? steps.findIndex((s) => s._id === current._id)
+    : -1;
+  return { steps, currentIndex };
 }
 
 function PipelineCard({
   candidate,
+  statuses,
   overall100,
   onStatusChange,
   pending,
 }: {
   candidate: CandidateDetail | null | undefined;
+  /** The org's column catalog, in any order — this card sorts it. */
+  statuses: CandidateStatus[];
   /** 0-100 overall score — used to render the AI recommendation line. */
   overall100: number | null;
   onStatusChange: (statusKey: string) => void;
   pending: boolean;
 }) {
-  const statusKey = candidate?.currentStatusId.key;
-  const idx = pipelineIndexFor(statusKey);
+  const currentStatus = candidate?.currentStatusId ?? null;
+  const statusKey = currentStatus?.key;
+  const { steps, currentIndex } = buildPipeline(statuses, currentStatus);
   const isProcessing = statusKey === "scored";
   const isShortlisted = statusKey === "shortlisted";
   const isHired = statusKey === "hired";
@@ -450,6 +483,27 @@ function PipelineCard({
   const isRejected = REJECTED_STATUS_KEYS.includes(
     statusKey as BuiltinCandidateStatusKey,
   );
+
+  /*
+   * Reconsidering returns the candidate to the point they were rejected FROM,
+   * and the two rejections are not interchangeable (see `REJECTED_STATUS_KEYS`
+   * in `candidates/types.ts`).
+   *
+   *   final_rejected  they were interviewed and scored, so `scored` is exactly
+   *                   where the decision was taken and where it re-opens.
+   *   rejected        their CV never qualified; they have no interview and no
+   *                   score. Sending them to `scored` filed a never-interviewed
+   *                   candidate under "interviewed and said no", corrupting the
+   *                   one number that comment exists to protect — and parked
+   *                   them where HR could do nothing with them, since only
+   *                   `needs_review` is invitable. `needs_review` is the state
+   *                   the vetting engine itself uses for "a human should look
+   *                   at this", which is precisely what reconsidering means.
+   */
+  const reconsiderTarget =
+    statusKey === POST_INTERVIEW_REJECT_STATUS_KEY
+      ? "scored"
+      : INVITABLE_STATUS_KEY;
 
   return (
     <div className="rounded-2xl border border-line bg-surface p-[18px]">
@@ -459,12 +513,15 @@ function PipelineCard({
       </div>
 
       <div className="grid">
-        {PIPELINE_STEPS.map((step, i) => {
-          const done = i < idx;
-          const current = i === idx && isProcessing;
-          const isLast = i === PIPELINE_STEPS.length - 1;
+        {steps.map((step, i) => {
+          // A candidate not found in the catalog (`currentIndex` -1) leaves
+          // every step un-done rather than marking them all complete.
+          const done = currentIndex >= 0 && i < currentIndex;
+          const current = i === currentIndex;
+          const isLast = i === steps.length - 1;
+          const hint = STAGE_HINTS[step.key];
           return (
-            <div key={step.key} className="flex gap-3">
+            <div key={step._id} className="flex gap-3">
               <div className="flex flex-col items-center">
                 <div
                   className={cn(
@@ -504,9 +561,11 @@ function PipelineCard({
                 >
                   {step.label}
                 </div>
-                <div className="mt-0.5 text-[12px] text-ink-muted">
-                  {step.desc}
-                </div>
+                {hint ? (
+                  <div className="mt-0.5 text-[12px] text-ink-muted">
+                    {hint}
+                  </div>
+                ) : null}
               </div>
             </div>
           );
@@ -616,7 +675,7 @@ function PipelineCard({
             variant="secondary"
             size="sm"
             disabled={pending}
-            onClick={() => onStatusChange("scored")}
+            onClick={() => onStatusChange(reconsiderTarget)}
           >
             Reconsider candidate
           </Button>
@@ -772,6 +831,21 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
     queryFn: () => getCandidate(candidateId!),
     enabled: Boolean(candidateId),
   });
+
+  /*
+   * The org's column catalog, for the pipeline stepper.
+   *
+   * Same `["candidateStatuses"]` key the lists use, so opening a drawer from a
+   * page that already loaded it costs nothing. Not gated on `candidateId`: the
+   * catalog is org-level and reused across every candidate the drawer shows,
+   * and refetching it per candidate would be a request per row clicked.
+   */
+  const statusesQuery = useQuery({
+    queryKey: ["candidateStatuses"],
+    queryFn: listCandidateStatuses,
+    staleTime: 5 * 60 * 1000,
+  });
+  const statuses = statusesQuery.data ?? [];
   const candidate = candidateQuery.data ?? null;
   const profile = candidate?.profile ?? null;
 
@@ -1646,6 +1720,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                 <div className="mt-4">
                   <PipelineCard
                     candidate={candidate}
+                    statuses={statuses}
                     overall100={overallScore100}
                     onStatusChange={handleStatusChange}
                     pending={statusPending}
