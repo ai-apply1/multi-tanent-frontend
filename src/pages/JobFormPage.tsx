@@ -17,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ChipInput } from "@/features/jobs/components/ChipInput";
 import { createJob, getJob, updateJob } from "@/features/jobs/jobsApi";
 import {
@@ -84,14 +85,7 @@ export function JobFormPage() {
   });
 
   if (isEdit && jobQuery.isLoading) {
-    return (
-      <div className="mx-auto max-w-[1080px] px-6 py-6 lg:px-8 lg:py-8">
-        <div className="flex items-center justify-center gap-2 rounded-2xl border border-line bg-surface py-24 text-[13.5px] text-ink-muted">
-          <Loader2 className="h-5 w-5 animate-spin text-primary" />
-          Loading job…
-        </div>
-      </div>
-    );
+    return <JobFormSkeleton />;
   }
 
   if (isEdit && jobQuery.isError) {
@@ -507,6 +501,68 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
           )}
         </div>
       </form>
+    </div>
+  );
+}
+
+/**
+ * Loading placeholder shown while an existing job is fetched for editing.
+ * Mirrors the real form shell — header row, the four-step stepper, the step
+ * card with a couple of label+field rows, and the footer buttons — so the
+ * page keeps its shape and doesn't jump when the job data arrives.
+ */
+function JobFormSkeleton() {
+  return (
+    <div className="mx-auto max-w-[1080px] px-6 py-6 lg:px-8 lg:py-8">
+      {/* Header row */}
+      <div className="mb-5 flex items-start justify-between gap-4">
+        <div>
+          <Skeleton className="h-6 w-40" />
+          <Skeleton className="mt-2 h-3.5 w-72 max-w-full" />
+        </div>
+        <Skeleton className="h-8 w-20 rounded-lg" />
+      </div>
+
+      {/* Stepper */}
+      <div className="mb-6 flex items-center gap-0">
+        {STEPS.map(([t], i) => (
+          <div
+            key={t}
+            className={`flex items-center ${i < STEPS.length - 1 ? "flex-1" : "flex-none"}`}
+          >
+            <div className="flex items-center gap-2.5">
+              <Skeleton className="h-[30px] w-[30px] flex-none rounded-full" />
+              <div>
+                <Skeleton className="h-3 w-20" />
+                <Skeleton className="mt-1.5 h-2.5 w-28" />
+              </div>
+            </div>
+            {i < STEPS.length - 1 ? (
+              <span className="mx-3.5 h-[2px] flex-1 rounded-full bg-line-2" />
+            ) : null}
+          </div>
+        ))}
+      </div>
+
+      {/* Step card */}
+      <div className="rounded-2xl border border-line bg-surface p-6">
+        <Skeleton className="h-5 w-48" />
+        <Skeleton className="mt-2 h-3.5 w-80 max-w-full" />
+        <div className="mt-6 space-y-5">
+          {Array.from({ length: 2 }).map((_, i) => (
+            <div key={i}>
+              <Skeleton className="mb-1.5 h-3.5 w-28" />
+              <Skeleton className="h-11 w-full rounded-lg" />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="mt-4 flex justify-between gap-2.5">
+        <Skeleton className="h-8 w-20 rounded-lg" />
+        <Skeleton className="h-8 w-28 rounded-lg" />
+      </div>
     </div>
   );
 }

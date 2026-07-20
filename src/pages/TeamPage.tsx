@@ -35,6 +35,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Skeleton } from "@/components/ui/skeleton";
 import { UserFormDialog } from "@/features/users/components/UserFormDialog";
 import { listUsers, updateUser } from "@/features/users/usersApi";
 import { USER_ROLE_LABELS, type OrgUser } from "@/features/users/types";
@@ -270,10 +271,7 @@ export function TeamPage() {
           </div>
 
           {isLoading ? (
-            <div className="flex items-center justify-center gap-2 px-6 py-14 text-[13.5px] text-ink-muted">
-              <Loader2 className="h-4 w-4 animate-spin text-primary" />
-              Loading members…
-            </div>
+            <TeamTableSkeleton />
           ) : isError ? (
             <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
               <p className="text-[13.5px] text-[var(--danger)]">
@@ -473,6 +471,32 @@ export function TeamPage() {
           activationTarget && activationMutation.mutate(activationTarget)
         }
       />
+    </div>
+  );
+}
+
+/**
+ * Loading placeholder for the members table. Skeleton rows on the SAME `COLS`
+ * grid as the real rows and the live header — name, username, email, a role
+ * pill, a status pill, last login, and the trailing actions slot.
+ */
+function TeamTableSkeleton() {
+  return (
+    <div>
+      {Array.from({ length: 8 }).map((_, i) => (
+        <div
+          key={i}
+          className={`grid ${COLS} items-center gap-3 border-b border-line px-5 py-3.5 last:border-b-0`}
+        >
+          <Skeleton className="h-3.5 w-28 max-w-full" />
+          <Skeleton className="h-3 w-24 max-w-full" />
+          <Skeleton className="h-3.5 w-36 max-w-full" />
+          <Skeleton className="h-5 w-16 rounded-full" />
+          <Skeleton className="h-5 w-20 rounded-full" />
+          <Skeleton className="h-3 w-24 max-w-full" />
+          <Skeleton className="ml-auto h-8 w-8 rounded-md" />
+        </div>
+      ))}
     </div>
   );
 }

@@ -35,6 +35,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Skeleton } from "@/components/ui/skeleton";
 import { deleteJob, listJobs, setJobStatus } from "@/features/jobs/jobsApi";
 import {
   EMPLOYMENT_TYPE_LABELS,
@@ -224,10 +225,7 @@ export function JobsPage() {
           </div>
 
           {isLoading ? (
-            <div className="flex items-center justify-center gap-2 px-6 py-14 text-[13.5px] text-ink-muted">
-              <Loader2 className="h-4 w-4 animate-spin text-primary" />
-              Loading jobs…
-            </div>
+            <JobsTableSkeleton />
           ) : isError ? (
             <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
               <p className="text-[13.5px] text-[var(--danger)]">
@@ -470,6 +468,41 @@ export function JobStatusBadge({ status }: { status: JobStatus }) {
   // archived — terminal, kept visually neutral.
   return (
     <span className={`${base} bg-ink-faint text-ink-muted`}>Archived</span>
+  );
+}
+
+/**
+ * Loading placeholder for the table body. Renders skeleton rows on the SAME
+ * `COLS` grid the real rows use, so the columns line up under the live header
+ * and nothing shifts when the data arrives — a title cell (avatar + name bar),
+ * a status pill, classification chips, three right-aligned numeric cells, a
+ * created date and the trailing actions slot.
+ */
+function JobsTableSkeleton() {
+  return (
+    <div>
+      {Array.from({ length: 8 }).map((_, i) => (
+        <div
+          key={i}
+          className={`grid ${COLS} items-center gap-3 border-b border-line px-5 py-3.5 last:border-b-0`}
+        >
+          <div className="flex min-w-0 items-center gap-3">
+            <Skeleton className="h-[34px] w-[34px] flex-none rounded-lg" />
+            <Skeleton className="h-3.5 w-40 max-w-full" />
+          </div>
+          <Skeleton className="h-5 w-16 rounded-full" />
+          <div className="flex gap-1.5">
+            <Skeleton className="h-5 w-14 rounded-full" />
+            <Skeleton className="h-5 w-12 rounded-full" />
+          </div>
+          <Skeleton className="ml-auto h-3.5 w-6" />
+          <Skeleton className="ml-auto h-3.5 w-6" />
+          <Skeleton className="ml-auto h-3.5 w-6" />
+          <Skeleton className="h-3 w-16" />
+          <Skeleton className="ml-auto h-8 w-8 rounded-md" />
+        </div>
+      ))}
+    </div>
   );
 }
 

@@ -58,6 +58,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   bulkDeleteOverviewStats,
   createOverviewStat,
@@ -177,7 +178,7 @@ export function OverviewPage() {
   );
 
   // Shares the Candidates page's key + fetcher: one request, one cache entry.
-  const { data: jobs } = useQuery({
+  const { data: jobs, isLoading: jobsLoading } = useQuery({
     queryKey: JOB_OPTIONS_QUERY_KEY,
     queryFn: listJobOptions,
     staleTime: 5 * 60 * 1000,
@@ -393,11 +394,23 @@ export function OverviewPage() {
               <SelectValue placeholder="All jobs" />
             </SelectTrigger>
             <SelectContent>
-              {jobOptions.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>
-                  {opt.label}
-                </SelectItem>
-              ))}
+              {/* "All jobs" is always present; the org's jobs stream in after
+                  the list resolves, so show skeleton rows beneath it while the
+                  query is in flight instead of a dropdown that looks empty. */}
+              <SelectItem value="all">All jobs</SelectItem>
+              {jobsLoading
+                ? Array.from({ length: 4 }).map((_, i) => (
+                    <div key={i} className="px-2 py-1.5">
+                      <Skeleton className="h-3.5 w-40 max-w-full" />
+                    </div>
+                  ))
+                : jobOptions
+                    .filter((opt) => opt.value !== "all")
+                    .map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
             </SelectContent>
           </Select>
           <Button
@@ -421,10 +434,7 @@ export function OverviewPage() {
       {/* KPI grid — filter metrics and manual cards flow together so drag
           reorder can move either kind and the layout matches the design. */}
       {isLoading ? (
-        <div className="flex items-center justify-center gap-2 rounded-2xl border border-line bg-surface py-16 text-ink-muted">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Loading metrics...
-        </div>
+        <OverviewSkeleton />
       ) : isError ? (
         <div className="rounded-2xl border border-line bg-surface">
           <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
@@ -694,6 +704,83 @@ export function OverviewPage() {
           if (!open) setDrawerCandidateId(null);
         }}
       />
+    </div>
+  );
+}
+
+/**
+ * Loading placeholder for the whole dashboard body. Mirrors the real layout so
+ * the page doesn't reflow when data lands: the KPI card grid (same auto-fit
+ * columns as the live grid) over the two-column funnel + awaiting-decision
+ * shell. Each stat card carries a title bar, the big count, and a criteria pill;
+ * the funnel shows label/bar/count rows and the awaiting list shows avatar rows.
+ */
+function OverviewSkeleton() {
+  return (
+    <div>
+      {/* KPI card grid — same responsive columns as the real grid. */}
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 md:[grid-template-columns:repeat(auto-fit,minmax(210px,1fr))]">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div
+            key={i}
+            className="rounded-2xl border border-line bg-surface p-4"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <Skeleton className="h-3 w-24 max-w-full" />
+              <Skeleton className="h-3.5 w-3.5 rounded" />
+            </div>
+            <Skeleton className="mt-3 h-7 w-16" />
+            <Skeleton className="mt-2 h-4 w-20 rounded-full" />
+          </div>
+        ))}
+      </div>
+
+      {/* Funnel + awaiting-decision two-column shell. */}
+      <div className="grid grid-cols-1 items-start gap-4 md:[grid-template-columns:1.15fr_1fr]">
+        {/* Pipeline funnel */}
+        <div className="rounded-2xl border border-line bg-surface">
+          <div className="flex items-center justify-between border-b border-line px-[18px] py-4">
+            <Skeleton className="h-4 w-28" />
+            <Skeleton className="h-4 w-24" />
+          </div>
+          <div className="grid gap-2.5 px-[18px] py-4">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div
+                key={i}
+                className="grid items-center gap-3 [grid-template-columns:110px_1fr_34px]"
+              >
+                <Skeleton className="h-3 w-20 max-w-full" />
+                <Skeleton className="h-[26px] w-full rounded-lg" />
+                <Skeleton className="h-3 w-6 justify-self-end" />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Awaiting your decision */}
+        <div className="rounded-2xl border border-line bg-surface">
+          <div className="flex items-center gap-2 border-b border-line px-[18px] py-4">
+            <Skeleton className="h-[18px] w-[18px] rounded" />
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="ml-auto h-5 w-14 rounded-md" />
+          </div>
+          <div>
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-3 border-b border-line px-[18px] py-3.5 last:border-b-0"
+              >
+                <Skeleton className="h-[34px] w-[34px] shrink-0 rounded-full" />
+                <div className="min-w-0 flex-1">
+                  <Skeleton className="h-3.5 w-32 max-w-full" />
+                  <Skeleton className="mt-1.5 h-2.5 w-20 max-w-full" />
+                </div>
+                <Skeleton className="h-4 w-4 rounded" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1044,6 +1131,33 @@ interface StatDialogProps {
 }
 
 /** Create or edit a filter metric (a title plus the filters to count by). */
+/**
+ * Loading placeholder for the metric dialog's filter list. Mirrors the grouped
+ * option layout — a `surface-3` group header over a set of checkbox rows — so
+ * the box keeps its height and the list doesn't pop in when the options land.
+ */
+function StatFiltersSkeleton() {
+  return (
+    <div>
+      {Array.from({ length: 3 }).map((_, g) => (
+        <div key={g} className="border-b border-line last:border-b-0">
+          <div className="bg-surface-3 px-3 py-1.5">
+            <Skeleton className="h-3 w-24" />
+          </div>
+          <div className="p-1">
+            {Array.from({ length: 3 }).map((_, r) => (
+              <div key={r} className="flex items-center gap-2.5 px-2 py-1.5">
+                <Skeleton className="h-4 w-4 rounded" />
+                <Skeleton className="h-3.5 w-40 max-w-full" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function StatDialog({ open, editing, onOpenChange, onSaved }: StatDialogProps) {
   const isEditing = Boolean(editing);
   const [title, setTitle] = useState("");
@@ -1178,10 +1292,7 @@ function StatDialog({ open, editing, onOpenChange, onSaved }: StatDialogProps) {
             </div>
             <div className="max-h-72 overflow-y-auto rounded-lg border border-line">
               {optionsLoading ? (
-                <div className="flex items-center justify-center gap-2 py-10 text-[13px] text-ink-muted">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading filters...
-                </div>
+                <StatFiltersSkeleton />
               ) : grouped.length === 0 ? (
                 <div className="py-10 text-center text-[13px] text-ink-muted">
                   No filters available.
