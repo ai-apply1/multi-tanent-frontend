@@ -254,8 +254,8 @@ export function PipelinePage() {
           </div>
           <p className="mt-1.5 max-w-[620px] text-[13.5px] text-ink-muted">
             The candidate board's columns, in order. The built-in stages are
-            fixed — that sequence is the funnel the hiring automations actually
-            run — but you can rename and recolour any of them, and add your own
+            fixed that sequence is the funnel the hiring automations actually
+            run but you can rename and recolour any of them, and add your own
             columns anywhere between them. A column's key is permanent, because
             the automations reference it.
           </p>

@@ -284,7 +284,15 @@
     color: var(--primary);
   }
 
-  /* Scrollbar polish for the app shell. */
+  /* Scrollbar polish. Used by the app shell AND any inner scroll surface
+     (dialog bodies, textareas) so every scrollbar reads as the same slim,
+     theme-tinted pill instead of the chunky OS default.
+
+     Deliberately WebKit-only: setting the standard `scrollbar-width` /
+     `scrollbar-color` here would make Chromium 121+ drop these ::-webkit
+     rules entirely and fall back to its plain native thin bar — losing the
+     rounded, inset pill. Firefox keeps its default bar; that trade is worth
+     the consistent, styled bar everywhere Blink/WebKit runs. */
   .scroll::-webkit-scrollbar {
     width: 10px;
     height: 10px;
@@ -302,8 +310,17 @@
     border: 3px solid transparent;
     background-clip: padding-box;
   }
+  /* Firm up on hover so the thumb feels grabbable without shouting at rest. */
+  .scroll::-webkit-scrollbar-thumb:hover {
+    background: rgba(13, 11, 11, 0.26);
+    background-clip: padding-box;
+  }
   .dark .scroll::-webkit-scrollbar-thumb {
     background: rgba(255, 255, 255, 0.14);
+    background-clip: padding-box;
+  }
+  .dark .scroll::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.26);
     background-clip: padding-box;
   }
 

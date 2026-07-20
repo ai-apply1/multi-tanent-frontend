@@ -1,9 +1,18 @@
-import { useEffect, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { Loader2, Minus, Plus, Sparkles, Trash2, Undo2 } from "lucide-react"
+import {
+  AlertTriangle,
+  Loader2,
+  Minus,
+  Plus,
+  Sparkles,
+  Trash2,
+  Undo2
+} from "lucide-react"
 import toast from "react-hot-toast"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
+import { ErrorBoundary } from "@/components/common/ErrorBoundary"
 import { CategoryPicker } from "@/features/question-categories/components/CategoryPicker"
 import { TagsInput } from "@/features/screening-questions/components/TagsInput"
 import {
@@ -89,6 +98,10 @@ export function QuestionFormDialog({
    */
   const [drafts, setDrafts] = useState<string[]>([])
   const [draftSel, setDraftSel] = useState<Record<number, boolean>>({})
+  // A failed save is shown INLINE on the dialog (and kept until the next
+  // attempt) rather than in a toast that pops outside the modal and vanishes —
+  // the error belongs where the action that caused it is.
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   const isEdit = Boolean(question)
 
@@ -96,8 +109,12 @@ export function QuestionFormDialog({
   useEffect(() => {
     if (!open) return
     setTouched(false)
+    setSaveError(null)
     setVariants(
-      question
+      // `?? []` is defensive: a malformed row with no `variants` would
+      // otherwise throw here on open and blank the whole app. An empty list
+      // just falls back to one blank wording below.
+      question && Array.isArray(question.variants) && question.variants.length
         ? question.variants.map((v) => ({
             _id: v._id,
             text: v.text,
@@ -150,7 +167,7 @@ export function QuestionFormDialog({
       onOpenChange(false)
     },
     onError: (err) =>
-      toast.error(
+      setSaveError(
         apiError(
           err,
           isEdit ? "Could not update question." : "Could not create question."
@@ -179,14 +196,18 @@ export function QuestionFormDialog({
         count: askFor
       }),
     onSuccess: (fresh) => {
+      // Guard the shape: the endpoint is documented as `string[]`, but an
+      // unexpected body (e.g. an error envelope that slipped through as 200)
+      // would throw on `.filter` below and, unhandled, blank the app.
+      const list = Array.isArray(fresh) ? fresh : []
       // Dedupe against wordings already committed AND against drafts already
       // sitting in the pool — the server hasn't seen either.
       const seen = new Set([
         ...variants.map((v) => normalize(v.text)),
         ...drafts.map(normalize)
       ])
-      const kept = fresh
-        .filter((text) => !seen.has(normalize(text)))
+      const kept = list
+        .filter((text) => typeof text === "string" && !seen.has(normalize(text)))
         .slice(0, room)
       if (kept.length === 0) {
         toast("No new wordings came back — try rephrasing the original.")
@@ -239,6 +260,8 @@ export function QuestionFormDialog({
     e.preventDefault()
     setTouched(true)
     if (!canSubmit) return
+    // Drop a stale failure line before the retry — it may well succeed now.
+    setSaveError(null)
     saveMutation.mutate(variants)
   }
 
@@ -288,8 +311,42 @@ export function QuestionFormDialog({
             </button>
           </div>
 
+          {/* Body + foot are wrapped so a crash inside the form (a bad
+              response, an unexpected shape) degrades to a recoverable message
+              instead of tearing down the whole app. `resetKeys` clears it when
+              the dialog reopens, so a past crash never sticks. */}
+          <ErrorBoundary
+            resetKeys={[open, question?._id]}
+            fallback={(reset) => (
+              <div className="px-6 py-12 text-center">
+                <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-[var(--danger-soft)] text-[var(--danger)]">
+                  <AlertTriangle className="h-5 w-5" strokeWidth={1.8} />
+                </div>
+                <p className="text-[14px] font-semibold text-ink">
+                  Something went wrong
+                </p>
+                <p className="mx-auto mt-1.5 max-w-[360px] text-[13px] text-ink-muted">
+                  This form hit an unexpected error. Nothing was saved — try
+                  again, or close and reopen the dialog.
+                </p>
+                <div className="mt-4 flex justify-center gap-2.5">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => onOpenChange(false)}
+                  >
+                    Close
+                  </Button>
+                  <Button type="button" size="sm" onClick={reset}>
+                    Try again
+                  </Button>
+                </div>
+              </div>
+            )}
+          >
           {/* Body */}
-          <div className="grid max-h-[70vh] gap-4 overflow-y-auto px-6 pb-5">
+          <div className="scroll grid max-h-[70vh] gap-4 overflow-y-auto px-6 pb-5">
             {/* Question textarea */}
             <div>
               <div className="mb-1.5 flex items-center justify-between">
@@ -314,7 +371,7 @@ export function QuestionFormDialog({
                   patch(0, { text: e.target.value })
                 }}
                 aria-invalid={touched && originalEmpty}
-                className="w-full resize-y rounded-lg border border-[var(--field-border)] bg-surface px-3.5 py-3 text-[14px] text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)]"
+                className="scroll w-full resize-y rounded-lg border border-[var(--field-border)] bg-surface px-3.5 py-3 text-[14px] text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)]"
               />
               <p className="mt-1.5 text-[12px] text-ink-muted">
                 The canonical wording. Each interview asks an AI-paraphrased
@@ -344,9 +401,8 @@ export function QuestionFormDialog({
                           v.retired ? "bg-surface-2" : "bg-surface"
                         }`}
                       >
-                        <textarea
+                        <AutoGrowTextarea
                           value={v.text}
-                          rows={1}
                           maxLength={QUESTION_TEXT_MAX_LENGTH}
                           disabled={v.retired}
                           onChange={(e) => {
@@ -354,7 +410,7 @@ export function QuestionFormDialog({
                             patch(i, { text: e.target.value })
                           }}
                           aria-invalid={touched && v.text.trim().length === 0}
-                          className="min-h-9 flex-1 resize-y rounded-md border-none bg-transparent px-0 py-1 text-[13px] leading-snug text-ink outline-none disabled:text-ink-muted"
+                          className="scroll min-h-9 flex-1 resize-none rounded-md border-none bg-transparent px-0 py-1 text-[13px] leading-snug text-ink outline-none disabled:text-ink-muted"
                         />
                         <div className="flex items-center gap-1">
                           {v._id ? (
@@ -624,31 +680,74 @@ export function QuestionFormDialog({
           </div>
 
           {/* Foot */}
-          <div className="flex justify-end gap-2.5 border-t border-line px-6 py-4">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => onOpenChange(false)}
-              disabled={saveMutation.isPending}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" size="sm" disabled={!canSubmit}>
-              {saveMutation.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : null}
-              {saveMutation.isPending
-                ? isEdit
-                  ? "Saving…"
-                  : "Creating…"
-                : isEdit
-                  ? "Save question"
-                  : "Create question"}
-            </Button>
+          <div className="border-t border-line px-6 py-4">
+            {saveError ? (
+              <div className="mb-3 flex items-start gap-2 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[12.5px] text-[var(--danger)]">
+                <AlertTriangle
+                  className="mt-[1px] h-3.5 w-3.5 flex-shrink-0"
+                  strokeWidth={1.9}
+                />
+                <span>{saveError}</span>
+              </div>
+            ) : null}
+            <div className="flex justify-end gap-2.5">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => onOpenChange(false)}
+                disabled={saveMutation.isPending}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" size="sm" disabled={!canSubmit}>
+                {saveMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : null}
+                {saveMutation.isPending
+                  ? isEdit
+                    ? "Saving…"
+                    : "Creating…"
+                  : isEdit
+                    ? "Save question"
+                    : "Create question"}
+              </Button>
+            </div>
           </div>
+          </ErrorBoundary>
         </form>
       </DialogContent>
     </Dialog>
   )
+}
+
+/**
+ * A textarea that grows with its content up to `maxHeight`, then scrolls.
+ *
+ * The additional-wording rows were a fixed one-row box, so anything past the
+ * first line was trapped behind a cramped internal scrollbar (the "weird
+ * scroll") and wrapped text read as clipped. Sizing to `scrollHeight` on every
+ * value change shows the whole wording; the `maxHeight` cap stops one very long
+ * wording from swallowing the dialog — past it, the box scrolls instead of
+ * growing forever. `resize-none` is expected on these (height is managed here).
+ */
+function AutoGrowTextarea({
+  value,
+  maxHeight = 160,
+  className,
+  ...props
+}: React.ComponentPropsWithoutRef<"textarea"> & { maxHeight?: number }) {
+  const ref = useRef<HTMLTextAreaElement | null>(null)
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    // Reset to `auto` first so a delete is measured too, not just growth —
+    // scrollHeight never reports smaller than the element's current height.
+    el.style.height = "auto"
+    el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`
+    el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden"
+  }, [value, maxHeight])
+
+  return <textarea ref={ref} value={value} className={className} {...props} />
 }

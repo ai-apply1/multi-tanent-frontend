@@ -183,6 +183,16 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     if (activeIndex >= flat.length) setActiveIndex(0)
   }, [flat.length, activeIndex])
 
+  // Points at whichever row is currently highlighted (only the active button
+  // gets this ref). Arrow-key navigation can move the selection past the
+  // visible edge of the scroll container, so nudge it back into view whenever
+  // the selection changes. `block: "nearest"` means an already-visible row
+  // never jumps.
+  const activeItemRef = useRef<HTMLButtonElement | null>(null)
+  useEffect(() => {
+    activeItemRef.current?.scrollIntoView({ block: "nearest" })
+  }, [activeIndex])
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowDown") {
       e.preventDefault()
@@ -275,6 +285,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     <button
                       key={item.id}
                       type="button"
+                      ref={active ? activeItemRef : null}
                       onMouseEnter={((idx) => () => setActiveIndex(idx))(flatIndex)}
                       onClick={item.onSelect}
                       className={
