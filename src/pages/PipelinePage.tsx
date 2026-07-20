@@ -29,6 +29,7 @@ import {
   Trash2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import {
   deleteStatusColumn,
   listCandidateStatuses,
@@ -67,6 +68,7 @@ export function PipelinePage() {
   const queryClient = useQueryClient()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<CandidateStatus | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<CandidateStatus | null>(null)
 
   const {
     data: statuses,
@@ -124,6 +126,9 @@ export function PipelinePage() {
       // a message naming the actual reason — surface it as-is.
       toast.error(errorMessage(err, "Could not delete status."))
     },
+    // Close on either outcome: a 403/409 is a permanent "no" for this row,
+    // so leaving the dialog up to retry would only cover the toast.
+    onSettled: () => setDeleteTarget(null),
   })
 
   const busy = reorderMutation.isPending || deleteMutation.isPending
@@ -169,13 +174,7 @@ export function PipelinePage() {
 
   const handleDelete = (status: CandidateStatus) => {
     if (status.isProtected) return
-    if (
-      window.confirm(
-        `Delete the “${status.label}” column? This cannot be undone.`,
-      )
-    ) {
-      deleteMutation.mutate(status._id)
-    }
+    setDeleteTarget(status)
   }
 
   return (
@@ -258,6 +257,39 @@ export function PipelinePage() {
         onOpenChange={setDialogOpen}
         status={editTarget}
         existing={ordered}
+      />
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title="Delete this column?"
+        description={
+          <>
+            {/* The column itself, rendered as it appears on the board. */}
+            {deleteTarget ? (
+              <span className="mb-2.5 flex flex-wrap items-center gap-2">
+                <span
+                  className="inline-flex items-center rounded-full px-2.5 py-1 text-[12.5px] font-semibold"
+                  style={{
+                    background: `color-mix(in oklab, ${
+                      deleteTarget.color ?? FALLBACK_COLOR
+                    }, white 88%)`,
+                    color: deleteTarget.color ?? FALLBACK_COLOR,
+                  }}
+                >
+                  {deleteTarget.label}
+                </span>
+              </span>
+            ) : null}
+            Removed from the board for everyone in the organisation. Only
+            possible while no candidate sits in it. This cannot be undone.
+          </>
+        }
+        confirmLabel="Delete"
+        loadingLabel="Deleting…"
+        destructive
+        loading={deleteMutation.isPending}
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget._id)}
       />
     </div>
   )
