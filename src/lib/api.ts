@@ -232,10 +232,17 @@ api.interceptors.request.use(async (config) => {
    *
    * `""` outside dev (see `devTenant`), so this is a no-op in production and
    * the request goes out exactly as it does today.
+   *
+   * Sent as a HEADER, not `?tenant=`: a query param lands in every `@Query()`
+   * DTO, where the backend's `forbidNonWhitelisted` ValidationPipe 400s it as an
+   * unknown property (e.g. `GET /admin/jobs` rejected `tenant`). A header is
+   * invisible to that pipe. `X-Dev-Tenant` is in the backend CORS allow-list.
    */
   const tenant = devTenant()
   if (tenant) {
-    config.params = { ...(config.params as object | undefined), tenant }
+    config.headers =
+      config.headers ?? ({} as InternalAxiosRequestConfig["headers"])
+    config.headers["X-Dev-Tenant"] = tenant
   }
 
   // Lift the instance's JSON ceiling for raw-byte downloads. `responseType`

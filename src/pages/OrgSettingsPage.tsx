@@ -32,6 +32,7 @@ import type {
   OrgProfile,
   UpdateOrganizationPayload,
 } from "@/features/organization/types";
+import { ApplyVideoCard } from "@/features/organization/components/ApplyVideoCard";
 import {
   getNotificationPrefs,
   updateNotificationPrefs,
@@ -41,6 +42,7 @@ import { useAuth } from "@/features/auth/AuthContext";
 import { errorMessage as apiError } from "@/lib/errors";
 import { cn } from "@/lib/utils";
 import { PLATFORM_NAME } from "@/lib/platform";
+import { trimTransparentEdges } from "@/lib/imageTrim";
 
 const MAX_ATTEMPTS_MIN = 1;
 const MAX_ATTEMPTS_MAX = 10;
@@ -178,6 +180,14 @@ interface ImageUploadRowProps {
   /** null = untouched, "" = clear on save, string = new key. */
   onKeyChange: (key: string | null) => void;
   onUploadingChange: (uploading: boolean) => void;
+  /**
+   * Crop transparent padding off the picked file before uploading. On for the
+   * LOGO, where a padded canvas silently shrinks the mark at every render site
+   * (see `trimTransparentEdges`); off for the favicon, where a square icon with
+   * intentional breathing room is a legitimate design and trimming it would
+   * change how the tab icon reads.
+   */
+  trimTransparentPadding?: boolean;
 }
 
 /**
@@ -209,6 +219,7 @@ function ImageUploadRow({
   upload,
   onKeyChange,
   onUploadingChange,
+  trimTransparentPadding = false,
 }: ImageUploadRowProps) {
   // null = untouched, "" = remove on save, string = uploaded (not yet saved).
   const [pendingKey, setPendingKey] = useState<string | null>(null);
@@ -245,13 +256,17 @@ function ImageUploadRow({
    * up; the org doesn't point at it until Save. An abandoned upload just
    * orphans an object under this org's own prefix.
    */
-  const handleFile = async (file: File) => {
+  const handleFile = async (rawFile: File) => {
     setError(null);
-    if (!allowedTypes.includes(file.type)) {
+    // Validate the file the OPERATOR picked, not the trimmed one. The size cap
+    // is a "don't upload huge files" rule about their choice, and trimming only
+    // ever shrinks — checking after would let a 5 MB padded PNG slip through
+    // just because the crop happened to land under the limit.
+    if (!allowedTypes.includes(rawFile.type)) {
       setError(typeErrorText);
       return;
     }
-    if (file.size > maxBytes) {
+    if (rawFile.size > maxBytes) {
       setError(sizeErrorText);
       return;
     }
@@ -259,6 +274,19 @@ function ImageUploadRow({
     setUploadPct(0);
     onUploadingChange(true);
     try {
+      // Crop baked-in transparent margins BEFORE presigning: the presign is
+      // signed against a specific content type and the S3 PUT must match it,
+      // so the file has to reach its final form first. Falls back to the
+      // original on any failure, so this can't block an upload.
+      const { file, trimmed, inkHeightRatio } = trimTransparentPadding
+        ? await trimTransparentEdges(rawFile)
+        : { file: rawFile, trimmed: false, inkHeightRatio: 1 };
+      if (trimmed) {
+        toast.success(
+          `Cropped ${Math.round((1 - inkHeightRatio) * 100)}% empty space from your logo so it fills the space properly.`,
+        );
+      }
+
       const presigned = await presign({
         contentType: file.type,
         sizeBytes: file.size,
@@ -526,6 +554,8 @@ export function OrgSettingsPage() {
       settings.timezone = timezone.trim();
     }
     if (Object.keys(settings).length > 0) patch.settings = settings;
+    // The apply video is NOT part of this PATCH — it has its own routes and
+    // manages its own state in `ApplyVideoCard`.
     return patch;
   };
 
@@ -686,6 +716,7 @@ export function OrgSettingsPage() {
         upload={uploadLogoToPresignedUrl}
         onKeyChange={setLogoKey}
         onUploadingChange={setLogoUploading}
+        trimTransparentPadding
       />
 
       <ImageUploadRow
@@ -714,6 +745,15 @@ export function OrgSettingsPage() {
         onKeyChange={setFaviconKey}
         onUploadingChange={setFaviconUploading}
       />
+
+      {/* Apply intro video. An ingested asset with its OWN upload/transcode
+          routes (not the profile PATCH), so it manages its own state and polls
+          independently. Lives on Identity because it is a candidate-facing
+          brand asset like the logo, NOT on "Interview defaults" (the interview
+          round). */}
+      <div className="border-t border-line pt-5">
+        <ApplyVideoCard initial={org.applyVideo} canWrite={canWrite} />
+      </div>
 
       {/* EmailDomainCard mounts on Identity — same PATCH surface (org profile)
           as the fields above, and the domain is part of the org's identity. */}

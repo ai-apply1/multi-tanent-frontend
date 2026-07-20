@@ -11,6 +11,7 @@ import { useTenantBranding } from "@/features/tenant/TenantBrandingContext"
 import { errorMessage } from "@/lib/errors"
 import { ROUTES } from "@/routes"
 import { PLATFORM_NAME } from "@/lib/platform"
+import { OrgLogo } from "@/components/common/OrgLogo"
 
 const schema = yup.object({
   identifier: yup
@@ -69,13 +70,6 @@ export function LoginPage() {
   // `PLATFORM_NAME` only shows when no org resolved at all (localhost with no
   // `?tenant=`, or a domain we have no tenant for).
   const orgName = organization?.name || PLATFORM_NAME
-  const orgInitials =
-    orgName
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((p) => p[0]?.toUpperCase() || "")
-      .join("") || "?"
 
   return (
     <div className="grid min-h-screen w-full bg-[var(--surface)] lg:grid-cols-2">
@@ -83,21 +77,11 @@ export function LoginPage() {
       <div className="flex items-center justify-center px-6 py-10 lg:px-10">
         <div className="w-full max-w-[340px]">
           <div className="mb-10 flex items-center gap-2.5">
-            {organization?.logoUrl ? (
-              // White plate in dark mode keeps ink-colored uploaded logos legible.
-              <span className="inline-flex items-center rounded-md dark:bg-white dark:px-2 dark:py-1">
-                <img
-                  src={organization.logoUrl}
-                  alt={orgName}
-                  className="h-10 w-auto max-w-[200px] object-contain dark:h-7"
-                  draggable={false}
-                />
-              </span>
-            ) : (
-              <span className="flex h-[36px] w-[36px] items-center justify-center rounded-lg bg-primary text-[15px] font-bold text-primary-foreground">
-                {orgInitials}
-              </span>
-            )}
+            <OrgLogo
+              logoUrl={organization?.logoUrl}
+              name={orgName}
+              size="lg"
+            />
           </div>
 
           <h1 className="mb-1.5 text-[30px] font-semibold tracking-tight text-[var(--ink)]">Welcome back</h1>

@@ -155,18 +155,14 @@ export function EmailDomainCard({ emailDomain, canWrite }: EmailDomainCardProps)
       </div>
 
       <div className="mt-4 space-y-4">
-        {/* The single most useful line on the card: what a candidate actually
-            sees. Resolved by the backend, never guessed here. */}
+        {/* The org's OWN sending identity (its parentDomain), so the card is
+            theirs and not the shared platform address. Whether it's live yet is
+            told honestly by `active` and the note below, never by hiding it. */}
         <div className="flex flex-wrap items-center gap-2 text-[13px]">
           <span className="text-ink-muted">Emails are sent from</span>
           <code className="mono rounded-md bg-surface-2 border border-line px-2 py-0.5 text-[12.5px] text-ink">
             {emailDomain.fromAddress}
           </code>
-          {!emailDomain.active && !notSetUp ? (
-            <span className="text-[12px] text-ink-subtle">
-              until the records below are verified
-            </span>
-          ) : null}
         </div>
 
         {emailDomain.error ? (
@@ -175,10 +171,16 @@ export function EmailDomainCard({ emailDomain, canWrite }: EmailDomainCardProps)
           </p>
         ) : null}
 
-        {notSetUp ? (
+        {!emailDomain.active ? (
           <p className="rounded-lg border border-line bg-surface-2 px-3.5 py-3 text-[13px] text-ink-muted">
-            No sending domain is set up for your organization yet, so candidate
-            emails come from our address. Contact support to enable it.
+            <span className="font-medium text-ink-2">
+              {emailDomain.sendingDomain}
+            </span>{" "}
+            isn&apos;t verified yet, so candidate emails are delivered from our
+            shared address in the meantime.{" "}
+            {notSetUp
+              ? "Contact support to start setting it up."
+              : "Add the records below at your DNS provider, then re-verify."}
           </p>
         ) : null}
 

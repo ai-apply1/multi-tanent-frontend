@@ -21,6 +21,7 @@ import { useAuth } from "@/features/auth/AuthContext";
 import { useOrganization } from "@/features/organization/useOrganization";
 import type { UserRole } from "@/features/auth/types";
 import { PLATFORM_NAME } from "@/lib/platform";
+import { OrgLogo } from "@/components/common/OrgLogo";
 
 interface NavItem {
   label: string;
@@ -106,7 +107,6 @@ export function Sidebar() {
   // resolved at all (the query is disabled without a session), and it is a
   // neutral placeholder rather than anyone's brand.
   const orgName = organization?.name || PLATFORM_NAME;
-  const orgInitials = initialsFor(orgName);
 
   const handleLogout = async () => {
     try {
@@ -124,28 +124,7 @@ export function Sidebar() {
   return (
     <aside className="hidden w-[236px] shrink-0 flex-col border-r border-line bg-surface lg:flex">
       <div className="flex h-[60px] items-center gap-2.5 border-b border-line px-4">
-        {organization?.logoUrl ? (
-          // Dark-mode legibility: orgs upload ONE logo (usually dark ink on a
-          // transparent background), so on the dark theme we render it on a
-          // small white plate. Zero visual change in light mode where the
-          // sidebar surface is already white.
-          <span className="inline-flex items-center rounded-md dark:bg-white dark:px-2 dark:py-1">
-            <img
-              src={organization.logoUrl}
-              alt={orgName}
-              title={orgName}
-              className="h-8 w-auto max-w-[180px] object-contain dark:h-7"
-              draggable={false}
-            />
-          </span>
-        ) : (
-          <span
-            title={orgName}
-            className="flex h-[30px] w-[30px] items-center justify-center rounded-lg bg-primary text-[14px] font-bold text-primary-foreground"
-          >
-            {orgInitials}
-          </span>
-        )}
+        <OrgLogo logoUrl={organization?.logoUrl} name={orgName} />
       </div>
 
       <nav className="scroll flex-1 overflow-auto px-3 pt-2.5 pb-1">
@@ -231,7 +210,6 @@ export function MobileNavTrigger() {
 
   // Same rule as the desktop sidebar above: never a hardcoded org name.
   const orgName = organization?.name || PLATFORM_NAME;
-  const orgInitials = initialsFor(orgName);
 
   const handleLogout = async () => {
     try {
@@ -271,24 +249,7 @@ export function MobileNavTrigger() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex h-[60px] items-center gap-2.5 border-b border-line px-4">
-              {organization?.logoUrl ? (
-                <span className="inline-flex items-center rounded-md dark:bg-white dark:px-2 dark:py-1">
-                  <img
-                    src={organization.logoUrl}
-                    alt={orgName}
-                    title={orgName}
-                    className="h-9 w-auto max-w-[160px] object-contain dark:h-7"
-                    draggable={false}
-                  />
-                </span>
-              ) : (
-                <span
-                  title={orgName}
-                  className="flex h-[30px] w-[30px] items-center justify-center rounded-lg bg-primary text-[14px] font-bold text-primary-foreground"
-                >
-                  {orgInitials}
-                </span>
-              )}
+              <OrgLogo logoUrl={organization?.logoUrl} name={orgName} />
               <span className="flex-1" />
               <button
                 type="button"

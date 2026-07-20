@@ -74,6 +74,55 @@ export async function getCandidateCvUrl(candidateId: string) {
 }
 
 /**
+ * Mint a same-domain, inline CV view URL. Returns a RELATIVE path
+ * (`/cv/<id>/<name>.pdf?t=<token>`) that the caller opens on the current
+ * origin, so the reviewer sees the portal's own domain and the PDF renders in
+ * the tab, rather than the raw S3 link. A reverse-proxy rewrite (Vite in dev,
+ * Vercel in prod) forwards `/cv/*` to the backend, which verifies the token and
+ * streams the file. See the backend `CvViewController`.
+ */
+export async function getCandidateCvViewUrl(candidateId: string) {
+  const { data } = await api.post<{ url: string; expiresIn: number }>(
+    `/admin/candidates/${candidateId}/cv-view-url`
+  )
+  return data
+}
+
+/**
+ * Fetch a candidate's CV and return a `blob:` object URL for it.
+ *
+ * Why a blob and not a plain navigation to `/cv/...`: a download manager (IDM)
+ * intercepts a top-level navigation that returns `application/pdf` and turns it
+ * into a download, by URL extension AND by content type, so no server header
+ * can both render it inline and hide it. A `blob:` URL is in-memory and
+ * same-origin, so there is no HTTP transfer for IDM to hook, and the browser
+ * still renders the PDF inline.
+ *
+ * Plain `fetch`, NOT the `api` instance: this route returns raw bytes, not the
+ * encrypted JSON envelope the axios interceptors expect (they would try to
+ * decrypt a PDF). It needs no auth header — the one-time token is in the URL,
+ * and the route is exempt from the crypto layer and the Basic Auth perimeter.
+ *
+ * The caller owns the returned URL and should `URL.revokeObjectURL` it once the
+ * viewer has loaded (revoking after load is safe; the rendered document keeps
+ * its bytes).
+ */
+export async function fetchCandidateCvBlobUrl(
+  candidateId: string
+): Promise<string> {
+  const { url } = await getCandidateCvViewUrl(candidateId)
+  const res = await fetch(window.location.origin + url)
+  if (!res.ok) throw new Error(`Could not load the CV (${res.status}).`)
+  // The route serves the bytes as `text/plain` so a download manager (IDM)
+  // ignores the fetch; the REAL type comes back in `X-Cv-Content-Type`. Build
+  // the blob from that so it renders as a PDF (same-origin fetch, so the header
+  // is readable). Never trust `res.blob()`'s type here — it would be text/plain.
+  const type = res.headers.get("x-cv-content-type") || "application/pdf"
+  const buf = await res.arrayBuffer()
+  return URL.createObjectURL(new Blob([buf], { type }))
+}
+
+/**
  * CSV export of the org's candidates, optionally scoped to one job. The
  * endpoint is `@SkipCrypto()` and streams raw `text/csv` (NOT the encrypted
  * JSON envelope), so we bypass the client crypto layer with the

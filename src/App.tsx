@@ -11,6 +11,7 @@ import { QuestionBankPage } from "@/pages/QuestionBankPage";
 import { OrgSettingsPage } from "@/pages/OrgSettingsPage";
 import { PipelinePage } from "@/pages/PipelinePage";
 import { TeamPage } from "@/pages/TeamPage";
+import { CvViewerPage } from "@/pages/CvViewerPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
 import { ROUTES } from "@/routes";
 
@@ -68,6 +69,19 @@ export default function App() {
         <Route path={ROUTES.ORG_SETTINGS} element={<OrgSettingsPage />} />
         <Route path={ROUTES.TEAM} element={<TeamPage />} />
       </Route>
+
+      {/* Standalone full-screen CV viewer, opened in a new tab from "Open CV".
+          Protected (it mints an org-scoped token) but deliberately OUTSIDE the
+          dashboard shell — it's just the PDF. Path is `/cv-view/*`, not
+          `/cv/*`, because `/cv/*` is reverse-proxied to the backend. */}
+      <Route
+        path="/cv-view/:candidateId"
+        element={
+          <ProtectedRoute>
+            <CvViewerPage />
+          </ProtectedRoute>
+        }
+      />
 
       <Route path="/" element={<Navigate to={ROUTES.OVERVIEW} replace />} />
       <Route path="*" element={<NotFoundPage />} />

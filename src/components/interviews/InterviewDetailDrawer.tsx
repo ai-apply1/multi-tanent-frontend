@@ -70,7 +70,6 @@ import {
   downloadInterviewVideo,
   getInterview,
   getInterviewAttempts,
-  getInterviewCvUrl,
   getInterviewScoringStatus,
   reinviteInterview,
   rescoreInterview,
@@ -85,6 +84,7 @@ import {
 import {
   INVITABLE_STATUS_KEY,
   type CandidateDetail,
+  type CandidateProfile,
   type CandidateStatus,
 } from "@/features/candidates/types";
 import {
@@ -532,6 +532,72 @@ function PipelineCard({
   );
 }
 
+/**
+ * The candidate's parsed-CV profile (summary + top skills). Candidate-level, so
+ * it renders both alongside a scored interview AND on its own when the candidate
+ * hasn't interviewed yet. Returns null when the CV wasn't parsed.
+ */
+function ProfileCard({ profile }: { profile: CandidateProfile | null }) {
+  if (!profile) return null;
+  return (
+    <div className="rounded-2xl border border-line bg-surface p-[18px]">
+      <div className="mb-2 flex items-center gap-2">
+        <Briefcase className="h-4 w-4 text-ink-muted" strokeWidth={1.7} />
+        <span className="text-[13.5px] font-bold">Profile</span>
+      </div>
+      {profile.summary ? (
+        <p className="text-[13px] leading-relaxed text-ink-2">
+          {profile.summary}
+        </p>
+      ) : (
+        <p className="text-[13px] text-ink-muted">
+          No summary parsed from this candidate&apos;s CV.
+        </p>
+      )}
+      {profile.technologies?.length ? (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {profile.technologies.slice(0, 12).map((t) => (
+            <span
+              key={t.name}
+              className="rounded-full border border-line bg-surface-2 px-2 py-0.5 text-[11.5px] text-ink-2"
+            >
+              {t.name}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** One labelled contact field (Email / Phone / City) in the no-interview view. */
+function ContactField({
+  label,
+  value,
+  capitalize,
+}: {
+  label: string;
+  value: string | null | undefined;
+  capitalize?: boolean;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-subtle">
+        {label}
+      </div>
+      <div
+        className={cn(
+          "truncate text-[13px]",
+          value ? "text-ink-2" : "text-ink-muted",
+          capitalize && "capitalize",
+        )}
+      >
+        {value || "Not provided"}
+      </div>
+    </div>
+  );
+}
+
 // ── Main drawer ────────────────────────────────────────────────────────
 
 export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp, onOpenChange }: Props) {
@@ -768,25 +834,14 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   const is404 =
     isError && axios.isAxiosError(error) && error.response?.status === 404;
 
-  const handleOpenCv = async () => {
-    if (!activeSessionId) return;
-    const win = window.open("about:blank", "_blank");
-    try {
-      const { url } = await getInterviewCvUrl(activeSessionId);
-      if (win) {
-        win.location.href = url;
-        try {
-          win.opener = null;
-        } catch {
-          /* some browsers freeze it */
-        }
-      } else {
-        window.location.assign(url);
-      }
-    } catch (err) {
-      if (win) win.close();
-      toast.error(errorMessage(err, "Could not open CV."));
-    }
+  // Keyed on the CANDIDATE, not the interview session, so it works even for a
+  // candidate rejected before ever sitting an interview (they still have a CV).
+  // Opens the standalone viewer route (`/cv-view/<id>`), which fetches the CV
+  // and renders it from a blob — clean URL, and a download manager (IDM) never
+  // sees a PDF download to grab. See `CvViewerPage`.
+  const handleOpenCv = () => {
+    if (!candidateId) return;
+    window.open(`/cv-view/${candidateId}`, "_blank", "noopener");
   };
 
   const handleExportJson = () => {
@@ -918,12 +973,17 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                 className="flex h-[50px] w-[50px] shrink-0 items-center justify-center rounded-full text-[17px] font-bold text-primary"
                 style={{ background: "var(--accent-soft)" }}
               >
-                {initialsFor(data?.candidateName, data?.email)}
+                {initialsFor(
+                  data?.candidateName ?? candidate?.fullName,
+                  data?.email ?? candidate?.email,
+                )}
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2.5">
                   <h2 className="m-0 truncate text-[19px] font-semibold tracking-tight">
-                    {data?.candidateName || "Interview detail"}
+                    {data?.candidateName ||
+                      candidate?.fullName ||
+                      "Interview detail"}
                   </h2>
                   <StageBadge status={candidate?.currentStatusId} />
                   {data ? (
@@ -980,43 +1040,46 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                 <ExternalLink className="h-3 w-3" strokeWidth={1.7} />
               </Button>
               <div className="flex-1" />
-              {/* Shortlist/Reject are ALWAYS surfaced on the header (per
-                  user request) — they're gated on having a `candidateId`
-                  we can address, but not on the interview being done, so a
-                  recruiter can shortcut a decision straight from the
-                  drawer even before the AI is finished. */}
-              <Button
-                variant="danger"
-                size="sm"
-                disabled={statusPending || !candidateId}
-                onClick={() => handleStatusChange("rejected")}
-              >
-                <X className="h-3.5 w-3.5" strokeWidth={1.9} />
-                Reject
-              </Button>
-              <Button
-                size="sm"
-                disabled={statusPending || !candidateId}
-                onClick={() =>
-                  // Already-shortlisted → the natural next step is "hired",
-                  // so the primary action escalates rather than no-ops.
-                  handleStatusChange(
-                    candidate?.currentStatusId.key === "shortlisted"
-                      ? "hired"
-                      : "shortlisted",
-                  )
-                }
-              >
-                <Star className="h-3.5 w-3.5" strokeWidth={1.8} />
-                {candidate?.currentStatusId.key === "shortlisted"
-                  ? "Mark as hired"
-                  : "Shortlist"}
-              </Button>
+              {/* Reject / Shortlist only once there's an interview to decide
+                  on. For a candidate with no interview (e.g. rejected at the
+                  CV pre-screen), these are hidden — the reviewer isn't making
+                  an interview verdict, and any status change they need is still
+                  in the Actions menu. */}
+              {activeSessionId ? (
+                <>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    disabled={statusPending || !candidateId}
+                    onClick={() => handleStatusChange("rejected")}
+                  >
+                    <X className="h-3.5 w-3.5" strokeWidth={1.9} />
+                    Reject
+                  </Button>
+                  <Button
+                    size="sm"
+                    disabled={statusPending || !candidateId}
+                    onClick={() =>
+                      // Already-shortlisted → the natural next step is "hired",
+                      // so the primary action escalates rather than no-ops.
+                      handleStatusChange(
+                        candidate?.currentStatusId.key === "shortlisted"
+                          ? "hired"
+                          : "shortlisted",
+                      )
+                    }
+                  >
+                    <Star className="h-3.5 w-3.5" strokeWidth={1.8} />
+                    {candidate?.currentStatusId.key === "shortlisted"
+                      ? "Mark as hired"
+                      : "Shortlist"}
+                  </Button>
+                </>
+              ) : null}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="secondary" size="sm">
+                  <Button variant="secondary" size="sm" aria-label="Actions">
                     <MoreHorizontal className="h-3.5 w-3.5" strokeWidth={1.9} />
-                    Actions
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">
@@ -1166,10 +1229,48 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
 
           {/* Body */}
           <div className="scroll flex-1 overflow-auto px-[22px] py-[18px]">
-            {isLoading ? (
+            {isLoading || (!activeSessionId && candidateQuery.isLoading) ? (
+              // Either the interview detail is loading, or we have no session id
+              // YET because the candidate detail (which resolves the interview
+              // pointer to a `publicSessionId`) is still in flight. Both are
+              // "loading", NOT "no interview" — showing the empty state here
+              // would flash it for a candidate who does have one.
               <div className="flex h-72 items-center justify-center text-sm text-ink-muted">
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Loading interview…
+              </div>
+            ) : !activeSessionId ? (
+              // No interview yet, but there IS a candidate — the drawer must not
+              // be blank. Show who they are (identity + parsed-CV profile) and a
+              // note where the interview results would go. NOT an error, so no
+              // "Could not load" and no Retry (a Retry would `refetch()`, which
+              // runs even while the query is disabled, and hit
+              // `/interviews/null`, which 404s). The Open CV / Reject / Shortlist
+              // actions in the header still work.
+              <div className="space-y-4">
+                {/* Contact — the header already carries the name + avatar, so
+                    this is just the reachable details. */}
+                {candidate ? (
+                  <div className="grid grid-cols-1 gap-x-6 gap-y-3 rounded-2xl border border-line bg-surface p-[18px] sm:grid-cols-3">
+                    <ContactField label="Email" value={candidate.email} />
+                    <ContactField label="Phone" value={candidate.phone} />
+                    <ContactField
+                      label="City"
+                      value={candidate.city}
+                      capitalize
+                    />
+                  </div>
+                ) : null}
+
+                <ProfileCard profile={profile} />
+
+                <div className="flex items-center gap-3 rounded-2xl border border-dashed border-line bg-surface px-5 py-4 text-[13px] text-ink-muted">
+                  <MicOff className="h-5 w-5 shrink-0 text-ink-subtle" />
+                  <p>
+                    No interview yet. Once this candidate completes one, the
+                    score, responses and transcript appear here.
+                  </p>
+                </div>
               </div>
             ) : is404 ? (
               <div className="flex h-72 flex-col items-center justify-center gap-3 px-6 text-center text-sm text-ink-muted">
@@ -1283,35 +1384,8 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                     sees who the candidate is before diving into the AI
                     evaluation surface. */}
                 {profile ? (
-                  <div className="mb-4 rounded-2xl border border-line bg-surface p-[18px]">
-                    <div className="mb-2 flex items-center gap-2">
-                      <Briefcase
-                        className="h-4 w-4 text-ink-muted"
-                        strokeWidth={1.7}
-                      />
-                      <span className="text-[13.5px] font-bold">Profile</span>
-                    </div>
-                    {profile.summary ? (
-                      <p className="text-[13px] leading-relaxed text-ink-2">
-                        {profile.summary}
-                      </p>
-                    ) : (
-                      <p className="text-[13px] text-ink-muted">
-                        No summary parsed from this candidate&apos;s CV.
-                      </p>
-                    )}
-                    {profile.technologies?.length ? (
-                      <div className="mt-3 flex flex-wrap gap-1.5">
-                        {profile.technologies.slice(0, 12).map((t) => (
-                          <span
-                            key={t.name}
-                            className="rounded-full border border-line bg-surface-2 px-2 py-0.5 text-[11.5px] text-ink-2"
-                          >
-                            {t.name}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
+                  <div className="mb-4">
+                    <ProfileCard profile={profile} />
                   </div>
                 ) : null}
 

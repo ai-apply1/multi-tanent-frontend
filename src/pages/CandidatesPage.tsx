@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import {
@@ -53,7 +53,6 @@ import {
   deleteCandidate,
   exportCandidatesCsv,
   getCandidate,
-  getCandidateCvUrl,
   listCandidateStatuses,
   listCandidates,
   sendCandidateInvite,
@@ -76,8 +75,17 @@ const ALL = "all";
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 const DEFAULT_PAGE_SIZE = 25;
 
-/** DevExcel grid columns — Candidate / Role / Status / AI score / Manual / Date / kebab. */
-const ROW_GRID = "grid-cols-[1.7fr_1.3fr_auto_1.1fr_1fr_0.8fr_40px]";
+/**
+ * DevExcel grid columns — Candidate / Role / Status / AI score / Manual / Date / kebab.
+ *
+ * Every column is a fixed `fr` (or px), NEVER `auto`. The header and each data
+ * row are SEPARATE grid containers, so an `auto` column sizes to whatever THAT
+ * container holds — "Status" in the header, a short "Rejected" pill in one row,
+ * "Applied" + a "CV couldn't be read" line in the next. Three different widths
+ * means every column after it lands at a different x per row. `fr` units are a
+ * fraction of the shared container width, so they line up across all rows.
+ */
+const ROW_GRID = "grid-cols-[1.7fr_1.3fr_1.1fr_1.1fr_1fr_0.8fr_40px]";
 
 /**
  * Stage badge tint. The org owns the hue (custom columns included), so the
@@ -138,11 +146,31 @@ export function CandidatesPage() {
   // candidates". On the latter the job is the whole point of the URL, so it
   // seeds the filter. Without this the job id in the URL would be ignored.
   const { jobId: routeJobId } = useParams<{ jobId: string }>();
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
-  const [jobFilter, setJobFilter] = useState<string>(routeJobId ?? ALL);
-  const [statusFilter, setStatusFilter] = useState<string>(ALL);
-  const [search, setSearch] = useState("");
+
+  // ── URL-backed view state ───────────────────────────────────────────
+  // Filters, pagination and the open candidate drawer all live in the query
+  // string, so a refresh (or a shared link) restores the exact view instead of
+  // dumping the reviewer back to an empty, unfiltered list with the drawer
+  // closed. These `useState`s seed ONCE from the URL (lazy initialisers) to
+  // stay snappy for typing; the effect further down mirrors them back. Purely
+  // ephemeral UI (row selection, dialogs) stays in memory on purpose.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [page, setPage] = useState(() => {
+    const p = Number(searchParams.get("page"));
+    return Number.isInteger(p) && p > 0 ? p : 1;
+  });
+  const [pageSize, setPageSize] = useState(() => {
+    const s = Number(searchParams.get("size"));
+    return PAGE_SIZE_OPTIONS.includes(s) ? s : DEFAULT_PAGE_SIZE;
+  });
+  const [jobFilter, setJobFilter] = useState<string>(
+    () => searchParams.get("job") ?? routeJobId ?? ALL,
+  );
+  const [statusFilter, setStatusFilter] = useState<string>(
+    () => searchParams.get("status") ?? ALL,
+  );
+  const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
+
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<CandidateListItem | null>(
     null,
@@ -152,23 +180,25 @@ export function CandidatesPage() {
     null,
   );
   const [exporting, setExporting] = useState(false);
-  // The candidate whose interview the drawer should show. The drawer is keyed
-  // by `publicSessionId`, which the LIST doesn't carry — resolving it costs a
-  // detail read (see `interviewSessionId` below).
-  const [drawerCandidateId, setDrawerCandidateId] = useState<string | null>(
-    null,
-  );
 
-  // Deep-link support: the Command Palette navigates here with `?candidate=<id>`
-  // to auto-open the drawer for a specific row (or an unfiltered profile, when
-  // the row isn't on the current page). Kept as a one-shot — as soon as the
-  // drawer opens the param is stripped so a back/forward navigation can't
-  // re-fire the open on every history entry.
-  const [searchParams, setSearchParams] = useSearchParams();
-  useEffect(() => {
-    const target = searchParams.get("candidate");
-    if (!target) return;
-    setDrawerCandidateId(target);
+  // The candidate whose interview the drawer shows, read straight from the URL
+  // so it survives a refresh and supports deep-links (the Command Palette
+  // navigates here with `?candidate=<id>`). The drawer is keyed by
+  // `publicSessionId`, which the LIST doesn't carry, so resolving it costs a
+  // detail read (see `interviewSessionId` below).
+  const drawerCandidateId = searchParams.get("candidate");
+  const openDrawer = useCallback(
+    (candidateId: string) => {
+      // Push (not replace), so the browser Back button closes the drawer.
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("candidate", candidateId);
+        return next;
+      });
+    },
+    [setSearchParams],
+  );
+  const closeDrawer = useCallback(() => {
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
@@ -177,7 +207,40 @@ export function CandidatesPage() {
       },
       { replace: true },
     );
-  }, [searchParams, setSearchParams]);
+  }, [setSearchParams]);
+
+  // Mirror the filters + pagination into the URL. `replace` so typing in the
+  // search box doesn't spawn a history entry per keystroke; the functional
+  // update preserves the drawer's `candidate` param, which is managed above.
+  useEffect(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        const put = (key: string, value: string, isDefault: boolean) => {
+          if (isDefault || !value) next.delete(key);
+          else next.set(key, value);
+        };
+        put("q", search.trim(), false);
+        put("status", statusFilter, statusFilter === ALL);
+        put("page", String(page), page === 1);
+        put("size", String(pageSize), pageSize === DEFAULT_PAGE_SIZE);
+        // On the job-scoped route the path owns the job; only the org-wide
+        // route carries it as a query param.
+        if (routeJobId) next.delete("job");
+        else put("job", jobFilter, jobFilter === ALL);
+        return next;
+      },
+      { replace: true },
+    );
+  }, [
+    search,
+    statusFilter,
+    page,
+    pageSize,
+    jobFilter,
+    routeJobId,
+    setSearchParams,
+  ]);
 
   const statusesQuery = useQuery({
     queryKey: ["candidateStatuses"],
@@ -290,8 +353,8 @@ export function CandidatesPage() {
   useEffect(() => {
     if (!detailQuery.isError) return;
     toast.error(errorMessage(detailQuery.error, "Could not open the interview."));
-    setDrawerCandidateId(null);
-  }, [detailQuery.isError, detailQuery.error]);
+    closeDrawer();
+  }, [detailQuery.isError, detailQuery.error, closeDrawer]);
 
   // ── mutations ───────────────────────────────────────────────────────
 
@@ -306,7 +369,7 @@ export function CandidatesPage() {
       toast.success("Candidate deleted.");
       invalidateCandidates();
       queryClient.removeQueries({ queryKey: ["candidate", res.candidateId] });
-      if (drawerCandidateId === res.candidateId) setDrawerCandidateId(null);
+      if (drawerCandidateId === res.candidateId) closeDrawer();
       setSelectedIds((prev) => {
         const next = new Set(prev);
         next.delete(res.candidateId);
@@ -427,31 +490,14 @@ export function CandidatesPage() {
   const selectedCount = selectedIds.size;
 
   /**
-   * Open a candidate's CV in a new tab. The bucket is private, so a fresh
-   * presigned GET is minted per click. The blank tab is opened SYNCHRONOUSLY
-   * inside the click — doing it after the await lands outside the user-gesture
-   * window and the browser blocks it as a popup. `noopener` is deliberately
-   * NOT passed (it returns a handle whose `location` setter is a no-op, so the
-   * redirect silently fails); we sever `opener` ourselves once the URL is set.
+   * Open a candidate's CV in a new tab, at the standalone viewer route
+   * (`/cv-view/<id>`). The viewer page fetches the CV and renders it from a
+   * blob, so the address bar stays a clean URL and a download manager (IDM)
+   * never sees a PDF download to grab (see `CvViewerPage`). A plain synchronous
+   * `window.open` inside the click, so the popup blocker doesn't kill it.
    */
-  const handleOpenCv = async (candidateId: string) => {
-    const win = window.open("about:blank", "_blank");
-    try {
-      const { downloadUrl } = await getCandidateCvUrl(candidateId);
-      if (win) {
-        win.location.href = downloadUrl;
-        try {
-          win.opener = null;
-        } catch {
-          /* some browsers freeze it */
-        }
-      } else {
-        window.location.assign(downloadUrl);
-      }
-    } catch (err) {
-      if (win) win.close();
-      toast.error(errorMessage(err, "Could not open the CV."));
-    }
+  const handleOpenCv = (candidateId: string) => {
+    window.open(`/cv-view/${candidateId}`, "_blank", "noopener");
   };
 
   /**
@@ -566,6 +612,19 @@ export function CandidatesPage() {
               </Link>
             </Button>
           ) : null}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => void refetch()}
+            disabled={isFetching}
+            aria-label="Refresh candidates"
+          >
+            <RefreshCw
+              className={cn("h-4 w-4", isFetching && "animate-spin")}
+              strokeWidth={1.7}
+            />
+            Refresh
+          </Button>
           <Button
             variant="secondary"
             size="sm"
@@ -746,8 +805,8 @@ export function CandidatesPage() {
               </span>
               <span>Role</span>
               <span>Status</span>
-              <span>AI score</span>
-              <span>Manual score</span>
+              <span className="text-center">AI score</span>
+              <span className="text-center">Manual score</span>
               <span>Date</span>
               <span />
             </div>
@@ -805,7 +864,7 @@ export function CandidatesPage() {
                     }
                     onToggle={(c) => toggleOne(row._id, c)}
                     onOpenCv={() => void handleOpenCv(row._id)}
-                    onOpenInterview={() => setDrawerCandidateId(row._id)}
+                    onOpenInterview={() => openDrawer(row._id)}
                     onInvite={() => setInviteTarget(row)}
                     onChangeStatus={(statusKey) =>
                       statusMutation.mutate({ id: row._id, statusKey })
@@ -958,7 +1017,7 @@ export function CandidatesPage() {
         sessionId={interviewSessionId}
         candidateId={drawerCandidateId}
         onOpenChange={(open) => {
-          if (!open) setDrawerCandidateId(null);
+          if (!open) closeDrawer();
         }}
       />
     </div>
@@ -981,15 +1040,21 @@ function AiScoreCell({
   hasInterview: boolean;
 }) {
   if (value == null) {
+    // Same subtle icon + label as the Manual Score cell, so the two score
+    // columns read consistently. `Pending` (an interview is being scored) is
+    // the one state that differs, because it genuinely is a different one.
     return (
-      <span className="text-[13px] text-ink-subtle">
+      <span className="inline-flex items-center gap-1.5 text-[13px] text-ink-subtle">
         {hasInterview ? (
-          <span className="inline-flex items-center gap-1.5">
+          <>
             <Loader className="h-3.5 w-3.5" strokeWidth={1.7} />
             Pending
-          </span>
+          </>
         ) : (
-          "—"
+          <>
+            <Clock className="h-3.5 w-3.5" strokeWidth={1.7} />
+            Not scored
+          </>
         )}
       </span>
     );
@@ -1083,7 +1148,12 @@ function CandidateRow({
     <div
       onClick={onOpenInterview}
       className={cn(
-        "grid cursor-pointer items-center gap-3 border-b border-line px-5 py-3.5 text-[13.5px] transition-colors last:border-b-0 hover:bg-hover",
+        // `items-start`, not `items-center`: a status cell can stack a
+        // "Reading CV…" / "CV couldn't be read" line under its badge, and
+        // centering pushed the badge above the other columns on those rows.
+        // Top-aligning keeps the badge level with the name and scores; the
+        // extra line just hangs below, like the email under the name.
+        "grid cursor-pointer items-start gap-3 border-b border-line px-5 py-3.5 text-[13.5px] transition-colors last:border-b-0 hover:bg-hover",
         ROW_GRID,
         selected && "bg-[var(--accent-softer)]",
       )}
@@ -1178,11 +1248,15 @@ function CandidateRow({
         )}
       </span>
 
-      {/* AI score */}
-      <AiScoreCell value={aiScore} hasInterview={hasInterview} />
+      {/* AI score — centered under its header */}
+      <div className="flex justify-center">
+        <AiScoreCell value={aiScore} hasInterview={hasInterview} />
+      </div>
 
-      {/* Manual score */}
-      <ManualScoreCell value={manualScore} />
+      {/* Manual score — centered under its header */}
+      <div className="flex justify-center">
+        <ManualScoreCell value={manualScore} />
+      </div>
 
       {/* Date */}
       <span className="text-[12.5px] text-ink-muted">

@@ -62,11 +62,59 @@ export interface OrgEmailDomain {
   status: EmailDomainStatus
   /** True only when emails really are coming from the org's own domain. */
   active: boolean
-  /** The resolved From: candidates will actually see. Never guess this locally. */
+  /**
+   * The org's OWN From: identity, e.g. `DevExcel <no-reply@softmind.com>`. When
+   * `active` it is the live sender; before verification it is the identity the
+   * org is setting up, and delivery falls back to the shared address until then
+   * (say so, don't imply it's already live). Never guess this locally.
+   */
   fromAddress: string
+  /** The org's own sending domain (its verified apex, else its parentDomain). */
+  sendingDomain: string
   records: EmailDomainRecord[]
   lastCheckedAt: string | null
   error: string
+}
+
+/** Lifecycle of the apply intro video, mirroring the backend `ApplyVideoStatus`. */
+export type ApplyVideoStatus =
+  | "draft"
+  | "uploading"
+  | "processing"
+  | "ready"
+  | "failed"
+
+/**
+ * The apply intro video as the OWNER sees it: full pipeline state.
+ *
+ * An INGESTED ASSET now, not a link the org hosts. HR uploads a file, a worker
+ * transcodes it to HLS, and the funnel streams it back. `status` drives the
+ * progress/failure UI; `hasVideo` (a live bundle exists) drives Replace-vs-
+ * Choose and whether the preview can render. The two differ during a replace:
+ * status is `processing`/`failed` while a previously-transcoded bundle stays
+ * live.
+ */
+export interface OrgApplyVideo {
+  status: ApplyVideoStatus
+  /** Transcode progress 0-100. A number, never a parsed string. */
+  progressPct: number
+  /** Short current-phase label for display (e.g. "Transcoding"). */
+  progressLabel: string
+  /** Why the last transcode failed; "" otherwise. */
+  error: string
+  /** Runtime seconds of the live bundle. 0 = none/unknown. */
+  durationSec: number
+  originalFilename: string
+  sizeBytes: number
+  uploadedAt: string | null
+  readyAt: string | null
+  /** A live, playable bundle exists (may be a prior upload during a replace). */
+  hasVideo: boolean
+  /**
+   * The reviewer's preview manifest (full `/api/v1` path, resolve with
+   * `apiUrl`), present whenever `hasVideo`. Same proxy the candidate uses.
+   */
+  manifestUrl: string
 }
 
 /**
@@ -100,6 +148,8 @@ export interface OrgProfile {
   industry: string
   seats: number
   settings: OrganizationSettings
+  /** The apply funnel's intro video. `url: ""` means the funnel skips it. */
+  applyVideo: OrgApplyVideo
   /**
    * The org's own sending domain + the DNS records to publish. Read-only:
    * the domain is registered by the backend at provisioning; the only action
@@ -129,6 +179,11 @@ export interface UpdateOrganizationPayload {
    */
   faviconKey?: string
   settings?: Partial<OrganizationSettings>
+  /*
+   * No `applyVideo` here: it is an ingested asset with its own upload/transcode
+   * routes (`applyVideoApi.ts`), not a profile field. The backend rejects it on
+   * this PATCH (`forbidNonWhitelisted`).
+   */
 }
 
 /** Body of `POST /admin/organization/logo/presign`. */
