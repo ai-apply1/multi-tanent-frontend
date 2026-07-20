@@ -481,9 +481,11 @@ function StatusRow({
           <GripVertical className="h-4 w-4" strokeWidth={1.8} />
         </button>
       )}
-      <span className="w-9 shrink-0 text-[12.5px] tabular-nums text-ink-subtle">
-        {status.stageOrder}
-      </span>
+      {/* `stageOrder` is deliberately not shown. It is still the ordering
+          field — the drag-and-drop writes it, the dialog edits it, and every
+          consumer sorts by it — but its VALUE is an implementation detail
+          (10, 20, 30… with gaps left for insertions), and the row's position
+          in this list already says everything the number did. */}
       <span
         className="inline-flex items-center rounded-full px-2.5 py-1 text-[12.5px] font-semibold"
         style={{

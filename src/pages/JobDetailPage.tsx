@@ -50,6 +50,7 @@ import { useOrganization } from "@/features/organization/useOrganization";
 import { UploadCvsDialog } from "@/features/candidates/components/UploadCvsDialog";
 import {
   getCandidate,
+  getCandidateKanban,
   listCandidateStatuses,
   listCandidates,
 } from "@/features/candidates/candidatesApi";
@@ -146,6 +147,46 @@ export function JobDetailPage() {
     },
   });
 
+  /*
+   * The job's board, for the KPI strip's counts.
+   *
+   * One request for all four numbers instead of four filtered count queries.
+   * The trade is payload: the response also carries up to 25 candidate rows
+   * per column, which the strip throws away. Worth it for a single round trip
+   * and one cache entry; if it ever bites, the honest fix is a counts-only
+   * endpoint rather than fanning out here.
+   */
+  const boardQuery = useQuery({
+    queryKey: ["candidateKanban", jobId],
+    queryFn: () => getCandidateKanban(jobId!),
+    enabled: Boolean(jobId),
+  });
+
+  /*
+   * Counts + labels for the four tiles.
+   *
+   * Renders a dash, never a zero, until the board lands: "0 applicants" and
+   * "not loaded yet" are different claims, and a job page that flashes four
+   * zeroes on every open reads as an empty funnel.
+   */
+  const kpi = useMemo(() => {
+    const columns = boardQuery.data?.columns;
+    const tile = (key: string, fallbackLabel: string) => {
+      const column = columns?.find((c) => c.key === key);
+      return {
+        label: column?.label || fallbackLabel,
+        value: column ? String(column.count) : "—",
+      };
+    };
+    return {
+      total: columns
+        ? String(columns.reduce((sum, c) => sum + c.count, 0))
+        : "—",
+      shortlisted: tile("shortlisted", "Shortlisted"),
+      finalRejected: tile("final_rejected", "Final Rejection"),
+      hired: tile("hired", "Finalized"),
+    };
+  }, [boardQuery.data]);
   // Resolve `publicSessionId` for the drawer target.
   const detailQuery = useQuery({
     queryKey: ["candidate", drawerCandidateId],
@@ -295,30 +336,46 @@ export function JobDetailPage() {
 
       <JobShareDialog jobId={job._id} open={shareOpen} onOpenChange={setShareOpen} />
 
-      {/* KPI strip. Candidate counts have no matching API here, so the tiles
-          show a dash rather than fabricating a zero. */}
+      {/*
+        KPI strip, counted from the job's own board.
+
+        These tiles read "no matching API" and showed a dash for every job.
+        There is one: the kanban returns each column with its TRUE total
+        (`count`, independent of the 25-row `candidates` cap), which is exactly
+        a per-status count for one job.
+
+        "Applied" is the SUM of every column, not the `applied` column: every
+        candidate sits in exactly one column, so the sum is how many people
+        applied to this job. Reading the `applied` column instead would show 0
+        for a job whose applicants had all been processed, which is the
+        opposite of what the tile means.
+
+        The other three take their labels from the catalog, so an org that
+        renames a column renames the tile with it. Defaults match the builtin
+        labels ("Final Rejection", "Finalized").
+      */}
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard
           label="Applied"
-          value="—"
+          value={kpi.total}
           icon={<User className="h-4 w-4" strokeWidth={1.9} />}
           tint="var(--stage-applied)"
         />
         <KpiCard
-          label="Shortlisted"
-          value="—"
+          label={kpi.shortlisted.label}
+          value={kpi.shortlisted.value}
           icon={<Star className="h-4 w-4" strokeWidth={1.9} />}
           tint="var(--stage-shortlisted)"
         />
         <KpiCard
-          label="Rejected"
-          value="—"
+          label={kpi.finalRejected.label}
+          value={kpi.finalRejected.value}
           icon={<XIcon className="h-4 w-4" strokeWidth={2.1} />}
           tint="var(--danger)"
         />
         <KpiCard
-          label="Hired"
-          value="—"
+          label={kpi.hired.label}
+          value={kpi.hired.value}
           icon={<UserCheck className="h-4 w-4" strokeWidth={1.9} />}
           tint="var(--success)"
         />

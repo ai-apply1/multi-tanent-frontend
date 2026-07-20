@@ -1217,55 +1217,21 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                 <ExternalLink className="h-3 w-3" strokeWidth={1.7} />
               </Button>
               <div className="flex-1" />
-              {/* Reject / Shortlist need BOTH an interview to decide on and an
-                  AI score to decide with.
-
-                  No interview (e.g. rejected at the CV pre-screen) — the
-                  reviewer isn't making an interview verdict at all.
-
-                  No score yet — the verdict is supposed to be a confirmation of
-                  the AI's assessment, so offering it before the assessment
-                  exists invites a decision made on nothing. Scoring runs in the
-                  background after submit, so this is a real window, not a rare
-                  edge case; the drawer polls and the buttons appear on their
-                  own once it lands.
-
-                  Either way this only hides the SHORTCUT: every status change
-                  is still reachable from the Actions menu, so nobody is
-                  blocked, just not nudged. */}
-              {activeSessionId && overallScore100 !== null ? (
-                <>
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    disabled={statusPending || !candidateId}
-                    onClick={() =>
-                      handleStatusChange(POST_INTERVIEW_REJECT_STATUS_KEY)
-                    }
-                  >
-                    <X className="h-3.5 w-3.5" strokeWidth={1.9} />
-                    Reject
-                  </Button>
-                  <Button
-                    size="sm"
-                    disabled={statusPending || !candidateId}
-                    onClick={() =>
-                      // Already-shortlisted → the natural next step is "hired",
-                      // so the primary action escalates rather than no-ops.
-                      handleStatusChange(
-                        candidate?.currentStatusId.key === "shortlisted"
-                          ? "hired"
-                          : "shortlisted",
-                      )
-                    }
-                  >
-                    <Star className="h-3.5 w-3.5" strokeWidth={1.8} />
-                    {candidate?.currentStatusId.key === "shortlisted"
-                      ? "Mark as hired"
-                      : "Shortlist"}
-                  </Button>
-                </>
-              ) : null}
+              {/*
+               * No Reject / Shortlist here, deliberately.
+               *
+               * They used to sit in this header AND in the Pipeline stage card,
+               * which put the same two decisions in two places with different
+               * visibility rules: the header pair needed an interview plus a
+               * score, the card's needed the candidate to be sitting in
+               * `scored`. A reviewer could therefore see Shortlist in one spot
+               * and not the other on the same candidate.
+               *
+               * The card is the right home: the decision belongs next to the
+               * stage it moves the candidate out of, and it is the surface that
+               * also shows what the AI recommended. Nothing is lost from here —
+               * every status change stays reachable from the Actions menu.
+               */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="secondary" size="sm" aria-label="Actions">
@@ -2268,26 +2234,34 @@ function ActivityTab({
    *  "No activity yet" line if omitted, so existing call-sites keep working. */
   emptyFallback?: React.ReactNode;
 }) {
+  /*
+   * OLDEST FIRST — the invite at the top, the score at the bottom, read down
+   * the way the interview actually happened.
+   *
+   * Two events legitimately share a timestamp: the score is stamped with
+   * `submittedAt` (there is no separate `scoredAt` on this payload), so
+   * "submitted" and "scored" tie to the second. Sorting on time alone would
+   * let them swap and show the interview scored before it was submitted, so
+   * `seq` breaks the tie in causal order. Sorting rather than relying on push
+   * order also keeps this correct if a future event is added in the wrong
+   * place.
+   */
   const events: Array<{
     title: string;
     sub: string;
     time: string;
+    at: number;
+    seq: number;
     kind: "score" | "submit" | "start" | "create";
   }> = [];
-  if (scoringStatus === "done" && typeof overall === "number") {
+  if (createdAt) {
     events.push({
-      title: `AI interview scored — overall ${Math.round(overall * 10)}`,
-      sub: `${answeredCount} of ${questionCount} answered`,
-      time: submittedAt ? new Date(submittedAt).toLocaleString() : "—",
-      kind: "score",
-    });
-  }
-  if (submittedAt) {
-    events.push({
-      title: "Interview submitted",
-      sub: `${answeredCount} video response${answeredCount === 1 ? "" : "s"}`,
-      time: new Date(submittedAt).toLocaleString(),
-      kind: "submit",
+      title: "Interview invited",
+      sub: "Invite link emailed to candidate",
+      time: new Date(createdAt).toLocaleString(),
+      at: new Date(createdAt).getTime(),
+      seq: 0,
+      kind: "create",
     });
   }
   if (startedAt) {
@@ -2295,17 +2269,37 @@ function ActivityTab({
       title: "Interview started",
       sub: "Candidate began recording",
       time: new Date(startedAt).toLocaleString(),
+      at: new Date(startedAt).getTime(),
+      seq: 1,
       kind: "start",
     });
   }
-  if (createdAt) {
+  if (submittedAt) {
     events.push({
-      title: "Interview invited",
-      sub: "Invite link emailed to candidate",
-      time: new Date(createdAt).toLocaleString(),
-      kind: "create",
+      title: "Interview submitted",
+      sub: `${answeredCount} video response${answeredCount === 1 ? "" : "s"}`,
+      time: new Date(submittedAt).toLocaleString(),
+      at: new Date(submittedAt).getTime(),
+      seq: 2,
+      kind: "submit",
     });
   }
+  if (scoringStatus === "done" && typeof overall === "number") {
+    events.push({
+      // Comma, not a dash: no em/en dash in user-facing text.
+      // `toDisplayScore` is the shared 0-10 -> 0-100 conversion, so this line
+      // can never disagree with the score ring above it.
+      title: `AI interview scored, overall ${toDisplayScore(overall)}`,
+      sub: `${answeredCount} of ${questionCount} answered`,
+      time: submittedAt
+        ? new Date(submittedAt).toLocaleString()
+        : "Time unknown",
+      at: submittedAt ? new Date(submittedAt).getTime() : Number.MAX_SAFE_INTEGER,
+      seq: 3,
+      kind: "score",
+    });
+  }
+  events.sort((a, b) => a.at - b.at || a.seq - b.seq);
   if (!events.length) {
     return (
       <>
