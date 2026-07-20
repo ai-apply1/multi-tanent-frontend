@@ -12,7 +12,13 @@ export const ROUTES = {
   CANDIDATES: "/dashboard/candidates",
   QUESTIONS: "/dashboard/questions",
   PIPELINE: "/dashboard/pipeline",
-  ORG_SETTINGS: "/dashboard/settings",
+  /**
+   * The dedicated settings destination (identity, branding, domains, apply
+   * video, email, defaults, notifications). Named `SETTINGS`, not
+   * `ORG_SETTINGS`: it is its own top-level nav group, no longer a tab inside
+   * an "Organization" page.
+   */
+  SETTINGS: "/dashboard/settings",
   TEAM: "/dashboard/team",
 } as const;
 
