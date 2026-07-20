@@ -156,8 +156,17 @@ export function ApplyVideoCard({ initial, canWrite }: ApplyVideoCardProps) {
     mutationFn: removeApplyVideo,
     onSuccess: (data) => {
       queryClient.setQueryData<OrgApplyVideo>(["applyVideoStatus"], data)
+      // Close HERE, not in `onConfirm`. The dialog stays up through the request
+      // so it can show its "Removing…" state, which means something has to
+      // dismiss it when that finishes — otherwise the video disappears from the
+      // card behind a dialog that never goes away.
+      setRemoveOpen(false)
       toast.success("Video removed.")
     },
+    // Deliberately left OPEN on failure: the toast explains what went wrong and
+    // the buttons re-enable, so the obvious retry is right there. Closing would
+    // dump the operator back to a card that still shows the video with no clue
+    // whether anything happened.
     onError: (err) => toast.error(apiError(err, "Could not remove the video.")),
   })
 
@@ -228,7 +237,13 @@ export function ApplyVideoCard({ initial, canWrite }: ApplyVideoCardProps) {
       {/* Live preview of the finished bundle. Stays visible during a replace,
           because the old video keeps playing until the new one is ready. */}
       {showPreview ? (
-        <div className="mt-4 overflow-hidden rounded-xl border border-line bg-black">
+        // `max-w-md` caps the preview at ~448px (252px tall at 16:9). Without
+        // it the player is `aspect-video w-full` and stretches to the full
+        // settings card, which on a wide screen is a ~1360px video dominating
+        // a page that is mostly form fields. This is a "check the right video
+        // is live" thumbnail, not a viewing experience — the max-w still lets
+        // it shrink to full width on a narrow screen.
+        <div className="mt-4 w-full max-w-md overflow-hidden rounded-xl border border-line bg-black">
           <HlsPlayer
             key={video.manifestUrl}
             manifestUrl={video.manifestUrl}

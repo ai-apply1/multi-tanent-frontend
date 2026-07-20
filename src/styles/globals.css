@@ -241,6 +241,28 @@
     color: var(--foreground);
   }
 
+  /*
+   * The WINDOW never scrolls. This is a fixed-shell app: the dashboard is
+   * `h-screen` with its own internal scroll area (`<main>` in DashboardLayout),
+   * and every full-page screen sizes to `h-full` and scrolls inside itself.
+   *
+   * Without this, anything appended to <body> after the shell — a portalled
+   * overlay, a toast root, an injected browser-extension node — makes the
+   * document taller than the viewport and hands the window its own scrollbar.
+   * The symptom is a SECOND vertical scrollbar next to the app's own, and a
+   * band of empty page below the shell that you can scroll down into. Clipping
+   * at the document level makes that structurally impossible rather than
+   * relying on nothing ever being appended.
+   *
+   * The trade this accepts: a screen that wants to scroll must say so itself.
+   * That is already how the shell works, and the two standalone screens
+   * (login, 404) carry `overflow-y-auto` for exactly this reason.
+   */
+  html,
+  body {
+    overflow: hidden;
+  }
+
   body {
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
@@ -266,6 +288,13 @@
   .scroll::-webkit-scrollbar {
     width: 10px;
     height: 10px;
+  }
+  /* The main scroll area runs `overflow-y: scroll` so its width never changes
+     (see DashboardLayout). That means the track is present even on a page with
+     nothing to scroll, so it has to be invisible — otherwise every short page
+     would show an empty grey groove down its right edge. */
+  .scroll::-webkit-scrollbar-track {
+    background: transparent;
   }
   .scroll::-webkit-scrollbar-thumb {
     background: rgba(13, 11, 11, 0.14);

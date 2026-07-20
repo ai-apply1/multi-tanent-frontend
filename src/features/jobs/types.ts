@@ -222,8 +222,16 @@ export const DIFFICULTY_LABELS: Record<DifficultyLevel, string> = {
 
 /**
  * The job-status state machine, mirrored from `JobService`. Offering a
- * transition that isn't listed here earns a 409, so menus must be built
- * from the CURRENT status's entry — `archived` is terminal (empty list).
+ * transition that isn't listed here earns a 409, so menus must be built from
+ * the CURRENT status's entry.
+ *
+ * No status is terminal. `archived` used to be, and an empty list here meant
+ * the whole status menu vanished on an archived job — leaving a finished
+ * posting with no route back. It now offers Unarchive (→ draft only).
+ *
+ * Keep this in step with the backend's `ALLOWED_STATUS_TRANSITIONS`: a
+ * transition offered here but rejected there is a 409 the user can trigger
+ * from the UI.
  */
 export const STATUS_TRANSITIONS: Record<
   JobStatus,
@@ -241,5 +249,11 @@ export const STATUS_TRANSITIONS: Record<
     { status: "open", label: "Reopen" },
     { status: "archived", label: "Archive" },
   ],
-  archived: [],
+  // Archive is reversible, but only back to `draft` — mirroring the backend's
+  // state machine, which refuses archived → open. A job returns for review
+  // rather than straight back in front of candidates, so republishing is
+  // always a deliberate second step (and re-runs the "needs questions" check).
+  // This list was empty, which hid the status dropdown entirely and left a
+  // fully-configured job with no way back.
+  archived: [{ status: "draft", label: "Unarchive" }],
 }

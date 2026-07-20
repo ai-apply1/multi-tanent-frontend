@@ -268,7 +268,7 @@ export function TopBar() {
               <User className="h-3.5 w-3.5" strokeWidth={1.7} />
               Your profile
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => navigate(ROUTES.ORG_SETTINGS)}>
+            <DropdownMenuItem onSelect={() => navigate(ROUTES.SETTINGS)}>
               <Bell className="h-3.5 w-3.5" strokeWidth={1.7} />
               Notification settings
             </DropdownMenuItem>

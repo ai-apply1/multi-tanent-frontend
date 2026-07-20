@@ -76,6 +76,47 @@ export interface OrgEmailDomain {
   error: string
 }
 
+/** Which branded portal a domain fronts. `host` is `${portal}.${parentDomain}`. */
+export type TenantPortal = "admin" | "screening" | "apply"
+
+/**
+ * DNS/TLS state of one portal domain, mirroring the backend `TenantDomainState`.
+ *
+ * The one to understand is `pending_dns`: Vercel has accepted that we own the
+ * name, but the customer hasn't pointed DNS at us yet. It is the NORMAL state
+ * for days after provisioning, not a failure. Only `live` means reachable.
+ */
+export type TenantDomainState =
+  | "skipped"
+  | "pending"
+  | "pending_dns"
+  | "pending_verification"
+  | "live"
+  | "failed"
+
+/** A DNS record the customer must publish (only present for TXT challenges). */
+export interface OrgDomainVerification {
+  type: string
+  domain: string
+  value: string
+  reason: string
+}
+
+/** One of the org's three branded portal domains. */
+export interface OrgDomain {
+  portal: TenantPortal
+  host: string
+  state: TenantDomainState
+  /**
+   * The CNAME target this host must point at. PER-PROJECT, so the three rows
+   * legitimately differ — never render one shared value for all of them.
+   */
+  cnameTarget: string
+  verification: OrgDomainVerification[]
+  lastCheckedAt: string | null
+  error: string
+}
+
 /** Lifecycle of the apply intro video, mirroring the backend `ApplyVideoStatus`. */
 export type ApplyVideoStatus =
   | "draft"
@@ -147,6 +188,10 @@ export interface OrgProfile {
   status: "active" | "inactive"
   industry: string
   seats: number
+  /** The customer-owned apex the portal hosts are built from. Read-only. */
+  parentDomain: string
+  /** The three branded portal domains + their DNS state. Read-only. */
+  domains: OrgDomain[]
   settings: OrganizationSettings
   /** The apply funnel's intro video. `url: ""` means the funnel skips it. */
   applyVideo: OrgApplyVideo

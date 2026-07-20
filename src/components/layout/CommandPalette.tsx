@@ -111,7 +111,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       { id: "go-candidates", icon: Users2, title: "Candidates", sub: "Every applicant", to: ROUTES.CANDIDATES },
       { id: "go-questions", icon: Library, title: "Question bank", sub: "Screening questions", to: ROUTES.QUESTIONS },
       { id: "go-pipeline", icon: GitBranch, title: "Pipeline", sub: "Status groups", to: ROUTES.PIPELINE },
-      { id: "go-settings", icon: Settings, title: "Organization settings", sub: "Identity, defaults & notifications", to: ROUTES.ORG_SETTINGS },
+      { id: "go-settings", icon: Settings, title: "Settings", sub: "Branding, domains, apply video & defaults", to: ROUTES.SETTINGS },
     ]
     if (isOrgAdmin) {
       raw.push({ id: "go-team", icon: UserSquare2, title: "Team", sub: "Manage members", to: ROUTES.TEAM })

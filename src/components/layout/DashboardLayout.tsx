@@ -14,7 +14,18 @@ export function DashboardLayout() {
       <Sidebar />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <TopBar />
-        <main className="scroll min-h-0 min-w-0 flex-1 overflow-y-auto">
+        {/* THIS element is the app's scroll container — the window never
+            scrolls, because the shell above is `h-screen overflow-hidden`.
+            `scrollbar-gutter: stable` reserves the scrollbar's width whether or
+            not one is drawn, so moving between a tall page and a short one
+            can't add/remove the bar, change this box's content width, and jerk
+            the centred page sideways. Most obvious on Settings, where switching
+            tabs swaps a one-field pane for a stack of cards.
+            Deliberately `overflow-y-auto`, not `scroll`: forcing the track does
+            reserve the width too, but it paints a scrollbar on every short page
+            where there is nothing to scroll, which is worse than the problem it
+            solves. */}
+        <main className="scroll min-h-0 min-w-0 flex-1 overflow-y-auto scrollbar-gutter-stable">
           <Outlet />
         </main>
       </div>

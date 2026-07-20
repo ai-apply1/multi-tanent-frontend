@@ -439,8 +439,14 @@ function PipelineCard({
         })}
       </div>
 
-      {/* Decision actions */}
-      {isProcessing ? (
+      {/* Decision actions.
+          Gated on an AI SCORE existing, not just on the pipeline stage. Without
+          the score there is nothing for the reviewer to confirm — and the
+          banner below would fall through its `>= 70` test and assert the AI
+          recommends "No Hire" when the AI has not actually said anything. That
+          is worse than showing no recommendation: it invites a reject on
+          evidence that does not exist. See the placeholder in the else branch. */}
+      {isProcessing && overall100 !== null ? (
         <div className="mt-1.5">
           <div
             className="mb-3 flex items-start gap-2 rounded-[10px] px-3 py-2.5"
@@ -453,7 +459,7 @@ function PipelineCard({
             <p className="text-[12px] leading-snug text-ink-2">
               The AI recommends{" "}
               <strong className="font-bold">
-                {overall100 !== null && overall100 >= 70 ? "Hire" : "No Hire"}
+                {overall100 >= 70 ? "Hire" : "No Hire"}
               </strong>
               . Your confirmation is required — nothing advances automatically.
             </p>
@@ -477,6 +483,20 @@ function PipelineCard({
               Shortlist
             </Button>
           </div>
+        </div>
+      ) : isProcessing ? (
+        // Same stage, but the score hasn't landed. Say so rather than render an
+        // empty gap: the reviewer needs to know the actions are coming, not
+        // wonder whether the drawer is broken.
+        <div className="mt-1.5 flex items-start gap-2 rounded-[10px] bg-surface-3 px-3 py-2.5">
+          <Sparkles
+            className="mt-[1px] h-3.5 w-3.5 shrink-0 text-ink-subtle"
+            strokeWidth={1.7}
+          />
+          <p className="text-[12px] leading-snug text-ink-muted">
+            Waiting on the AI score. Reject and Shortlist unlock once it lands,
+            so a decision is never made without it.
+          </p>
         </div>
       ) : null}
 
@@ -1040,12 +1060,23 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                 <ExternalLink className="h-3 w-3" strokeWidth={1.7} />
               </Button>
               <div className="flex-1" />
-              {/* Reject / Shortlist only once there's an interview to decide
-                  on. For a candidate with no interview (e.g. rejected at the
-                  CV pre-screen), these are hidden — the reviewer isn't making
-                  an interview verdict, and any status change they need is still
-                  in the Actions menu. */}
-              {activeSessionId ? (
+              {/* Reject / Shortlist need BOTH an interview to decide on and an
+                  AI score to decide with.
+
+                  No interview (e.g. rejected at the CV pre-screen) — the
+                  reviewer isn't making an interview verdict at all.
+
+                  No score yet — the verdict is supposed to be a confirmation of
+                  the AI's assessment, so offering it before the assessment
+                  exists invites a decision made on nothing. Scoring runs in the
+                  background after submit, so this is a real window, not a rare
+                  edge case; the drawer polls and the buttons appear on their
+                  own once it lands.
+
+                  Either way this only hides the SHORTCUT: every status change
+                  is still reachable from the Actions menu, so nobody is
+                  blocked, just not nudged. */}
+              {activeSessionId && overallScore100 !== null ? (
                 <>
                   <Button
                     variant="danger"

@@ -66,7 +66,7 @@ export default function App() {
         <Route path={ROUTES.CANDIDATES} element={<CandidatesPage key="org-wide" />} />
         <Route path={ROUTES.QUESTIONS} element={<QuestionBankPage />} />
         <Route path={ROUTES.PIPELINE} element={<PipelinePage />} />
-        <Route path={ROUTES.ORG_SETTINGS} element={<OrgSettingsPage />} />
+        <Route path={ROUTES.SETTINGS} element={<OrgSettingsPage />} />
         <Route path={ROUTES.TEAM} element={<TeamPage />} />
       </Route>
 

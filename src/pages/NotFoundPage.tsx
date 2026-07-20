@@ -4,7 +4,9 @@ import { ROUTES } from "@/routes"
 
 export function NotFoundPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-surface-2 px-6">
+    // `h-full overflow-y-auto`: the document no longer scrolls (globals.css),
+    // so this standalone screen owns its own scrolling.
+    <div className="h-full overflow-y-auto flex items-center justify-center bg-surface-2 px-6">
       <div className="w-full max-w-[420px] rounded-2xl border border-line bg-surface p-8 text-center">
         <p className="mono text-[52px] font-semibold tracking-tight text-primary leading-none">
           404

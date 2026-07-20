@@ -119,8 +119,17 @@ export function JobDetailPage() {
       queryClient.setQueryData(["job", saved._id], saved);
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
     },
-    onError: (err) =>
-      toast.error(errorMessage(err, "Could not change the job status.")),
+    onError: (err) => {
+      toast.error(errorMessage(err, "Could not change the job status."));
+      // A rejected transition almost always means THIS TAB IS STALE: the job
+      // moved on somewhere else (another tab, another user, a script) and the
+      // menu was built from the status we last cached. Without a refetch the
+      // page keeps offering the same impossible transition and the user can
+      // only fail again — refetch so the badge and the menu rebuild from the
+      // job's real status.
+      void queryClient.invalidateQueries({ queryKey: ["job", jobId] });
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    },
   });
 
   // Resolve `publicSessionId` for the drawer target.

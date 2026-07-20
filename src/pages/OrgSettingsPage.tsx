@@ -33,6 +33,7 @@ import type {
   UpdateOrganizationPayload,
 } from "@/features/organization/types";
 import { ApplyVideoCard } from "@/features/organization/components/ApplyVideoCard";
+import { PortalDomainsCard } from "@/features/organization/components/PortalDomainsCard";
 import {
   getNotificationPrefs,
   updateNotificationPrefs,
@@ -134,14 +135,43 @@ const toInt = (value: string) => {
   return Number.isInteger(n) ? n : NaN;
 };
 
-type SettingsTab = "identity" | "defaults" | "platform" | "notifications";
+/**
+ * One tab per THING BEING CONFIGURED, not one per storage mechanism.
+ *
+ * "Identity" used to hold the name, the logo, the favicon, the apply video, the
+ * portal domains and the email domain — six unrelated concerns that shared a tab
+ * only because they happened to live on the same Mongo document. It had become
+ * the page's dumping ground, and a reader looking for "where do I set the DNS"
+ * had no reason to guess "Identity".
+ *
+ * `saves` marks the tabs whose fields feed the org PATCH. The others own their
+ * own writes (notifications) or are read-only (platform, domains) — the shared
+ * Save bar is hidden on those rather than sitting there permanently disabled,
+ * which reads as broken.
+ */
+type SettingsTab =
+  | "general"
+  | "branding"
+  | "domains"
+  | "video"
+  | "defaults"
+  | "platform"
+  | "notifications";
 
-const TABS: Array<{ id: SettingsTab; label: string }> = [
-  { id: "identity", label: "Identity" },
-  { id: "defaults", label: "Interview defaults" },
-  { id: "platform", label: "Platform" },
-  { id: "notifications", label: "My notifications" },
+const TABS: Array<{ id: SettingsTab; label: string; saves: boolean }> = [
+  { id: "general", label: "General", saves: true },
+  { id: "branding", label: "Branding", saves: true },
+  { id: "domains", label: "Domains", saves: false },
+  { id: "video", label: "Apply video", saves: false },
+  { id: "defaults", label: "Interview defaults", saves: true },
+  { id: "platform", label: "Platform", saves: false },
+  { id: "notifications", label: "My notifications", saves: false },
 ];
+
+/** Tabs whose edits go through the shared org PATCH + Save bar. */
+const SAVING_TABS = new Set<SettingsTab>(
+  TABS.filter((t) => t.saves).map((t) => t.id),
+);
 
 const inputBase =
   "h-11 w-full rounded-lg border border-[var(--field-border)] bg-surface px-3.5 text-[14px] text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)] disabled:cursor-not-allowed disabled:bg-ink-faint disabled:text-ink-muted";
@@ -453,7 +483,7 @@ export function OrgSettingsPage() {
 
   const canWrite = user?.role === "org_admin";
 
-  const [activeTab, setActiveTab] = useState<SettingsTab>("identity");
+  const [activeTab, setActiveTab] = useState<SettingsTab>("general");
   const [name, setName] = useState("");
   const [maxAttempts, setMaxAttempts] = useState("");
   const [expiryDays, setExpiryDays] = useState("");
@@ -601,14 +631,22 @@ export function OrgSettingsPage() {
             <Settings className="h-[18px] w-[18px]" strokeWidth={1.7} />
           </span>
           <h1 className="text-[23px] font-semibold tracking-tight text-ink">
-            Organization settings
+            Settings
           </h1>
         </div>
         <p className="mt-1.5 max-w-[620px] text-[13.5px] text-ink-muted">
-          Your organization&apos;s identity and the defaults every job inherits.
+          Your branding, domains and the defaults every job inherits.
         </p>
       </div>
-      {canWrite ? (
+      {/* Save/Reset on tabs that feed the org PATCH — Domains and Platform are
+          read-only, and the apply video and notifications own their own writes,
+          so a permanently disabled Save button there reads as broken rather
+          than as "nothing to save here".
+          `|| isDirty` is the safety catch: the form spans several tabs, so
+          edits made on General and then abandoned by switching to Domains must
+          not vanish behind a hidden Save bar. Unsaved work always keeps a way
+          out. */}
+      {canWrite && (SAVING_TABS.has(activeTab) || isDirty) ? (
         <div className="flex shrink-0 items-center gap-2">
           <Button
             type="button"
@@ -671,7 +709,7 @@ export function OrgSettingsPage() {
     );
   }
 
-  const identityBody = (
+  const generalBody = (
     <div className="grid gap-5">
       <div>
         <label htmlFor="org-name" className={labelBase}>
@@ -688,9 +726,17 @@ export function OrgSettingsPage() {
         />
         {touched.name && nameError ? (
           <p className="mt-1.5 text-[12px] text-[var(--danger)]">{nameError}</p>
-        ) : null}
+        ) : (
+          <p className="mt-1.5 text-[12px] text-ink-muted">
+            Shown to candidates on every page and email they receive from you.
+          </p>
+        )}
       </div>
+    </div>
+  );
 
+  const brandingBody = (
+    <div className="grid gap-5">
       <ImageUploadRow
         key={`logo-${formVersion}`}
         idBase="org-logo"
@@ -746,25 +792,46 @@ export function OrgSettingsPage() {
         onUploadingChange={setFaviconUploading}
       />
 
-      {/* Apply intro video. An ingested asset with its OWN upload/transcode
-          routes (not the profile PATCH), so it manages its own state and polls
-          independently. Lives on Identity because it is a candidate-facing
-          brand asset like the logo, NOT on "Interview defaults" (the interview
-          round). */}
-      <div className="border-t border-line pt-5">
-        <ApplyVideoCard initial={org.applyVideo} canWrite={canWrite} />
-      </div>
+    </div>
+  );
 
-      {/* EmailDomainCard mounts on Identity — same PATCH surface (org profile)
-          as the fields above, and the domain is part of the org's identity. */}
-      {org.emailDomain ? (
-        <div className="pt-2">
-          <EmailDomainCard
-            emailDomain={org.emailDomain}
-            canWrite={canWrite}
-          />
-        </div>
+  /**
+   * Both domains on one tab: they are the same job (publish DNS records with
+   * your provider) done twice, usually in one sitting by the same person.
+   * Portal domains come first — a branded careers URL is what a candidate hits
+   * before any email is ever sent.
+   *
+   * Read-only, so this tab has no Save bar: both are provisioned by the backend
+   * and progress on their own as DNS resolves.
+   */
+  const domainsBody = (
+    <div className="grid gap-5">
+      {org.domains?.length ? (
+        <PortalDomainsCard
+          parentDomain={org.parentDomain}
+          domains={org.domains}
+        />
       ) : null}
+      {org.emailDomain ? (
+        <EmailDomainCard emailDomain={org.emailDomain} canWrite={canWrite} />
+      ) : null}
+      {!org.domains?.length && !org.emailDomain ? (
+        <p className="text-[13px] text-ink-muted">
+          No domains are configured for your organization yet.
+        </p>
+      ) : null}
+    </div>
+  );
+
+  /**
+   * Its own tab rather than a row under Branding: it is an ingested asset with
+   * its own upload/transcode routes and its own polling, so it neither belongs
+   * to the profile PATCH nor wants to sit next to fields governed by a Save bar
+   * that does not apply to it.
+   */
+  const videoBody = (
+    <div className="grid gap-5">
+      <ApplyVideoCard initial={org.applyVideo} canWrite={canWrite} />
     </div>
   );
 
@@ -935,11 +1002,18 @@ export function OrgSettingsPage() {
         </p>
       ) : null}
 
-      {/* Segmented pill tabs */}
+      {/* Segmented pill tabs.
+          Sized to its CONTENT (`w-fit`), not a fixed 560px: that width was set
+          when there were four tabs, and seven inside it forced two-word labels
+          to wrap mid-phrase ("Apply / video"), leaving the bar ragged and
+          uneven. Each tab is now as wide as its own label — `shrink-0` +
+          `whitespace-nowrap` stop the flex row from compressing them back into
+          a wrap — and the row scrolls horizontally on a narrow screen rather
+          than wrapping or overflowing the card. */}
       <div
         role="tablist"
         aria-label="Settings sections"
-        className="mb-4 flex max-w-[560px] gap-1 rounded-full border border-line bg-surface-3 p-1"
+        className="scroll mb-4 flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-line bg-surface-3 p-1"
       >
         {TABS.map((t) => {
           const isActive = activeTab === t.id;
@@ -951,7 +1025,7 @@ export function OrgSettingsPage() {
               aria-selected={isActive}
               onClick={() => setActiveTab(t.id)}
               className={cn(
-                "flex-1 rounded-full px-3 py-2 text-[13px] font-semibold transition-colors",
+                "shrink-0 whitespace-nowrap rounded-full px-5 py-2 text-[13px] font-semibold transition-colors",
                 isActive
                   ? "bg-surface text-primary shadow-sm"
                   : "text-ink-muted hover:text-ink",
@@ -966,7 +1040,10 @@ export function OrgSettingsPage() {
       <form id="org-settings-form" onSubmit={submit}>
         <div className="rounded-2xl border border-line bg-surface">
           <div className="p-5 sm:p-6">
-            {activeTab === "identity" ? identityBody : null}
+            {activeTab === "general" ? generalBody : null}
+            {activeTab === "branding" ? brandingBody : null}
+            {activeTab === "domains" ? domainsBody : null}
+            {activeTab === "video" ? videoBody : null}
             {activeTab === "defaults" ? defaultsBody : null}
             {activeTab === "platform" ? platformBody : null}
             {activeTab === "notifications" ? <NotificationPrefsBody /> : null}

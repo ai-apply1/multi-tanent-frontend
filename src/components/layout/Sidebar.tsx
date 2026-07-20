@@ -49,7 +49,6 @@ export const navSections: NavSection[] = [
     label: "Workspace",
     items: [
       { label: "Pipeline", to: ROUTES.PIPELINE, icon: GitBranch },
-      { label: "Organization", to: ROUTES.ORG_SETTINGS, icon: Settings },
       {
         label: "Team",
         to: ROUTES.TEAM,
@@ -57,6 +56,15 @@ export const navSections: NavSection[] = [
         requiresRole: "org_admin",
       },
     ],
+  },
+  // Settings sits in its OWN group rather than under "Workspace". Workspace is
+  // the day-to-day surface (the pipeline you run, the people you run it with);
+  // settings is configuration you touch rarely and deliberately. Grouping them
+  // together made a destination that now spans branding, domains, the apply
+  // video and email look like just another workspace tool, and "Organization"
+  // said nothing about what was inside it.
+  {
+    items: [{ label: "Settings", to: ROUTES.SETTINGS, icon: Settings }],
   },
 ];
 

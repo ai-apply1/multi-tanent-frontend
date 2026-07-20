@@ -28,11 +28,11 @@ import { cn } from "@/lib/utils"
  */
 const SIZES = {
   /** Dense chrome. */
-  sm: { box: "h-6 max-w-32", fallback: "h-7 w-7 text-[12px]" },
+  sm: { box: "h-5 max-w-28", fallback: "h-6 w-6 text-[11px]" },
   /** Default: sidebar and nav bars. Mirrored by the apply portal. */
-  md: { box: "h-8 max-w-44", fallback: "h-8 w-8 text-[14px]" },
+  md: { box: "h-6.5 max-w-36", fallback: "h-7 w-7 text-[13px]" },
   /** Hero: the login screen. */
-  lg: { box: "h-10 max-w-56", fallback: "h-10 w-10 text-[15px]" },
+  lg: { box: "h-8 max-w-44", fallback: "h-9 w-9 text-[14px]" },
 } as const
 
 export type OrgLogoSize = keyof typeof SIZES

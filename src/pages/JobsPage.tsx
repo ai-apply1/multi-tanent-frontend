@@ -91,10 +91,16 @@ export function JobsPage() {
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
       queryClient.setQueryData(["job", job._id], job);
     },
-    // The state machine is mirrored client-side, so a 409 here means our map
-    // has drifted from the backend's — show what it actually said.
-    onError: (err) =>
-      toast.error(errorMessage(err, "Could not change the job status.")),
+    // The state machine is mirrored client-side, so a 409 here means either our
+    // map has drifted from the backend's, or (far more often) this list is
+    // stale and the job already moved on elsewhere — another tab, another user,
+    // a script. Show what the server actually said, then refetch so the row's
+    // menu rebuilds from the real status instead of offering the same
+    // impossible transition again.
+    onError: (err) => {
+      toast.error(errorMessage(err, "Could not change the job status."));
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    },
   });
 
   const deleteMutation = useMutation({
