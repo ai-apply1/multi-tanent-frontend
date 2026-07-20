@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useForm } from "react-hook-form"
 import { yupResolver } from "@hookform/resolvers/yup"
-import { Navigate, useLocation, useNavigate } from "react-router-dom"
+import { Link, Navigate, useLocation, useNavigate } from "react-router-dom"
 import * as yup from "yup"
 import toast from "react-hot-toast"
 import { AlertCircle, Eye, EyeOff, Loader2, Mail, Lock, Sparkles } from "lucide-react"
@@ -114,9 +114,12 @@ export function LoginPage() {
               <label htmlFor="password" className="text-[13px] font-medium text-[var(--ink)]">
                 Password
               </label>
-              <a href="#" className="text-[12.5px] font-semibold text-primary hover:underline">
+              <Link
+                to={ROUTES.FORGOT_PASSWORD}
+                className="text-[12.5px] font-semibold text-primary hover:underline"
+              >
                 Forgot password?
-              </a>
+              </Link>
             </div>
             <div className="relative mb-2">
               <Lock

@@ -1,5 +1,7 @@
 export const ROUTES = {
   LOGIN: "/login",
+  /** Email → emailed 6-char code + new password. Public, like LOGIN. */
+  FORGOT_PASSWORD: "/forgot-password",
   OVERVIEW: "/dashboard/overview",
   JOBS: "/dashboard/jobs",
   JOB_NEW: "/dashboard/jobs/new",

@@ -104,6 +104,11 @@ export const api = axios.create({
  *   - refresh  → 401 here means the refresh token itself is invalid; recursing
  *                would loop forever.
  *   - logout   → 401 here means we were already logged out. No retry needed.
+ *   - forgot-password / reset-password
+ *              → anonymous endpoints reached from the login screen. There is
+ *                no session behind them by definition, so a non-2xx (a 400 for
+ *                a bad reset code, most often) has nothing to refresh — the
+ *                round-trip would only delay the error the form wants to show.
  *
  * Crucially, `/admin/auth/me` is NOT in this list. A 401 from /me is
  * exactly the case we want to recover from: the access cookie has expired
@@ -114,7 +119,9 @@ export const api = axios.create({
 const AUTH_ENDPOINTS_NO_REFRESH = [
   "/admin/auth/login",
   "/admin/auth/refresh",
-  "/admin/auth/logout"
+  "/admin/auth/logout",
+  "/admin/auth/forgot-password",
+  "/admin/auth/reset-password"
 ]
 
 function shouldSkipRefresh(url: string | undefined): boolean {

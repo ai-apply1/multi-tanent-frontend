@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { GuestRoute, ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { LoginPage } from "@/pages/LoginPage";
+import { ForgotPasswordPage } from "@/pages/ForgotPasswordPage";
 import { OverviewPage } from "@/pages/OverviewPage";
 import { JobsPage } from "@/pages/JobsPage";
 import { JobFormPage } from "@/pages/JobFormPage";
@@ -23,6 +24,17 @@ export default function App() {
         element={
           <GuestRoute>
             <LoginPage />
+          </GuestRoute>
+        }
+      />
+
+      {/* GuestRoute like /login: someone with a live session has no business
+          here, and the reset itself revokes every session anyway. */}
+      <Route
+        path={ROUTES.FORGOT_PASSWORD}
+        element={
+          <GuestRoute>
+            <ForgotPasswordPage />
           </GuestRoute>
         }
       />

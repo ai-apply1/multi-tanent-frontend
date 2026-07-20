@@ -34,3 +34,41 @@ export async function meRequest() {
 export async function logoutRequest() {
   await api.post("/admin/auth/logout")
 }
+
+/**
+ * Request a one-time password-reset code by email.
+ *
+ * This ALWAYS resolves on a 2xx, for every email — known, unknown, or belonging
+ * to another org. That is deliberate on the backend (`forgotPassword` returns
+ * early and still 200s), so the endpoint can't be used to enumerate who has an
+ * account. Do NOT "improve" this into reporting whether the email was found:
+ * the server does not tell us, and it must not.
+ *
+ * Org selection is the page's own hostname, exactly as in `loginRequest` above —
+ * so on localhost this silently issues nothing unless the API has
+ * `DEV_LOGIN_ORG_SLUG` set. There is no org field in this body.
+ *
+ * The emailed code is 6 characters, single-use, valid 30 minutes. Calling this
+ * again invalidates any previous unconsumed code.
+ */
+export async function forgotPasswordRequest(email: string) {
+  await api.post("/admin/auth/forgot-password", { email })
+}
+
+/**
+ * Redeem the emailed code and set a new password.
+ *
+ * Every failure mode — wrong code, expired code, already-consumed code, unknown
+ * email, unresolved org — comes back as one opaque 400 ("Invalid or expired
+ * reset code."). The UI cannot and should not distinguish them.
+ *
+ * On success the backend revokes EVERY session for this user, so the caller is
+ * signed out everywhere and must log in again with the new password.
+ */
+export async function resetPasswordRequest(
+  email: string,
+  code: string,
+  newPassword: string
+) {
+  await api.post("/admin/auth/reset-password", { email, code, newPassword })
+}
