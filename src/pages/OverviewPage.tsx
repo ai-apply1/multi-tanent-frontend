@@ -862,7 +862,11 @@ function StatCard({
       {...dragHandleListeners}
       className={cn(
         "group relative cursor-grab select-none rounded-2xl border border-line bg-surface p-4 transition-shadow active:cursor-grabbing",
-        selected && "ring-2 ring-primary ring-offset-2 ring-offset-background",
+        // Draw the selected highlight as an INSET ring. An offset ring (a halo
+        // outside the card) gets sliced by the grid's `overflow-hidden`, which
+        // clipped its top/bottom edges and left only curved side arcs — the
+        // "weird borders". An inset ring stays within the card and never clips.
+        selected && "ring-2 ring-inset ring-primary",
         isDragging && "z-10 opacity-70 shadow-lg",
       )}
     >

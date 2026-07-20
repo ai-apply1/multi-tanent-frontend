@@ -1,13 +1,7 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  ArrowLeft,
-  ArrowRight,
-  Briefcase,
-  Check,
-  Loader2,
-} from "lucide-react";
+import { ArrowLeft, ArrowRight, Briefcase, Check, Loader2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +13,12 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ChipInput } from "@/features/jobs/components/ChipInput";
+import {
+  ANY_CITY_VALUE,
+  OTHER_CITY_VALUE,
+  PAKISTAN_CITIES,
+  PAKISTAN_CITY_SET,
+} from "@/features/jobs/cities";
 import { createJob, getJob, updateJob } from "@/features/jobs/jobsApi";
 import {
   EMPLOYMENT_TYPE_LABELS,
@@ -128,12 +128,12 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-
   // ── wizard cursor
   const [step, setStep] = useState(0);
-  // Only steps the user has committed to leaving become "reachable" via the
-  // stepper. Currently we let them jump anywhere at or below the furthest
-  // step they've advanced to.
+  // How far the user has advanced. In CREATE mode the stepper only lets them
+  // jump to a step they've already reached (and only forward past a step whose
+  // fields still validate) — mirroring the Continue gate. In EDIT mode every
+  // step is directly reachable, since the job already has saved values.
   const [maxStep, setMaxStep] = useState(0);
 
   // ── Basics
@@ -288,6 +288,27 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
     setMaxStep((prev) => Math.max(prev, next));
   };
 
+  // Which steps the stepper allows jumping to right now.
+  //  • Edit mode: any step — everything already has a saved value.
+  //  • Create mode: the current step or any earlier (already-visited) one, plus
+  //    a later step only if it's been reached AND every step in between still
+  //    validates, so you can't slip past one you've left unfinished.
+  const canVisitStep = (target: number) => {
+    if (isEdit) return true;
+    if (target <= step) return true;
+    if (target > maxStep) return false;
+    for (let i = step; i < target; i += 1) {
+      if (!stepValid[i]) return false;
+    }
+    return true;
+  };
+
+  // Stepper-header click handler. The button is disabled when a step isn't
+  // visitable, so this stays a no-op guard rather than the source of truth.
+  const goToStepFromHeader = (target: number) => {
+    if (canVisitStep(target)) goToStep(target);
+  };
+
   const isFinalStep = step === STEPS.length - 1;
 
   const onContinue = () => {
@@ -303,15 +324,14 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
     mutation.mutate();
   };
 
-  // Any submit attempt from a non-final step falls back to "advance"; only the
-  // final step's explicit type="submit" button can reach the mutation.
+  // Enter / implicit form submission must NEVER create the job: the mutation
+  // fires only from the final step's button click (onClick={onContinue}). A
+  // stray Enter on an earlier step still advances the wizard so the flow
+  // isn't broken; on the final step it does nothing, so the job is created
+  // solely by an explicit click of "Create job".
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (!isFinalStep) {
-      if (stepValid[step]) goToStep(step + 1);
-      return;
-    }
-    onContinue();
+    if (!isFinalStep && stepValid[step]) goToStep(step + 1);
   };
 
   const onBack = () => {
@@ -357,7 +377,10 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
           {STEPS.map(([t, sub], i) => {
             const done = i < step;
             const cur = i === step;
-            const reachable = i <= maxStep;
+            // Edit mode unlocks every step; create mode only the reached ones.
+            const reachable = isEdit || i <= maxStep;
+            // Unlocked, but can we actually land there from here right now?
+            const visitable = reachable && canVisitStep(i);
             const CircleTag = reachable ? "button" : "div";
             return (
               <div
@@ -368,11 +391,16 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
                   {...(reachable
                     ? {
                         type: "button" as const,
-                        onClick: () => setStep(i),
+                        onClick: () => goToStepFromHeader(i),
+                        disabled: !visitable,
                       }
                     : {})}
                   className={`flex items-center gap-2.5 border-0 bg-transparent p-0 text-left ${
-                    reachable ? "cursor-pointer" : "cursor-default"
+                    reachable
+                      ? visitable
+                        ? "cursor-pointer"
+                        : "cursor-not-allowed"
+                      : "cursor-default"
                   }`}
                 >
                   <span
@@ -490,9 +518,10 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
             </Button>
           ) : (
             <Button
-              type="submit"
+              type="button"
               size="sm"
               disabled={hasErrors || busy}
+              onClick={onContinue}
             >
               {busy ? (
                 <>
@@ -789,12 +818,12 @@ function ScoringStep({
         <input
           id="job-weights"
           type="range"
-          min={30}
-          max={70}
-          step={5}
+          min={1}
+          max={100}
+          step={1}
           value={technicalWeight}
           onChange={(e) => setTechnicalWeight(Number(e.target.value))}
-          className="w-full"
+          className="w-full cursor-pointer"
           style={{ accentColor: "var(--primary)" }}
         />
         <div className="flex items-center justify-between text-[12.5px] font-semibold text-ink-2">
@@ -874,6 +903,44 @@ function EligibilityStep({
   requiredSkills: string[];
   setRequiredSkills: (v: string[]) => void;
 }) {
+  // City is picked from a fixed list (shared with /apply so a job's required
+  // city and an applicant's stored city are drawn from one vocabulary), with
+  // an "Other" escape hatch that reveals a free-text box, and an "Any city"
+  // choice for jobs with no city gate. The form value stays a plain `city`
+  // string either way. `isOther` is seeded from the incoming value so an edit
+  // that carries a custom city (one not on the list) re-opens the text input;
+  // this step remounts on every visit, so the seed re-runs each time.
+  const [isOther, setIsOther] = useState<boolean>(() => {
+    const v = city.trim();
+    return v.length > 0 && !PAKISTAN_CITY_SET.has(v);
+  });
+  const otherCityRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (isOther) otherCityRef.current?.focus();
+  }, [isOther]);
+
+  // Radix Select forbids empty values, so "Any city" carries its own
+  // sentinel; a listed city selects itself; a custom one shows as "Other".
+  const citySelectValue = isOther
+    ? OTHER_CITY_VALUE
+    : PAKISTAN_CITY_SET.has(city)
+      ? city
+      : ANY_CITY_VALUE;
+
+  const handleCityChange = (selected: string) => {
+    if (selected === OTHER_CITY_VALUE) {
+      // Switch to free text and clear the value so the user types a city.
+      setIsOther(true);
+      setCity("");
+      return;
+    }
+    setIsOther(false);
+    setCity(selected === ANY_CITY_VALUE ? "" : selected);
+  };
+
+  const cityTriggerCls =
+    "h-11 rounded-lg border-[var(--field-border)] bg-surface px-3.5 text-[14px]";
+
   return (
     <div>
       <StepHead
@@ -886,16 +953,38 @@ function EligibilityStep({
             <label htmlFor="job-city" className={LABEL_CLASS}>
               City
             </label>
-            <input
-              id="job-city"
-              value={city}
-              maxLength={120}
-              onChange={(e) => setCity(e.target.value)}
-              placeholder="Any city"
-              className={FIELD_CLASS}
-            />
+            <Select value={citySelectValue} onValueChange={handleCityChange}>
+              <SelectTrigger id="job-city" className={cityTriggerCls}>
+                <SelectValue placeholder="Any city" />
+              </SelectTrigger>
+              <SelectContent className="max-h-72">
+                <SelectItem value={ANY_CITY_VALUE}>
+                  Any city (no requirement)
+                </SelectItem>
+                {PAKISTAN_CITIES.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
+                <SelectItem value={OTHER_CITY_VALUE}>
+                  Other (not listed)
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            {isOther ? (
+              <input
+                ref={otherCityRef}
+                type="text"
+                value={city}
+                maxLength={120}
+                onChange={(e) => setCity(e.target.value)}
+                placeholder="Enter the required city"
+                aria-label="Enter the required city"
+                className={`${FIELD_CLASS} mt-2`}
+              />
+            ) : null}
             <p className={HELP_CLASS}>
-              A hard gate — leave empty for no city requirement.
+              A hard gate — pick “Any city” for no city requirement.
             </p>
           </div>
           <div>
