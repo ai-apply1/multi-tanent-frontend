@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Markdown } from "@/components/Markdown";
 import {
   DropdownMenu,
@@ -155,14 +156,7 @@ export function JobDetailPage() {
   };
 
   if (isLoading) {
-    return (
-      <div className="mx-auto max-w-[1240px] px-6 py-6 lg:px-8 lg:py-8">
-        <div className="flex items-center justify-center gap-2 py-24 text-[13.5px] text-ink-muted">
-          <Loader2 className="h-5 w-5 animate-spin text-primary" />
-          Loading job…
-        </div>
-      </div>
-    );
+    return <JobDetailSkeleton />;
   }
 
   if (isError || !job) {
@@ -820,6 +814,96 @@ function SectionCard({ children }: { children: ReactNode }) {
   return (
     <div className="rounded-2xl border border-line bg-surface p-5 sm:p-6">
       {children}
+    </div>
+  );
+}
+
+/**
+ * Loading placeholder for the whole job detail view. Mirrors the real page —
+ * breadcrumb, header (title + status pill + classification chips + actions),
+ * the four-tile KPI strip, the underline tab row, and the Overview tab's
+ * two-column card grid — so the page holds its shape while the job loads.
+ */
+function JobDetailSkeleton() {
+  return (
+    <div className="mx-auto max-w-[1240px] px-6 py-6 lg:px-8 lg:py-8">
+      {/* Breadcrumb */}
+      <div className="mb-3 flex items-center gap-2">
+        <Skeleton className="h-3.5 w-10" />
+        <span className="text-ink-subtle">/</span>
+        <Skeleton className="h-3.5 w-32" />
+      </div>
+
+      {/* Header */}
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-3">
+            <Skeleton className="h-7 w-56 max-w-full" />
+            <Skeleton className="h-6 w-16 rounded-full" />
+          </div>
+          <div className="mt-2.5 flex flex-wrap gap-1.5">
+            <Skeleton className="h-6 w-20 rounded-full" />
+            <Skeleton className="h-6 w-16 rounded-full" />
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Skeleton className="h-8 w-36 rounded-lg" />
+          <Skeleton className="h-8 w-20 rounded-lg" />
+          <Skeleton className="h-8 w-28 rounded-lg" />
+        </div>
+      </div>
+
+      {/* KPI strip */}
+      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div
+            key={i}
+            className="rounded-2xl border border-line bg-surface p-4 sm:p-5"
+          >
+            <div className="flex items-center gap-2">
+              <Skeleton className="h-6 w-6 rounded" />
+              <Skeleton className="h-3.5 w-20" />
+            </div>
+            <Skeleton className="mono mt-2 h-7 w-12" />
+          </div>
+        ))}
+      </div>
+
+      {/* Tabs */}
+      <div className="mb-5 flex gap-6 border-b border-line pb-3">
+        <Skeleton className="h-4 w-20" />
+        <Skeleton className="h-4 w-20" />
+        <Skeleton className="h-4 w-24" />
+      </div>
+
+      {/* Overview tab — two-column card grid */}
+      <div className="grid gap-4 lg:grid-cols-[1.55fr_1fr] lg:items-start">
+        <div className="rounded-2xl border border-line bg-surface p-5 sm:p-6">
+          <Skeleton className="h-4 w-40" />
+          <div className="mt-3 space-y-2">
+            <Skeleton className="h-3.5 w-full" />
+            <Skeleton className="h-3.5 w-11/12" />
+            <Skeleton className="h-3.5 w-4/5" />
+          </div>
+          <Skeleton className="mt-6 h-3 w-28" />
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-6 w-16 rounded-full" />
+            ))}
+          </div>
+        </div>
+        <div className="rounded-2xl border border-line bg-surface p-5 sm:p-6">
+          <Skeleton className="h-4 w-32" />
+          <div className="mt-4 space-y-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="flex items-center justify-between gap-3">
+                <Skeleton className="h-3.5 w-24" />
+                <Skeleton className="h-3.5 w-16" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

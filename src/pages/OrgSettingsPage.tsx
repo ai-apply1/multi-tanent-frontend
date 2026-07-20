@@ -18,6 +18,7 @@ import toast from "react-hot-toast";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useOrganization } from "@/features/organization/useOrganization";
 import { EmailDomainCard } from "@/features/organization/components/EmailDomainCard";
 import {
@@ -755,12 +756,7 @@ export function OrgSettingsPage() {
     return (
       <div className="mx-auto max-w-[1240px] px-6 py-6 lg:px-8 lg:py-8">
         {header}
-        <div className="rounded-2xl border border-line bg-surface">
-          <div className="flex items-center justify-center gap-2 px-6 py-14 text-[13.5px] text-ink-muted">
-            <Loader2 className="h-4 w-4 animate-spin text-primary" />
-            Loading organization…
-          </div>
-        </div>
+        <SettingsSkeleton />
       </div>
     );
   }
@@ -1154,6 +1150,80 @@ export function OrgSettingsPage() {
 }
 
 /**
+ * Loading placeholder for the whole Settings body. Mirrors the segmented tab
+ * bar and the content card (defaulting to the General tab's field layout: a
+ * full-width name field, a two-column numeric grid and a narrower time-zone
+ * field), so the page keeps its shape while the organization loads. Tab-pill
+ * widths track the real labels so the bar reads as the real one.
+ */
+function SettingsSkeleton() {
+  return (
+    <div>
+      {/* Tab bar — same pill container as the live one; `w-fit` so it hugs
+          the pills exactly like the real tablist. */}
+      <div className="mb-4 flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-line bg-surface-3 p-1">
+        {TABS.map((t) => (
+          <Skeleton
+            key={t.id}
+            className="h-9 rounded-full"
+            style={{ width: `${t.label.length * 8 + 32}px` }}
+          />
+        ))}
+      </div>
+
+      {/* Content card — General tab field layout. */}
+      <div className="rounded-2xl border border-line bg-surface">
+        <div className="grid gap-5 p-5 sm:p-6">
+          <div>
+            <Skeleton className="mb-1.5 h-3.5 w-16" />
+            <Skeleton className="h-11 w-full rounded-lg" />
+          </div>
+          <div className="grid gap-5 sm:grid-cols-2">
+            {Array.from({ length: 2 }).map((_, i) => (
+              <div key={i}>
+                <Skeleton className="mb-1.5 h-3.5 w-28" />
+                <Skeleton className="h-11 w-full rounded-lg" />
+              </div>
+            ))}
+          </div>
+          <div className="max-w-[320px]">
+            <Skeleton className="mb-1.5 h-3.5 w-20" />
+            <Skeleton className="h-11 w-full rounded-lg" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Loading placeholder for the notifications tab — two toggle-row cards (title,
+ * helper line, a checkbox) and the trailing Save button, matching the real
+ * `NotificationPrefsBody` layout below.
+ */
+function NotificationPrefsSkeleton() {
+  return (
+    <div className="grid gap-3">
+      {Array.from({ length: 2 }).map((_, i) => (
+        <div
+          key={i}
+          className="flex items-start gap-3 rounded-xl border border-line p-4"
+        >
+          <div className="min-w-0 flex-1">
+            <Skeleton className="h-3.5 w-40 max-w-full" />
+            <Skeleton className="mt-2 h-3 w-64 max-w-full" />
+          </div>
+          <Skeleton className="mt-0.5 h-4 w-4 rounded" />
+        </div>
+      ))}
+      <div className="mt-1 flex justify-end">
+        <Skeleton className="h-8 w-36 rounded-lg" />
+      </div>
+    </div>
+  );
+}
+
+/**
  * Self-scoped preferences (`/admin/users/me/...`), so this sits inside the
  * Settings page rather than on the org_admin-only Team page — otherwise `hr`
  * could never reach their own notification settings.
@@ -1192,12 +1262,7 @@ function NotificationPrefsBody() {
   );
 
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center gap-2 py-8 text-[13.5px] text-ink-muted">
-        <Loader2 className="h-4 w-4 animate-spin text-primary" />
-        Loading preferences…
-      </div>
-    );
+    return <NotificationPrefsSkeleton />;
   }
 
   if (isError || !prefs) {

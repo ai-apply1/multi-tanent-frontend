@@ -12,6 +12,7 @@ import {
   Users2,
   type LucideIcon,
 } from "lucide-react"
+import { Skeleton } from "@/components/ui/skeleton"
 import { listCandidates } from "@/features/candidates/candidatesApi"
 import { listJobs } from "@/features/jobs/jobsApi"
 import { useAuth } from "@/features/auth/AuthContext"
@@ -240,7 +241,19 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         {/* Result body */}
         <div className="scroll max-h-[340px] overflow-auto p-2">
           {loading ? (
-            <div className="px-3 py-6 text-center text-[13px] text-ink-muted">Searching…</div>
+            <div className="p-1">
+              {/* Mirror the result rows — icon tile + a line of text — so the
+                  palette body doesn't jump when matches resolve. */}
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-3 rounded-[9px] px-2.5 py-2"
+                >
+                  <Skeleton className="h-7 w-7 flex-shrink-0 rounded-[8px]" />
+                  <Skeleton className="h-3.5 w-48 max-w-full" />
+                </div>
+              ))}
+            </div>
           ) : empty ? (
             <div className="px-3 py-8 text-center">
               <div className="text-[13.5px] font-semibold text-ink">No results</div>
