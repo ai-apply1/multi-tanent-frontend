@@ -53,33 +53,26 @@ export function StatusDialog({
   const pinned = !!status?.isProtected;
   const queryClient = useQueryClient();
 
-  const [label, setLabel] = useState("");
-  const [key, setKey] = useState("");
-  const [color, setColor] = useState<string>(STATUS_COLORS[0]!.hex);
-  const [stageOrder, setStageOrder] = useState("");
-  const [isTerminal, setIsTerminal] = useState(false);
-  /** Stop auto-deriving the key once the user has typed one themselves. */
-  const [keyTouched, setKeyTouched] = useState(false);
-
   /**
-   * Seed the form on OPEN via the controlled handler rather than a
-   * `useEffect` on `open` — same reason as everywhere else in this feature:
-   * it avoids the setState-in-effect cascade, and resetting on CLOSE would
-   * race the exit animation and flash the defaults before unmount.
+   * The form is seeded from `status` in the state INITIALISERS, not in a
+   * `useEffect` and not in the open handler. That only works because the
+   * caller mounts this component when it opens the dialog and unmounts it
+   * on close (`{dialogOpen && <StatusDialog … />}` with a `key` per row) —
+   * so every open is a fresh mount and these run again. Seeding in
+   * `onOpenChange` would silently never fire: Radix only calls it when the
+   * DIALOG asks to change, never when the parent flips `open` itself.
    */
-  const handleOpenChange = (next: boolean) => {
-    if (next) {
-      setLabel(status?.label ?? "");
-      setKey(status?.key ?? "");
-      setColor(status?.color ?? STATUS_COLORS[0]!.hex);
-      setStageOrder(
-        status ? String(status.stageOrder) : String(nextStageOrder(existing)),
-      );
-      setIsTerminal(status?.isTerminal ?? false);
-      setKeyTouched(isEdit);
-    }
-    onOpenChange(next);
-  };
+  const [label, setLabel] = useState(status?.label ?? "");
+  const [key, setKey] = useState(status?.key ?? "");
+  const [color, setColor] = useState<string>(
+    status?.color ?? STATUS_COLORS[0]!.hex,
+  );
+  const [stageOrder, setStageOrder] = useState(
+    status ? String(status.stageOrder) : String(nextStageOrder(existing)),
+  );
+  const [isTerminal, setIsTerminal] = useState(status?.isTerminal ?? false);
+  /** Stop auto-deriving the key once the user has typed one themselves. */
+  const [keyTouched, setKeyTouched] = useState(isEdit);
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -107,7 +100,7 @@ export function StatusDialog({
       // and change-status menu would otherwise show a stale column list.
       queryClient.invalidateQueries({ queryKey: ["candidateStatuses"] });
       toast.success(isEdit ? "Status updated." : "Status created.");
-      handleOpenChange(false);
+      onOpenChange(false);
     },
     onError: (err) => {
       toast.error(
@@ -166,7 +159,7 @@ export function StatusDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-[540px] gap-0 p-0" hideCloseButton>
         <form onSubmit={handleSubmit}>
           <div className="px-6 pb-[14px] pt-[22px]">
@@ -340,7 +333,7 @@ export function StatusDialog({
               type="button"
               variant="secondary"
               size="sm"
-              onClick={() => handleOpenChange(false)}
+              onClick={() => onOpenChange(false)}
               disabled={mutation.isPending}
             >
               Cancel

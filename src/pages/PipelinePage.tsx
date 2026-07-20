@@ -315,12 +315,18 @@ export function PipelinePage() {
         </div>
       )}
 
-      <StatusDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        status={editTarget}
-        existing={ordered}
-      />
+      {/* Mounted only while open, and keyed by the row — the dialog seeds its
+          fields in its state initialisers, so it has to be a fresh mount each
+          time or "Edit" would show whatever the previous open left behind. */}
+      {dialogOpen ? (
+        <StatusDialog
+          key={editTarget?._id ?? "new"}
+          open
+          onOpenChange={setDialogOpen}
+          status={editTarget}
+          existing={ordered}
+        />
+      ) : null}
 
       <ConfirmDialog
         open={Boolean(deleteTarget)}
