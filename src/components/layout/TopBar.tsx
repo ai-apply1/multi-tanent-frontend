@@ -10,7 +10,7 @@ import {
   Moon,
   Search,
   Sun,
-  User,
+  // User,
   Users,
   UserPlus,
 } from "lucide-react"
