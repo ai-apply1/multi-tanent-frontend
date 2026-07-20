@@ -17,6 +17,18 @@ export function useOrganization() {
     queryKey: ["organization"],
     queryFn: getOrganization,
     enabled: Boolean(user),
-    staleTime: 5 * 60_000
+    staleTime: 5 * 60_000,
+    /**
+     * Poll ONLY while a logo derivation is in flight.
+     *
+     * The worker finishes in a second or two, but it is a different process
+     * with no channel back to this tab, so without this the new variant only
+     * appears on a manual refresh — and the admin is looking straight at the
+     * spinner it would have replaced. A predicate rather than a fixed interval
+     * keeps the shell's own poll rate at zero the rest of the time; this query
+     * backs the sidebar on every screen, not just settings.
+     */
+    refetchInterval: (query) =>
+      query.state.data?.logoVariant?.status === "processing" ? 2_000 : false
   })
 }

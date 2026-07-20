@@ -57,6 +57,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Skeleton } from "@/components/ui/skeleton";
 import { VideoPlayer } from "@/components/ui/video-player";
 import {
   Tooltip,
@@ -83,6 +84,9 @@ import {
 } from "@/features/candidates/candidatesApi";
 import {
   INVITABLE_STATUS_KEY,
+  POST_INTERVIEW_REJECT_STATUS_KEY,
+  REJECTED_STATUS_KEYS,
+  type BuiltinCandidateStatusKey,
   type CandidateDetail,
   type CandidateProfile,
   type CandidateStatus,
@@ -267,6 +271,63 @@ function ScoreRing({ score, color }: { score: number; color: string }) {
   );
 }
 
+/**
+ * Loading placeholder for the interview drawer body. Mirrors the stacked
+ * layout the loaded view uses — the AI score card (badges, score ring,
+ * narrative), a contact card, and a few Q&A section blocks — so the drawer
+ * keeps its shape while the interview detail resolves instead of flashing a
+ * centered spinner.
+ */
+function InterviewDetailSkeleton() {
+  return (
+    <div className="space-y-4">
+      {/* AI score card */}
+      <div className="rounded-2xl border border-line bg-surface p-5">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <Skeleton className="h-6 w-28 rounded-full" />
+          <Skeleton className="h-6 w-24 rounded-full" />
+        </div>
+        <div className="flex items-start gap-4">
+          <Skeleton className="h-[72px] w-[72px] shrink-0 rounded-full" />
+          <div className="min-w-0 flex-1">
+            <Skeleton className="mb-2 h-3.5 w-24" />
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="mt-1.5 h-3 w-11/12" />
+            <Skeleton className="mt-1.5 h-3 w-4/5" />
+          </div>
+        </div>
+        <Skeleton className="mt-4 h-3 w-64 max-w-full" />
+      </div>
+
+      {/* Contact card */}
+      <div className="grid grid-cols-1 gap-x-6 gap-y-3 rounded-2xl border border-line bg-surface p-[18px] sm:grid-cols-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i}>
+            <Skeleton className="h-2.5 w-14" />
+            <Skeleton className="mt-2 h-3.5 w-28 max-w-full" />
+          </div>
+        ))}
+      </div>
+
+      {/* Q&A section blocks */}
+      {Array.from({ length: 3 }).map((_, i) => (
+        <div
+          key={i}
+          className="rounded-2xl border border-line bg-surface p-[18px]"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <Skeleton className="h-3.5 w-2/3" />
+            <Skeleton className="h-5 w-10 rounded-full" />
+          </div>
+          <Skeleton className="mt-3 h-3 w-full" />
+          <Skeleton className="mt-1.5 h-3 w-11/12" />
+          <Skeleton className="mt-1.5 h-3 w-3/4" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function AiScoreCard({
   overall,
   narrative,
@@ -340,7 +401,7 @@ const PIPELINE_STEPS: Array<{
 function pipelineIndexFor(statusKey: string | undefined): number {
   switch (statusKey) {
     case "applied":
-    case "prescreened":
+    case "needs_review":
     case "invited":
       return 0;
     case "interviewing":
@@ -351,7 +412,11 @@ function pipelineIndexFor(statusKey: string | undefined): number {
       return 3;
     case "hired":
       return 4;
+    // An INITIAL rejection never reached an interview, so it belongs at
+    // the first step; a FINAL rejection happened at the review step.
     case "rejected":
+      return 0;
+    case "final_rejected":
       return 2;
     default:
       return 0;
@@ -375,7 +440,10 @@ function PipelineCard({
   const isProcessing = statusKey === "scored";
   const isShortlisted = statusKey === "shortlisted";
   const isHired = statusKey === "hired";
-  const isRejected = statusKey === "rejected";
+  // Either rejection column — "Reconsider candidate" is offered from both.
+  const isRejected = REJECTED_STATUS_KEYS.includes(
+    statusKey as BuiltinCandidateStatusKey,
+  );
 
   return (
     <div className="rounded-2xl border border-line bg-surface p-[18px]">
@@ -469,7 +537,7 @@ function PipelineCard({
               variant="secondary"
               size="sm"
               disabled={pending}
-              onClick={() => onStatusChange("rejected")}
+              onClick={() => onStatusChange(POST_INTERVIEW_REJECT_STATUS_KEY)}
             >
               <X className="h-3.5 w-3.5" strokeWidth={1.9} />
               Reject
@@ -514,7 +582,7 @@ function PipelineCard({
             variant="ghost"
             size="sm"
             disabled={pending}
-            onClick={() => onStatusChange("rejected")}
+            onClick={() => onStatusChange(POST_INTERVIEW_REJECT_STATUS_KEY)}
           >
             Decline candidate
           </Button>
@@ -1082,7 +1150,9 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                     variant="danger"
                     size="sm"
                     disabled={statusPending || !candidateId}
-                    onClick={() => handleStatusChange("rejected")}
+                    onClick={() =>
+                      handleStatusChange(POST_INTERVIEW_REJECT_STATUS_KEY)
+                    }
                   >
                     <X className="h-3.5 w-3.5" strokeWidth={1.9} />
                     Reject
@@ -1115,7 +1185,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">
                   {/* Resend invite — candidate-level, only offered while the
-                      status is still `prescreened` (the API 409s otherwise).
+                      status is still `needs_review` (the API 409s otherwise).
                       Disabled with a note in every other state so the reason
                       is visible without another click. */}
                   <DropdownMenuItem
@@ -1266,10 +1336,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
               // pointer to a `publicSessionId`) is still in flight. Both are
               // "loading", NOT "no interview" — showing the empty state here
               // would flash it for a candidate who does have one.
-              <div className="flex h-72 items-center justify-center text-sm text-ink-muted">
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Loading interview…
-              </div>
+              <InterviewDetailSkeleton />
             ) : !activeSessionId ? (
               // No interview yet, but there IS a candidate — the drawer must not
               // be blank. Show who they are (identity + parsed-CV profile) and a

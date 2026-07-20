@@ -41,6 +41,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Skeleton } from "@/components/ui/skeleton";
 import { QuestionFormDialog } from "@/features/screening-questions/components/QuestionFormDialog";
 import { QuestionPreviewDialog } from "@/features/screening-questions/components/QuestionPreviewDialog";
 import { TagsInput } from "@/features/screening-questions/components/TagsInput";
@@ -260,10 +261,7 @@ export function QuestionBankPage() {
         {/* Rows */}
         <TooltipProvider delayDuration={300}>
           {isLoading ? (
-            <div className="flex flex-col items-center justify-center gap-2 px-6 py-16 text-[13.5px] text-ink-muted">
-              <Loader2 className="h-5 w-5 animate-spin text-primary" />
-              Loading questions…
-            </div>
+            <QuestionListSkeleton />
           ) : isError ? (
             <div className="flex flex-col items-center justify-center gap-2 px-6 py-16 text-center text-[13.5px] text-[var(--danger)]">
               Could not load questions.
@@ -546,6 +544,44 @@ export function QuestionBankPage() {
           deleteMutation.mutate(deleteTarget._id);
         }}
       />
+    </div>
+  );
+}
+
+/**
+ * Loading placeholder for the question list. Mirrors a real row's flex layout —
+ * a rounded icon tile, two lines of question text, a row of pills (category /
+ * difficulty / wordings / tags) and the trailing edit + kebab controls — so
+ * the list doesn't jump when the questions arrive. Pill widths are varied per
+ * row so the shimmer reads as content rather than a repeating pattern.
+ */
+function QuestionListSkeleton() {
+  const pillSets = ["w-16 w-14 w-20", "w-20 w-16 w-12", "w-14 w-20 w-16"];
+  return (
+    <div>
+      {Array.from({ length: 6 }).map((_, i) => {
+        const widths = pillSets[i % pillSets.length].split(" ");
+        return (
+          <div
+            key={i}
+            className="flex items-start gap-3.5 border-b border-line bg-surface px-[18px] py-[15px] last:border-b-0"
+          >
+            <Skeleton className="mt-0.5 h-[30px] w-[30px] flex-shrink-0 rounded-lg" />
+            <div className="min-w-0 flex-1">
+              <Skeleton className="h-3.5 w-3/4 max-w-full" />
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                {widths.map((w, j) => (
+                  <Skeleton key={j} className={`h-5 ${w} rounded-full`} />
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-shrink-0 items-center gap-1">
+              <Skeleton className="h-[30px] w-[30px] rounded-lg" />
+              <Skeleton className="h-[28px] w-[28px] rounded-lg" />
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

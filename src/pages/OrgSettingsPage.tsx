@@ -18,6 +18,7 @@ import toast from "react-hot-toast";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useOrganization } from "@/features/organization/useOrganization";
 import { EmailDomainCard } from "@/features/organization/components/EmailDomainCard";
 import {
@@ -29,10 +30,13 @@ import {
 } from "@/features/organization/organizationApi";
 import type {
   OrganizationSettings,
+  OrganizationTheme,
   OrgProfile,
   UpdateOrganizationPayload,
 } from "@/features/organization/types";
 import { ApplyVideoCard } from "@/features/organization/components/ApplyVideoCard";
+import { ThemeCard } from "@/features/organization/components/ThemeCard";
+import { LogoVariantNotice } from "@/features/organization/components/LogoVariantNotice";
 import { PortalDomainsCard } from "@/features/organization/components/PortalDomainsCard";
 import {
   getNotificationPrefs,
@@ -41,6 +45,7 @@ import {
 import type { NotificationPrefs } from "@/features/users/types";
 import { useAuth } from "@/features/auth/AuthContext";
 import { errorMessage as apiError } from "@/lib/errors";
+import { isHexColor, sameColor } from "@/lib/color";
 import { cn } from "@/lib/utils";
 import { PLATFORM_NAME } from "@/lib/platform";
 import { trimTransparentEdges } from "@/lib/imageTrim";
@@ -176,6 +181,22 @@ const SAVING_TABS = new Set<SettingsTab>(
 const inputBase =
   "h-11 w-full rounded-lg border border-[var(--field-border)] bg-surface px-3.5 text-[14px] text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)] disabled:cursor-not-allowed disabled:bg-ink-faint disabled:text-ink-muted";
 const labelBase = "mb-1.5 block text-[13px] font-semibold text-ink";
+
+/**
+ * The eight hex fields of the palette. `accent` and `mode` are excluded on
+ * purpose: they are enums, not colours, so neither parses as hex nor needs the
+ * case-insensitive comparison the stored-lowercase colours do.
+ */
+const THEME_COLOR_KEYS = [
+  "primary",
+  "secondary",
+  "background",
+  "surface",
+  "foreground",
+  "success",
+  "warning",
+  "danger",
+] as const satisfies ReadonlyArray<keyof OrganizationTheme>;
 
 interface ImageUploadRowProps {
   /** DOM id for the hidden file input; also its stable handle. */
@@ -512,6 +533,14 @@ export function OrgSettingsPage() {
   const [faviconUploading, setFaviconUploading] = useState(false);
   const [formVersion, setFormVersion] = useState(0);
 
+  /**
+   * The palette is held whole rather than as nine `useState`s, because every
+   * consumer wants it whole: the preview renders all nine at once, and the
+   * canvas presets set three in a single click. `null` until the profile lands,
+   * which is also the "no diff possible yet" signal for `buildPatch`.
+   */
+  const [theme, setTheme] = useState<OrganizationTheme | null>(null);
+
   // Seed once the profile lands, and re-seed after a save so the form's
   // baseline is whatever the server last confirmed.
   useEffect(() => {
@@ -520,6 +549,7 @@ export function OrgSettingsPage() {
     setMaxAttempts(String(org.settings.maxInterviewAttempts));
     setExpiryDays(String(org.settings.interviewExpiryDays));
     setTimezone(org.settings.timezone);
+    setTheme(org.theme);
     setTouched({});
     setLogoKey(null);
     setFaviconKey(null);
@@ -583,8 +613,22 @@ export function OrgSettingsPage() {
     ? "Pick a time zone from the list."
     : null;
 
+  /**
+   * Every colour on the palette parses.
+   *
+   * A half-typed `#12` is a normal keystroke, not a validation failure to shout
+   * about — `ThemeCard` shows it inline — but it must never reach the PATCH,
+   * which would 400 the whole save including the unrelated fields on it. So it
+   * gates Save rather than being surfaced up here as a red field.
+   */
+  const themeError =
+    theme &&
+    THEME_COLOR_KEYS.some((key) => !isHexColor(theme[key]))
+      ? "One of the brand colours is not a valid hex value."
+      : null;
+
   const hasErrors = Boolean(
-    nameError || attemptsError || expiryError || timezoneError,
+    nameError || attemptsError || expiryError || timezoneError || themeError,
   );
 
   // Only changed fields are sent. The PATCH is partial and settings are written
@@ -608,6 +652,36 @@ export function OrgSettingsPage() {
       settings.timezone = timezone.trim();
     }
     if (Object.keys(settings).length > 0) patch.settings = settings;
+
+    /*
+     * Palette diff. Two things to keep in mind here:
+     *
+     * 1. The server LOWERCASES every hex on write, while `<input type="color">`
+     *    and a hand-typed value can both be upper case. Comparing raw strings
+     *    would leave the form permanently dirty after saving `#FFFFFF`, with a
+     *    Save button that never goes quiet.
+     * 2. An unparseable colour is skipped rather than sent. `themeError`
+     *    already blocks Save, so this only matters for the `isDirty` readout,
+     *    but sending it would 400 the whole PATCH.
+     */
+    if (theme) {
+      const themePatch: Partial<OrganizationTheme> = {};
+      for (const key of THEME_COLOR_KEYS) {
+        const next = theme[key].trim();
+        if (!isHexColor(next)) continue;
+        if (!sameColor(next, profile.theme[key])) themePatch[key] = next;
+      }
+      // `mode` and `accent` are enums, not colours: no hex parsing, and a
+      // plain !== is the right comparison (both are lowercase literals).
+      if (theme.mode !== profile.theme.mode) {
+        themePatch.mode = theme.mode;
+      }
+      if (theme.accent !== profile.theme.accent) {
+        themePatch.accent = theme.accent;
+      }
+      if (Object.keys(themePatch).length > 0) patch.theme = themePatch;
+    }
+
     // The apply video is NOT part of this PATCH — it has its own routes and
     // manages its own state in `ApplyVideoCard`.
     return patch;
@@ -631,6 +705,7 @@ export function OrgSettingsPage() {
     setMaxAttempts(String(org.settings.maxInterviewAttempts));
     setExpiryDays(String(org.settings.interviewExpiryDays));
     setTimezone(org.settings.timezone);
+    setTheme(org.theme);
     setTouched({});
     setLogoKey(null);
     setFaviconKey(null);
@@ -718,12 +793,7 @@ export function OrgSettingsPage() {
     return (
       <div className="mx-auto max-w-[1240px] px-6 py-6 lg:px-8 lg:py-8">
         {header}
-        <div className="rounded-2xl border border-line bg-surface">
-          <div className="flex items-center justify-center gap-2 px-6 py-14 text-[13.5px] text-ink-muted">
-            <Loader2 className="h-4 w-4 animate-spin text-primary" />
-            Loading organization…
-          </div>
-        </div>
+        <SettingsSkeleton />
       </div>
     );
   }
@@ -802,6 +872,13 @@ export function OrgSettingsPage() {
         trimTransparentPadding
       />
 
+      {/*
+        There is no upload field for the dark-background variant: it is derived
+        from the logo above, and `LogoVariantNotice` shows both marks on their
+        own backdrop so the result is checkable here rather than on a deploy.
+      */}
+      <LogoVariantNotice org={org} canWrite={canWrite} />
+
       <ImageUploadRow
         key={`favicon-${formVersion}`}
         idBase="org-favicon"
@@ -829,6 +906,24 @@ export function OrgSettingsPage() {
         onUploadingChange={setFaviconUploading}
       />
 
+      {/*
+        Guarded on `theme` rather than falling back to the platform defaults:
+        rendering defaults before the profile lands would show every org a
+        purple palette for a frame, and any click in that window would diff
+        against the wrong baseline and save a colour nobody picked.
+      */}
+      {theme ? (
+        <ThemeCard
+          value={theme}
+          onChange={(next) =>
+            setTheme((current) => (current ? { ...current, ...next } : current))
+          }
+          canWrite={canWrite}
+          logoUrl={org.logoUrl}
+          logoDarkUrl={org.logoDarkUrl}
+          orgName={name || org.name}
+        />
+      ) : null}
     </div>
   );
 
@@ -1101,6 +1196,77 @@ export function OrgSettingsPage() {
 }
 
 /**
+ * Loading placeholder for the whole Settings body. Mirrors the segmented tab
+ * bar and the content card (defaulting to the General tab's field layout: a
+ * full-width name field, a two-column numeric grid and a narrower time-zone
+ * field), so the page keeps its shape while the organization loads. Tab-pill
+ * widths track the real labels so the bar reads as the real one.
+ */
+function SettingsSkeleton() {
+  return (
+    <div>
+      {/* Tab bar — same pill container as the live one; `w-fit` so it hugs
+          the pills exactly like the real tablist. */}
+      <div className="mb-4 flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-line bg-surface-3 p-1">
+        {TABS.map((t) => (
+          <Skeleton
+            key={t.id}
+            className="h-9 rounded-full"
+            style={{ width: `${t.label.length * 8 + 32}px` }}
+          />
+        ))}
+      </div>
+
+      {/* Content card — General tab field layout. */}
+      <div className="rounded-2xl border border-line bg-surface">
+        <div className="grid gap-5 p-5 sm:p-6">
+          <div>
+            <Skeleton className="mb-1.5 h-3.5 w-16" />
+            <Skeleton className="h-11 w-full rounded-lg" />
+          </div>
+          <div className="grid gap-5 sm:grid-cols-2">
+            {Array.from({ length: 2 }).map((_, i) => (
+              <div key={i}>
+                <Skeleton className="mb-1.5 h-3.5 w-28" />
+                <Skeleton className="h-11 w-full rounded-lg" />
+              </div>
+            ))}
+          </div>
+          <div className="max-w-[320px]">
+            <Skeleton className="mb-1.5 h-3.5 w-20" />
+            <Skeleton className="h-11 w-full rounded-lg" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Loading placeholder for the notifications tab — two toggle-row cards (title,
+ * helper line, a checkbox). Prefs share the header's Save/Reset bar, so this
+ * skeleton has no trailing button placeholder to mirror.
+ */
+function NotificationPrefsSkeleton() {
+  return (
+    <div className="grid gap-3">
+      {Array.from({ length: 2 }).map((_, i) => (
+        <div
+          key={i}
+          className="flex items-start gap-3 rounded-xl border border-line p-4"
+        >
+          <div className="min-w-0 flex-1">
+            <Skeleton className="h-3.5 w-40 max-w-full" />
+            <Skeleton className="mt-2 h-3 w-64 max-w-full" />
+          </div>
+          <Skeleton className="mt-0.5 h-4 w-4 rounded" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
  * Self-scoped preferences (`/admin/users/me/...`). State lives on the parent
  * so the shared Save/Reset bar in the header flushes prefs the same way it
  * flushes the org PATCH — one button, one dirty flag.
@@ -1123,12 +1289,7 @@ function NotificationPrefsBody({
   disabled,
 }: NotificationPrefsBodyProps) {
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center gap-2 py-8 text-[13.5px] text-ink-muted">
-        <Loader2 className="h-4 w-4 animate-spin text-primary" />
-        Loading preferences…
-      </div>
-    );
+    return <NotificationPrefsSkeleton />;
   }
 
   if (isError || !prefs) {

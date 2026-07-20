@@ -48,6 +48,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Skeleton } from "@/components/ui/skeleton";
 import { InterviewDetailDrawer } from "@/components/interviews/InterviewDetailDrawer";
 import {
   deleteCandidate,
@@ -111,7 +112,7 @@ function stageBadgeStyle(color: string | null | undefined) {
  *
  * `applied` alone can't answer it — the row sits at `applied` while the CV
  * is being read AND after a hard parse failure parked it there, because the
- * `applied → prescreened` transition only happens once the parse lands. So
+ * `applied → needs_review` transition only happens once the parse lands. So
  * the three conditions together are the honest test:
  *   - `applied`          — the worker hasn't moved it on yet,
  *   - has a `cvKey`      — there is something to parse (no CV = nothing to
@@ -812,10 +813,7 @@ export function CandidatesPage() {
             </div>
 
             {isLoading ? (
-              <div className="flex flex-col items-center gap-2 px-6 py-16 text-center text-[13px] text-ink-muted">
-                <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                Loading candidates…
-              </div>
+              <CandidatesTableSkeleton />
             ) : isError ? (
               <div className="flex flex-col items-center gap-2 px-6 py-16 text-center text-[13px] text-[var(--danger)]">
                 Could not load candidates.
@@ -1106,6 +1104,50 @@ function ManualScoreCell({ value }: { value: number | null }) {
   );
 }
 
+/**
+ * Loading placeholder for the candidate table. Renders skeleton rows on the
+ * SAME `ROW_GRID` as `CandidateRow` (and the live header above it), so the
+ * seven columns — checkbox+avatar+name, role, status pill, AI score, manual
+ * score, date, kebab — stay aligned and nothing reflows when data arrives.
+ */
+function CandidatesTableSkeleton() {
+  return (
+    <div>
+      {Array.from({ length: 8 }).map((_, i) => (
+        <div
+          key={i}
+          className={cn(
+            "grid items-start gap-3 border-b border-line px-5 py-3.5 last:border-b-0",
+            ROW_GRID,
+          )}
+        >
+          {/* Candidate — checkbox + avatar + name/email */}
+          <div className="flex min-w-0 items-center gap-2.5">
+            <Skeleton className="h-4 w-4 rounded" />
+            <Skeleton className="h-[34px] w-[34px] shrink-0 rounded-full" />
+            <div className="flex min-w-0 flex-col gap-1.5">
+              <Skeleton className="h-3.5 w-28 max-w-full" />
+              <Skeleton className="h-2.5 w-36 max-w-full" />
+            </div>
+          </div>
+          {/* Role */}
+          <Skeleton className="h-3.5 w-24 max-w-full" />
+          {/* Status pill */}
+          <Skeleton className="h-5 w-20 rounded-full" />
+          {/* AI score — centered */}
+          <Skeleton className="mx-auto h-5 w-9 rounded-full" />
+          {/* Manual score — centered */}
+          <Skeleton className="mx-auto h-5 w-9 rounded-full" />
+          {/* Date */}
+          <Skeleton className="h-3 w-16" />
+          {/* Kebab */}
+          <Skeleton className="h-8 w-8 justify-self-end rounded-full" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function CandidateRow({
   row,
   selected,
@@ -1134,7 +1176,7 @@ function CandidateRow({
   onDelete: () => void;
 }) {
   const status = row.currentStatusId;
-  // The §3.2 endpoint accepts ONLY `prescreened` — anything else 409s with
+  // The §3.2 endpoint accepts ONLY `needs_review` — anything else 409s with
   // INVALID_STATUS, so the action is gated rather than offered-then-refused.
   const canInvite = status?.key === INVITABLE_STATUS_KEY;
   const hasInterview = Boolean(row.latestInterviewId);

@@ -188,7 +188,12 @@ export function ForgotPasswordPage() {
       <div className="flex items-center justify-center px-6 py-10 lg:px-10">
         <div className="w-full max-w-[340px]">
           <div className="mb-10 flex items-center gap-2.5">
-            <OrgLogo logoUrl={organization?.logoUrl} name={orgName} size="lg" />
+            <OrgLogo
+              logoUrl={organization?.logoUrl}
+              logoDarkUrl={organization?.logoDarkUrl}
+              name={orgName}
+              size="lg"
+            />
           </div>
 
           {step === "email" ? (

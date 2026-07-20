@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Skeleton } from "@/components/ui/skeleton"
 import { listScreeningQuestions } from "@/features/screening-questions/screeningQuestionsApi"
 import {
   DIFFICULTY_LABELS,
@@ -208,10 +209,7 @@ export function AddJobQuestionsDialog({
 
         <div className="grid max-h-[420px] min-h-0 flex-1 gap-2 overflow-auto px-6 py-2">
           {questionsQuery.isLoading ? (
-            <p className="flex items-center justify-center gap-2 py-12 text-[13px] text-ink-muted">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Loading questions…
-            </p>
+            <QuestionPickerSkeleton />
           ) : questionsQuery.isError ? (
             <p className="py-12 text-center text-[13px] text-[var(--danger)]">
               Could not load questions.{" "}
@@ -313,5 +311,33 @@ export function AddJobQuestionsDialog({
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/**
+ * Loading placeholder for the question picker. Mirrors a real option row —
+ * a checkbox, the question text and a chip row (difficulty + tags) inside a
+ * bordered card — so the list keeps its shape while the bank loads.
+ */
+function QuestionPickerSkeleton() {
+  return (
+    <>
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div
+          key={i}
+          className="flex items-start gap-2.5 rounded-lg border border-line p-3"
+        >
+          <Skeleton className="mt-0.5 h-4 w-4 shrink-0 rounded" />
+          <div className="min-w-0 flex-1">
+            <Skeleton className="h-3.5 w-3/4 max-w-full" />
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <Skeleton className="h-5 w-16 rounded-full" />
+              <Skeleton className="h-5 w-12 rounded-full" />
+              <Skeleton className="h-5 w-14 rounded-full" />
+            </div>
+          </div>
+        </div>
+      ))}
+    </>
   )
 }

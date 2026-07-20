@@ -20,10 +20,20 @@ export interface TenantBranding {
   slug: string
   /** '' when the org never uploaded one. Render the name instead. */
   logoUrl: string
+  /**
+   * The variant for DARK backgrounds. '' means "use `logoUrl` on both
+   * themes", NOT "no logo" — most orgs upload a single mark.
+   */
+  logoDarkUrl: string
   /** '' when unset. Keep the platform icon rather than inventing a fallback. */
   faviconUrl: string
   status: "active" | "inactive"
   theme: {
+    /**
+     * The org's stated light/dark choice for its CANDIDATE pages. Not this
+     * dashboard's theme, which is a per-viewer toggle in `ThemeContext`.
+     */
+    mode: "light" | "dark"
     primary: string
     secondary: string
     /** A MODE, not a colour: how primary and secondary combine. */

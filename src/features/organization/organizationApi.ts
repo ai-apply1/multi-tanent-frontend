@@ -41,6 +41,31 @@ export async function presignLogo(payload: LogoPresignPayload) {
 }
 
 /**
+ * The same, for the DARK-BACKGROUND variant. A separate route rather than a
+ * flag on the one above, because the key lands under the org's `logo-dark/`
+ * prefix and the backend re-checks each field against its OWN prefix on the
+ * PATCH — so the two can never be crossed by a confused client.
+ *
+ * The bytes go up through `uploadLogoToPresignedUrl` unchanged: it takes a URL
+ * and a file and knows nothing about which variant it is carrying.
+ */
+/**
+ * Force the worker to re-derive the dark variant from the main logo.
+ *
+ * Normally unnecessary — saving a logo derives its counterpart on its own —
+ * so this is the retry for a derivation that failed, and the way to re-run one
+ * after the transform itself changes. Resolves with the profile already showing
+ * `logoVariant.status: "processing"`.
+ */
+export async function regenerateLogoVariant() {
+  const { data } = await api.post<OrgProfile>(
+    "/admin/organization/logo-dark/generate"
+  )
+  return data
+}
+
+
+/**
  * Step 2: direct browser PUT to S3.
  *
  * A FRESH axios instance, not `@/lib/api`: the global crypto + cookie

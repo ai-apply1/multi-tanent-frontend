@@ -9,24 +9,58 @@
 import type { Paginated } from "@/features/jobs/types"
 
 /**
- * The 8 builtin status keys seeded per org. Every org may ALSO add custom
+ * The 9 builtin status keys seeded per org. Every org may ALSO add custom
  * columns, whose keys are free-form — which is why `CandidateStatus.key` is a
  * plain `string` and every filter/menu is built from `GET /admin/statuses`
  * rather than from this union. It exists only for the handful of places that
- * legitimately hard-code a builtin (the invite gate needs `prescreened`).
+ * legitimately hard-code a builtin (the invite gate needs `needs_review`).
  */
 export type BuiltinCandidateStatusKey =
   | "applied"
-  | "prescreened"
+  | "needs_review"
+  | "rejected"
   | "invited"
   | "interviewing"
   | "scored"
   | "shortlisted"
-  | "rejected"
+  | "final_rejected"
   | "hired"
 
-/** Only pre-screened candidates can be manually invited (409 INVALID_STATUS otherwise). */
-export const INVITABLE_STATUS_KEY: BuiltinCandidateStatusKey = "prescreened"
+/**
+ * Only candidates sitting in `needs_review` can be manually invited (409
+ * INVALID_STATUS otherwise).
+ *
+ * NOTE: this string collides with `ScoringStatus`'s own `"needs_review"`
+ * below, which is an unrelated thing — a transcript too unreliable to
+ * score. Different unions, different domains; compare against this
+ * constant rather than the literal so the two can never be swapped by a
+ * find-and-replace.
+ */
+export const INVITABLE_STATUS_KEY: BuiltinCandidateStatusKey = "needs_review"
+
+/**
+ * The funnel has TWO rejection columns and they are not interchangeable:
+ *
+ *   `rejected`        INITIAL — the CV never cleared the job's eligibility
+ *                     gates. Written by the vetting engine only.
+ *   `final_rejected`  FINAL — the candidate was interviewed and turned
+ *                     down. Written by the scoring finalizer, the abandon
+ *                     path, and any HR reject taken FROM an interview.
+ *
+ * Anything on the interview surface that rejects must use
+ * {@link POST_INTERVIEW_REJECT_STATUS_KEY}; sending `rejected` from there
+ * would file an interviewed candidate under "CV didn't qualify" and
+ * corrupt the only number that answers "how many people did we actually
+ * interview and say no to?".
+ */
+export const POST_INTERVIEW_REJECT_STATUS_KEY: BuiltinCandidateStatusKey =
+  "final_rejected"
+
+/** Both terminal rejection columns — for read paths that treat them alike. */
+export const REJECTED_STATUS_KEYS: readonly BuiltinCandidateStatusKey[] = [
+  "rejected",
+  "final_rejected",
+]
 
 export type InterviewStatus = "pending" | "in_progress" | "submitted" | "expired"
 
