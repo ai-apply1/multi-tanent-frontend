@@ -31,11 +31,20 @@ export const STATUS_COLORS: StatusColorPreset[] = [
 ]
 
 /**
- * The 8 builtin columns occupy `stageOrder` 10..80. A custom column is
- * slotted between them (e.g. 65 to sit after Shortlisted), so the dialog
- * defaults new rows past the last builtin rather than to 0.
+ * The 9 builtin columns are PINNED at `stageOrder` 10, 20, 30 … 90 — the
+ * server writes those numbers back unchanged on every reorder, so they
+ * never drift. A custom column lives in a gap between two of them (75 to
+ * sit after Shortlisted), which leaves 9 integer slots per gap.
  */
-export const BUILTIN_STAGE_ORDER_MAX = 80
+export const BUILTIN_STAGE_ORDER_MAX = 90
+
+/**
+ * The lowest position a custom column may take. `applied` is pinned at 10
+ * and is where every candidate enters the funnel, so there is no stage
+ * before it — the server rejects anything at or below 10 (`createStatus`)
+ * and refuses a drag that puts a custom column first (`reorderStatuses`).
+ */
+export const MIN_CUSTOM_STAGE_ORDER = 11
 
 /**
  * `key` must match the backend's slug rule verbatim — lowercase alnum,

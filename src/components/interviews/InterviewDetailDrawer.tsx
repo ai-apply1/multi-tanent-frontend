@@ -83,6 +83,9 @@ import {
 } from "@/features/candidates/candidatesApi";
 import {
   INVITABLE_STATUS_KEY,
+  POST_INTERVIEW_REJECT_STATUS_KEY,
+  REJECTED_STATUS_KEYS,
+  type BuiltinCandidateStatusKey,
   type CandidateDetail,
   type CandidateProfile,
   type CandidateStatus,
@@ -340,7 +343,7 @@ const PIPELINE_STEPS: Array<{
 function pipelineIndexFor(statusKey: string | undefined): number {
   switch (statusKey) {
     case "applied":
-    case "prescreened":
+    case "needs_review":
     case "invited":
       return 0;
     case "interviewing":
@@ -351,7 +354,11 @@ function pipelineIndexFor(statusKey: string | undefined): number {
       return 3;
     case "hired":
       return 4;
+    // An INITIAL rejection never reached an interview, so it belongs at
+    // the first step; a FINAL rejection happened at the review step.
     case "rejected":
+      return 0;
+    case "final_rejected":
       return 2;
     default:
       return 0;
@@ -375,7 +382,10 @@ function PipelineCard({
   const isProcessing = statusKey === "scored";
   const isShortlisted = statusKey === "shortlisted";
   const isHired = statusKey === "hired";
-  const isRejected = statusKey === "rejected";
+  // Either rejection column — "Reconsider candidate" is offered from both.
+  const isRejected = REJECTED_STATUS_KEYS.includes(
+    statusKey as BuiltinCandidateStatusKey,
+  );
 
   return (
     <div className="rounded-2xl border border-line bg-surface p-[18px]">
@@ -469,7 +479,7 @@ function PipelineCard({
               variant="secondary"
               size="sm"
               disabled={pending}
-              onClick={() => onStatusChange("rejected")}
+              onClick={() => onStatusChange(POST_INTERVIEW_REJECT_STATUS_KEY)}
             >
               <X className="h-3.5 w-3.5" strokeWidth={1.9} />
               Reject
@@ -514,7 +524,7 @@ function PipelineCard({
             variant="ghost"
             size="sm"
             disabled={pending}
-            onClick={() => onStatusChange("rejected")}
+            onClick={() => onStatusChange(POST_INTERVIEW_REJECT_STATUS_KEY)}
           >
             Decline candidate
           </Button>
@@ -1082,7 +1092,9 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                     variant="danger"
                     size="sm"
                     disabled={statusPending || !candidateId}
-                    onClick={() => handleStatusChange("rejected")}
+                    onClick={() =>
+                      handleStatusChange(POST_INTERVIEW_REJECT_STATUS_KEY)
+                    }
                   >
                     <X className="h-3.5 w-3.5" strokeWidth={1.9} />
                     Reject
@@ -1115,7 +1127,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">
                   {/* Resend invite — candidate-level, only offered while the
-                      status is still `prescreened` (the API 409s otherwise).
+                      status is still `needs_review` (the API 409s otherwise).
                       Disabled with a note in every other state so the reason
                       is visible without another click. */}
                   <DropdownMenuItem

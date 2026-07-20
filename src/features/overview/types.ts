@@ -6,7 +6,7 @@
 
 /** One pickable filter dimension (from `GET /admin/overview/filter-options`). */
 export interface OverviewFilterOption {
-  /** Stable key persisted on a card, e.g. "status:prescreened". */
+  /** Stable key persisted on a card, e.g. "status:needs_review". */
   key: string
   /** Human label shown in the dropdown and on the card. */
   label: string

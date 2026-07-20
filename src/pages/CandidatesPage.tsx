@@ -111,7 +111,7 @@ function stageBadgeStyle(color: string | null | undefined) {
  *
  * `applied` alone can't answer it — the row sits at `applied` while the CV
  * is being read AND after a hard parse failure parked it there, because the
- * `applied → prescreened` transition only happens once the parse lands. So
+ * `applied → needs_review` transition only happens once the parse lands. So
  * the three conditions together are the honest test:
  *   - `applied`          — the worker hasn't moved it on yet,
  *   - has a `cvKey`      — there is something to parse (no CV = nothing to
@@ -1134,7 +1134,7 @@ function CandidateRow({
   onDelete: () => void;
 }) {
   const status = row.currentStatusId;
-  // The §3.2 endpoint accepts ONLY `prescreened` — anything else 409s with
+  // The §3.2 endpoint accepts ONLY `needs_review` — anything else 409s with
   // INVALID_STATUS, so the action is gated rather than offered-then-refused.
   const canInvite = status?.key === INVITABLE_STATUS_KEY;
   const hasInterview = Boolean(row.latestInterviewId);
