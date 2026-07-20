@@ -83,6 +83,7 @@ import {
   updateCandidateStatus,
 } from "@/features/candidates/candidatesApi";
 import { invalidateCandidateData } from "@/features/candidates/candidatesCache";
+import { toDisplayScore } from "@/features/candidates/aiScore";
 import {
   INVITABLE_STATUS_KEY,
   POST_INTERVIEW_REJECT_STATUS_KEY,
@@ -339,7 +340,11 @@ function AiScoreCard({
   narrative: string;
   answeredCount: number;
 }) {
-  const score = Math.round(Math.max(0, Math.min(10, overall)) * 10);
+  // Shared with the candidate tables' score cell. The 0-10 → 0-100 conversion
+  // lived only here while the tables had no number at all; now that they do,
+  // one copy of the maths is what keeps the drawer and the list from
+  // disagreeing about the same candidate.
+  const score = toDisplayScore(overall);
   const color = scoreBandColor(score);
   const reco = recommendationFrom(score);
   return (

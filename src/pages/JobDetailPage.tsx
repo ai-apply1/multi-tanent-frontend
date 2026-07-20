@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  AlertTriangle,
   ChevronDown,
+  Clock,
   Loader,
   Loader2,
   Pencil,
@@ -52,6 +54,7 @@ import {
   listCandidates,
 } from "@/features/candidates/candidatesApi";
 import { invalidateCandidateData } from "@/features/candidates/candidatesCache";
+import { aiScoreState, type AiScoreState } from "@/features/candidates/aiScore";
 import type {
   CandidateListItem,
   CandidateStatus,
@@ -702,11 +705,7 @@ function CandidateJobRow({
   onClick: () => void;
 }) {
   const status = row.currentStatusId;
-  const hasInterview = Boolean(row.latestInterviewId);
-  // The list projection doesn't carry interview scores today — the drawer is
-  // where the actual number lives. Kept as an explicit local so the contract
-  // is obvious when a future endpoint starts populating them.
-  const aiScore: number | null = null;
+  const scoreState = aiScoreState(row.latestInterviewId);
 
   return (
     <div
@@ -763,7 +762,7 @@ function CandidateJobRow({
         )}
       </span>
 
-      <AiScoreCell value={aiScore} hasInterview={hasInterview} />
+      <AiScoreCell state={scoreState} />
 
       <span className="flex items-center gap-2 text-[12.5px] text-ink-muted">
         {formatDate(row.createdAt)}
@@ -776,32 +775,42 @@ function CandidateJobRow({
 }
 
 /**
- * AI score readout — a 54px fill bar plus the mono value. Mirrors the helper
- * on CandidatesPage. The list projection doesn't carry scores today, so this
- * shows "Pending" for interviews-in-flight and "—" for candidates who never
- * started; the drawer holds the actual number once opened.
+ * AI score readout — a 54px fill bar plus the mono value, or the reason there
+ * isn't one yet. Mirrors the helper on CandidatesPage; both derive every state
+ * from the shared `aiScoreState`, which the drawer's score card also uses, so
+ * one candidate cannot read differently in two places.
  */
-function AiScoreCell({
-  value,
-  hasInterview,
-}: {
-  value: number | null;
-  hasInterview: boolean;
-}) {
-  if (value == null) {
+function AiScoreCell({ state }: { state: AiScoreState }) {
+  if (state.kind !== "scored") {
+    const label =
+      state.kind === "scoring"
+        ? "Scoring"
+        : state.kind === "failed"
+          ? "Scoring failed"
+          : state.kind === "awaiting"
+            ? "Awaiting interview"
+            : "Not scored";
     return (
-      <span className="text-[13px] text-ink-subtle">
-        {hasInterview ? (
-          <span className="inline-flex items-center gap-1.5">
-            <Loader className="h-3.5 w-3.5" strokeWidth={1.7} />
-            Pending
-          </span>
+      <span
+        className="inline-flex items-center gap-1.5 text-[13px]"
+        style={{
+          color: state.kind === "failed" ? "var(--danger)" : undefined,
+        }}
+      >
+        {state.kind === "scoring" ? (
+          <Loader className="h-3.5 w-3.5 animate-spin" strokeWidth={1.7} />
+        ) : state.kind === "failed" ? (
+          <AlertTriangle className="h-3.5 w-3.5" strokeWidth={1.7} />
         ) : (
-          "—"
+          <Clock className="h-3.5 w-3.5" strokeWidth={1.7} />
         )}
+        <span className={state.kind === "failed" ? "" : "text-ink-subtle"}>
+          {label}
+        </span>
       </span>
     );
   }
+  const value = state.value;
   const barColor =
     value >= 70
       ? "var(--primary)"

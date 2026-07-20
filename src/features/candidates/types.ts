@@ -156,17 +156,40 @@ export interface CandidateBase {
 }
 
 /**
+ * The slice of the latest interview the TABLE gets — enough to render the AI
+ * score column, and deliberately nothing more.
+ *
+ * Narrower than `CandidateLatestInterview` (what the detail route returns) on
+ * purpose: `scores` is a Mixed prop whose `perQuestion[]` runs to tens of KB,
+ * and a 25-row page has no use for it. The backend projects
+ * `scores.overall` alone, so that is all this may promise.
+ *
+ * No `publicSessionId` here either — opening the drawer still costs a detail
+ * read, exactly as before.
+ */
+export interface CandidateListInterview {
+  _id: string
+  status: InterviewStatus
+  scoringStatus: ScoringStatus
+  /** `null` until the scoring worker writes a rollup. */
+  scores: { overall: number } | null
+}
+
+/**
  * A row from `GET /admin/candidates`.
  *
- * Two projection facts the UI has to live with:
- *   - `profile` is EXCLUDED (the table never needs the parsed-CV blob) —
- *     only the detail route returns it;
- *   - `latestInterviewId` is a raw ObjectId, NOT populated. So a row can say
- *     WHETHER an interview exists, never its status/score, and cannot open
- *     the drawer without a detail read to resolve `publicSessionId`.
+ * One projection fact the UI has to live with: `profile` is EXCLUDED (the
+ * table never needs the parsed-CV blob) — only the detail route returns it.
+ *
+ * `latestInterviewId` IS populated, slimly. It used to be a raw ObjectId, and
+ * that is why the table's AI score column showed "Pending" on every row
+ * forever: the cell had no number to render and hardcoded `null`, so a
+ * candidate the scorer had long since finished still read as in-flight, while
+ * the drawer showed their actual score. Two views, same candidate, different
+ * answers.
  */
 export interface CandidateListItem extends CandidateBase {
-  latestInterviewId: string | null
+  latestInterviewId: CandidateListInterview | null
 }
 
 /**

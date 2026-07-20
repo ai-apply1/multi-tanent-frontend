@@ -60,6 +60,7 @@ import {
   updateCandidateStatus,
 } from "@/features/candidates/candidatesApi";
 import { invalidateCandidateData } from "@/features/candidates/candidatesCache";
+import { aiScoreState, type AiScoreState } from "@/features/candidates/aiScore";
 import {
   INVITABLE_STATUS_KEY,
   type CandidateListItem,
@@ -1020,40 +1021,45 @@ export function CandidatesPage() {
 }
 
 /**
- * AI score readout — a 54px fill bar plus the mono value. The list projection
- * doesn't carry interview scores (only whether an interview exists), so this
- * shows the "not yet scored" state for every list row today; the drawer holds
- * the actual number once opened. The colour thresholds match the design's
- * accent/warning/danger split so the visual grammar is ready when the API
- * starts populating the field.
+ * AI score readout — a 54px fill bar plus the mono value, or the reason there
+ * isn't one yet. The colour thresholds match the design's
+ * accent/warning/danger split.
+ *
+ * The number and the four waiting states both come from `aiScoreState`, which
+ * the drawer's score card also uses: the two views showing different numbers
+ * for one candidate is the bug this replaced.
  */
-function AiScoreCell({
-  value,
-  hasInterview,
-}: {
-  value: number | null;
-  hasInterview: boolean;
-}) {
-  if (value == null) {
-    // A subtle icon + label for the "no score yet" state. `Pending` (an
-    // interview is being scored) is the one state that differs, because it
-    // genuinely is a different one.
+function AiScoreCell({ state }: { state: AiScoreState }) {
+  if (state.kind !== "scored") {
+    const label =
+      state.kind === "scoring"
+        ? "Scoring"
+        : state.kind === "failed"
+          ? "Scoring failed"
+          : state.kind === "awaiting"
+            ? "Awaiting interview"
+            : "Not scored";
     return (
-      <span className="inline-flex items-center gap-1.5 text-[13px] text-ink-subtle">
-        {hasInterview ? (
-          <>
-            <Loader className="h-3.5 w-3.5" strokeWidth={1.7} />
-            Pending
-          </>
+      <span
+        className="inline-flex items-center gap-1.5 text-[13px]"
+        style={{
+          color: state.kind === "failed" ? "var(--danger)" : undefined,
+        }}
+      >
+        {state.kind === "scoring" ? (
+          <Loader className="h-3.5 w-3.5 animate-spin" strokeWidth={1.7} />
+        ) : state.kind === "failed" ? (
+          <AlertTriangle className="h-3.5 w-3.5" strokeWidth={1.7} />
         ) : (
-          <>
-            <Clock className="h-3.5 w-3.5" strokeWidth={1.7} />
-            Not scored
-          </>
+          <Clock className="h-3.5 w-3.5" strokeWidth={1.7} />
         )}
+        <span className={state.kind === "failed" ? "" : "text-ink-subtle"}>
+          {label}
+        </span>
       </span>
     );
   }
+  const value = state.value;
   const barColor =
     value >= 70
       ? "var(--primary)"
@@ -1152,10 +1158,7 @@ function CandidateRow({
   // INVALID_STATUS, so the action is gated rather than offered-then-refused.
   const canInvite = status?.key === INVITABLE_STATUS_KEY;
   const hasInterview = Boolean(row.latestInterviewId);
-  // The list projection doesn't ship the score; the drawer is where the actual
-  // number lives. Kept as an explicit local so the cell's contract is obvious
-  // when a future endpoint starts populating it.
-  const aiScore: number | null = null;
+  const scoreState = aiScoreState(row.latestInterviewId);
 
   return (
     <div
@@ -1263,7 +1266,7 @@ function CandidateRow({
 
       {/* AI score — centered under its header */}
       <div className="flex justify-center">
-        <AiScoreCell value={aiScore} hasInterview={hasInterview} />
+        <AiScoreCell state={scoreState} />
       </div>
 
       {/* Date */}
