@@ -132,7 +132,11 @@ export function Sidebar() {
   return (
     <aside className="hidden w-[236px] shrink-0 flex-col border-r border-line bg-surface lg:flex">
       <div className="flex h-[60px] items-center gap-2.5 border-b border-line px-4">
-        <OrgLogo logoUrl={organization?.logoUrl} name={orgName} />
+        <OrgLogo
+          logoUrl={organization?.logoUrl}
+          logoDarkUrl={organization?.logoDarkUrl}
+          name={orgName}
+        />
       </div>
 
       <nav className="scroll flex-1 overflow-auto px-3 pt-2.5 pb-1">
@@ -257,7 +261,11 @@ export function MobileNavTrigger() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex h-[60px] items-center gap-2.5 border-b border-line px-4">
-              <OrgLogo logoUrl={organization?.logoUrl} name={orgName} />
+              <OrgLogo
+                logoUrl={organization?.logoUrl}
+                logoDarkUrl={organization?.logoDarkUrl}
+                name={orgName}
+              />
               <span className="flex-1" />
               <button
                 type="button"

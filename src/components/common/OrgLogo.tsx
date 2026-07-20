@@ -56,6 +56,12 @@ interface OrgLogoProps {
    * an edge case.
    */
   logoUrl?: string | null
+  /**
+   * The variant for DARK backgrounds — "dark" names the backdrop, so the
+   * artwork is usually white. Also routinely absent: most orgs upload one mark,
+   * and `""` here means "use `logoUrl` on both themes", never "no logo".
+   */
+  logoDarkUrl?: string | null
   /** Used for `alt`/`title`, and for the initials fallback. */
   name: string
   size?: OrgLogoSize
@@ -64,6 +70,7 @@ interface OrgLogoProps {
 
 export function OrgLogo({
   logoUrl,
+  logoDarkUrl,
   name,
   size = "md",
   className,
@@ -85,9 +92,51 @@ export function OrgLogo({
     )
   }
 
+  /*
+   * `h-full`, NOT `max-h-full`: a max only ever shrinks, so a logo whose
+   * intrinsic size is under the box rendered at its natural size and looked
+   * tiny. `h-full` scales it UP to fill the box; `w-auto` keeps the ratio;
+   * `max-w-full` caps a very wide wordmark, and `object-contain` letterboxes it
+   * rather than distorting.
+   */
+  const imgClass = "h-full w-auto max-w-full object-contain"
+
+  /*
+   * With a dark variant on file, the two marks swap on the theme and NEITHER
+   * needs a plate — which is the whole point of storing a second asset. The
+   * swap is pure CSS (`dark:hidden` / `hidden dark:block`, the same trick
+   * `BrandLogo` uses for the platform's own mark) rather than `useTheme()`,
+   * so it costs no re-render and cannot flash the wrong variant on first paint.
+   * Both files are fetched, which is the price: they are logos, and a wrong
+   * mark for one frame on every theme toggle is the worse trade.
+   */
+  if (logoDarkUrl) {
+    return (
+      <span className={cn("inline-flex shrink-0 items-center", className)}>
+        <span className={cn("inline-flex items-center", box)}>
+          <img
+            src={logoUrl}
+            alt={name}
+            title={name}
+            className={cn(imgClass, "block dark:hidden")}
+            draggable={false}
+          />
+          <img
+            src={logoDarkUrl}
+            alt={name}
+            title={name}
+            className={cn(imgClass, "hidden dark:block")}
+            draggable={false}
+          />
+        </span>
+      </span>
+    )
+  }
+
   return (
-    // Dark-mode legibility: orgs upload ONE logo, usually dark ink on a
-    // transparent background, so on the dark theme it sits on a white plate.
+    // No dark variant uploaded, so fall back to the plate. Orgs commonly ship
+    // ONE logo, usually dark ink on a transparent background, which would
+    // otherwise vanish against the dark theme.
     //
     // The plate is the OUTER element and the sized box is nested inside it, so
     // the padding grows the plate outwards instead of eating into the logo.
@@ -105,12 +154,7 @@ export function OrgLogo({
           src={logoUrl}
           alt={name}
           title={name}
-          /* `h-full`, NOT `max-h-full`: a max only ever shrinks, so a logo whose
-             intrinsic size is under the box rendered at its natural size and
-             looked tiny. `h-full` scales it UP to fill the box; `w-auto` keeps
-             the ratio; `max-w-full` caps a very wide wordmark, and
-             `object-contain` letterboxes it rather than distorting. */
-          className="h-full w-auto max-w-full object-contain"
+          className={imgClass}
           draggable={false}
         />
       </span>

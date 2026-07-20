@@ -34,63 +34,9 @@
  * Same rule, and the same reason, as `email-palette.ts` in the backend.
  */
 
-interface Rgb {
-  r: number
-  g: number
-  b: number
-}
-
-/**
- * Parse `#rgb`, `#rrggbb` or `#rrggbbaa` — the forms the org schema's
- * HEX_COLOR_REGEX permits. An 8-digit colour's ALPHA IS DISCARDED: a
- * semi-transparent button has no defined ink colour to contrast against.
- *
- * Returns null for anything unparseable, which is the caller's cue to leave the
- * design tokens alone rather than emit a broken value.
- */
-const parseHex = (value: string): Rgb | null => {
-  const hex = (value || "").trim().replace(/^#/, "")
-  const full =
-    hex.length === 3
-      ? hex
-          .split("")
-          .map((c) => c + c)
-          .join("")
-      : hex
-  if (!/^[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(full)) return null
-  return {
-    r: parseInt(full.slice(0, 2), 16),
-    g: parseInt(full.slice(2, 4), 16),
-    b: parseInt(full.slice(4, 6), 16),
-  }
-}
-
-/** WCAG relative luminance. */
-const luminance = ({ r, g, b }: Rgb): number => {
-  const channel = (c: number) => {
-    const s = c / 255
-    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4)
-  }
-  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
-}
-
-/** WCAG contrast ratio, 1..21. */
-const contrast = (a: Rgb, b: Rgb): number => {
-  const la = luminance(a)
-  const lb = luminance(b)
-  const [hi, lo] = la > lb ? [la, lb] : [lb, la]
-  return (hi + 0.05) / (lo + 0.05)
-}
-
-const WHITE: Rgb = { r: 255, g: 255, b: 255 }
-const INK: Rgb = { r: 20, g: 16, b: 31 }
-
-/**
- * Readable text on a brand-coloured button. NOT always white: an org can pick
- * `#fbbf24`, and white on amber is illegible.
- */
-const readableInk = (bg: Rgb): string =>
-  contrast(bg, WHITE) >= contrast(bg, INK) ? "#ffffff" : "#14101f"
+// The colour maths lives in `@/lib/color`, shared with the settings-page
+// palette editor. Two copies of a WCAG formula is how they drift apart.
+import { parseHex, readableInk } from "@/lib/color"
 
 /**
  * Apply, or undo.
