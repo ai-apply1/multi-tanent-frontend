@@ -110,7 +110,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       { id: "go-jobs-new", icon: Briefcase, title: "Create job", sub: "New draft posting", to: ROUTES.JOB_NEW },
       { id: "go-candidates", icon: Users2, title: "Candidates", sub: "Every applicant", to: ROUTES.CANDIDATES },
       { id: "go-questions", icon: Library, title: "Question bank", sub: "Screening questions", to: ROUTES.QUESTIONS },
-      { id: "go-pipeline", icon: GitBranch, title: "Pipeline", sub: "Status groups", to: ROUTES.PIPELINE },
+      { id: "go-pipeline", icon: GitBranch, title: "Pipeline", sub: "Candidate statuses", to: ROUTES.PIPELINE },
       { id: "go-settings", icon: Settings, title: "Organization settings", sub: "Identity, defaults & notifications", to: ROUTES.ORG_SETTINGS },
     ]
     if (isOrgAdmin) {
