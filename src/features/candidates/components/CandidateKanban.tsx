@@ -19,6 +19,7 @@ import {
   getCandidateKanban,
   updateCandidateStatus,
 } from "@/features/candidates/candidatesApi"
+import { invalidateCandidateData } from "@/features/candidates/candidatesCache"
 import type { KanbanBoard, KanbanCard } from "@/features/candidates/types"
 import { errorMessage } from "@/lib/errors"
 import { cn } from "@/lib/utils"
@@ -113,9 +114,9 @@ export function CandidateKanban({ jobId, onOpenCandidate }: Props) {
       toast.error(errorMessage(err, "Could not move the candidate."))
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: kanbanQueryKey(jobId) })
-      // The table view reads the same rows through a different key.
-      queryClient.invalidateQueries({ queryKey: ["candidates"] })
+      // The board, the table view, and Overview's awaiting/KPI panels all read
+      // candidate-derived rows through different keys — fan out to every one.
+      invalidateCandidateData(queryClient)
     },
   })
 

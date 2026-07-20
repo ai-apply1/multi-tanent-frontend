@@ -82,6 +82,7 @@ import {
   sendCandidateInvite,
   updateCandidateStatus,
 } from "@/features/candidates/candidatesApi";
+import { invalidateCandidateData } from "@/features/candidates/candidatesCache";
 import {
   INVITABLE_STATUS_KEY,
   POST_INTERVIEW_REJECT_STATUS_KEY,
@@ -841,7 +842,10 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
     try {
       await sendCandidateInvite(candidateId);
       toast.success("Interview invite sent.");
+      // Inviting advances the candidate's status, which the lists and Overview
+      // panels display — refresh the drawer's own detail plus every derived key.
       await candidateQuery.refetch();
+      invalidateCandidateData(queryClient);
     } catch (err) {
       toast.error(errorMessage(err, "Could not send invite."));
     } finally {
@@ -855,10 +859,13 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
     try {
       await updateCandidateStatus(candidateId, { statusKey });
       toast.success("Candidate updated.");
-      await Promise.all([
-        candidateQuery.refetch(),
-        queryClient.invalidateQueries({ queryKey: ["candidates"] }),
-      ]);
+      // Refetch the drawer's own `["candidate", id]` detail first — it's what
+      // the open panel renders and the fan-out doesn't cover it. Then invalidate
+      // every derived surface: a decision here (accept/reject/hire/shortlist)
+      // can move the candidate out of Overview's "Awaiting your decision" panel
+      // and shift its KPI counts, not just the list and board.
+      await candidateQuery.refetch();
+      invalidateCandidateData(queryClient);
     } catch (err) {
       toast.error(errorMessage(err, "Could not update the candidate."));
     } finally {
@@ -872,6 +879,9 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
       toast.success("Interview deleted.");
       setConfirmDeleteInterview(false);
       await queryClient.invalidateQueries({ queryKey: ["interviews"] });
+      // The candidate's row shows its latest interview's score/status, so a
+      // deleted interview leaves those lists (and Overview) stale too.
+      invalidateCandidateData(queryClient);
       onOpenChange(false);
     },
     onError: (err) =>
@@ -883,7 +893,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
     onSuccess: async () => {
       toast.success("Candidate deleted.");
       setConfirmDeleteCandidate(false);
-      await queryClient.invalidateQueries({ queryKey: ["candidates"] });
+      invalidateCandidateData(queryClient);
       onOpenChange(false);
     },
     onError: (err) =>
