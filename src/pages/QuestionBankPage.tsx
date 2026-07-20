@@ -45,6 +45,10 @@ import { QuestionFormDialog } from "@/features/screening-questions/components/Qu
 import { QuestionPreviewDialog } from "@/features/screening-questions/components/QuestionPreviewDialog";
 import { TagsInput } from "@/features/screening-questions/components/TagsInput";
 import {
+  listQuestionCategories,
+  QUESTION_CATEGORIES_QUERY_KEY,
+} from "@/features/question-categories/questionCategoriesApi";
+import {
   deleteScreeningQuestion,
   listScreeningQuestions,
 } from "@/features/screening-questions/screeningQuestionsApi";
@@ -71,24 +75,6 @@ const DIFFICULTY_PILL: Record<DifficultyLevel, string> = {
   hard: "bg-[var(--danger-soft)] text-[var(--danger)]",
 };
 
-/**
- * Mirror of `QuestionFormDialog`'s CATEGORY_OPTIONS — kept in sync by hand
- * because the two files are edited together. The bank has no category column
- * on the backend, so the "category" lives inside the tag list; anything that
- * matches this shortlist renders as the accent-tinted category chip and is
- * hidden from the plain tag row (so it isn't shown twice).
- */
-const CATEGORY_OPTIONS = new Set<string>([
-  "Introductory",
-  "Behavioral",
-  "Technical",
-  "System Design",
-  "Culture Fit",
-  "Situational",
-]);
-function pickCategoryTag(tags: string[]): string | null {
-  return tags.find((t) => CATEGORY_OPTIONS.has(t)) ?? null;
-}
 
 export function QuestionBankPage() {
   const queryClient = useQueryClient();
@@ -136,12 +122,25 @@ export function QuestionBankPage() {
 
   const rows = data?.data ?? [];
 
-  // The bank has no distinct-tags endpoint, so suggestions come from the rows
-  // in hand. Under `$all` that's the right set: whatever co-occurs with the
-  // current selection is what can still narrow to a non-empty result.
-  const tagSuggestions = Array.from(new Set(rows.flatMap((q) => q.tags))).sort(
-    (a, b) => a.localeCompare(b),
+  // Category catalog — needed both for the row-label lookup (translating
+  // categoryId → name) and to keep category labels out of tag suggestions.
+  const categoriesQuery = useQuery({
+    queryKey: QUESTION_CATEGORIES_QUERY_KEY,
+    queryFn: listQuestionCategories,
+  });
+  const categoryById = new Map(
+    (categoriesQuery.data ?? []).map((c) => [c._id, c] as const),
   );
+  const categoryLabels = new Set(
+    (categoriesQuery.data ?? []).map((c) => c.label),
+  );
+
+  // Suggestions are drawn from rows in hand (no distinct-tags endpoint),
+  // minus anything that shares a name with a category — the two live in
+  // separate fields on the model.
+  const tagSuggestions = Array.from(
+    new Set(rows.flatMap((q) => q.tags).filter((t) => !categoryLabels.has(t))),
+  ).sort((a, b) => a.localeCompare(b));
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => deleteScreeningQuestion(id),
@@ -297,13 +296,10 @@ export function QuestionBankPage() {
               {rows.map((row) => {
                 const askable = askableCount(row);
                 const label = questionLabel(row);
-                const category = pickCategoryTag(row.tags);
-                // Non-category tags — the category tag is rendered by its
-                // own accent chip below and hidden from this list so it
-                // isn't shown twice on the same row.
-                const otherTags = category
-                  ? row.tags.filter((t) => t !== category)
-                  : row.tags;
+                const category = row.categoryId
+                  ? categoryById.get(row.categoryId)?.label ?? null
+                  : null;
+                const otherTags = row.tags;
                 return (
                   <div
                     key={row._id}

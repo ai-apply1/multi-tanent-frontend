@@ -499,7 +499,7 @@ export function OverviewPage() {
             onDragEnd={handleDragEnd}
           >
             <SortableContext items={combinedIds} strategy={rectSortingStrategy}>
-              <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 md:[grid-template-columns:repeat(auto-fit,minmax(210px,1fr))]">
+              <div className="mb-4 grid min-w-0 grid-cols-1 gap-3 overflow-hidden sm:grid-cols-2 md:[grid-template-columns:repeat(auto-fit,minmax(210px,1fr))]">
                 {metricStats.map((stat) => (
                   <SortableStatCard
                     key={stat.id}
@@ -717,6 +717,8 @@ function SortableStatCard(props: {
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
+    willChange: "transform",
+    touchAction: "none",
   };
   return (
     <StatCard
@@ -924,6 +926,8 @@ function SortableManualCard(props: {
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
+    willChange: "transform",
+    touchAction: "none",
   };
   return (
     <ManualCard

@@ -4,13 +4,7 @@ import { Loader2, Minus, Plus, Sparkles, Trash2, Undo2 } from "lucide-react"
 import toast from "react-hot-toast"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "@/components/ui/select"
+import { CategoryPicker } from "@/features/question-categories/components/CategoryPicker"
 import { TagsInput } from "@/features/screening-questions/components/TagsInput"
 import {
   createScreeningQuestion,
@@ -58,39 +52,6 @@ const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim()
 const DEFAULT_SUGGEST_COUNT = 3
 
 /**
- * The bank has no first-class `category` column — it lives inside the
- * question's tag list, so a shared vocabulary keeps the filter on the
- * bank page useful. Storing the category as a plain tag (rather than a
- * `category:X` prefix) means it round-trips through the existing tags
- * filter without a special case.
- */
-const CATEGORY_OPTIONS = [
-  "Introductory",
-  "Behavioral",
-  "Technical",
-  "System Design",
-  "Culture Fit",
-  "Situational"
-] as const
-type QuestionCategory = (typeof CATEGORY_OPTIONS)[number]
-const CATEGORY_SET = new Set<string>(CATEGORY_OPTIONS)
-
-/** Pluck the first tag we recognise as a category, if any. */
-function categoryFromTags(tags: string[] | undefined): QuestionCategory | "" {
-  const hit = tags?.find((t) => CATEGORY_SET.has(t))
-  return (hit as QuestionCategory | undefined) ?? ""
-}
-function withCategoryTag(
-  tags: string[],
-  category: QuestionCategory | ""
-): string[] {
-  // Drop every recognised category and reinsert the chosen one at the
-  // front — keeps a single source of truth without mutating unrelated tags.
-  const cleaned = tags.filter((t) => !CATEGORY_SET.has(t))
-  return category ? [category, ...cleaned] : cleaned
-}
-
-/**
  * Create / edit one bank question and all of its wordings.
  *
  * The canonical wording (`variants[0]`) is what the top textarea edits — the
@@ -117,7 +78,7 @@ export function QuestionFormDialog({
   // choose for the user (and the schema default only applies to writes the
   // DTO never lets through).
   const [difficulty, setDifficulty] = useState<DifficultyLevel | "">("")
-  const [category, setCategory] = useState<QuestionCategory | "">("")
+  const [categoryId, setCategoryId] = useState<string | null>(null)
   const [tags, setTags] = useState<string[]>([])
   /** How many drafts to ask for. Fewer may come back — see the suggest call. */
   const [suggestCount, setSuggestCount] = useState(DEFAULT_SUGGEST_COUNT)
@@ -145,12 +106,8 @@ export function QuestionFormDialog({
         : [{ text: "", retired: false }]
     )
     setDifficulty(question?.difficultyLevel ?? "")
-    setCategory(categoryFromTags(question?.tags))
-    // Strip any recognised category tag from the visible tag list so the
-    // dropdown owns it and it can't be edited from two places.
-    setTags(
-      (question?.tags ?? []).filter((t) => !CATEGORY_SET.has(t))
-    )
+    setCategoryId(question?.categoryId ?? null)
+    setTags(question?.tags ?? [])
     setSuggestCount(DEFAULT_SUGGEST_COUNT)
     setDrafts([])
     setDraftSel({})
@@ -164,7 +121,6 @@ export function QuestionFormDialog({
   const saveMutation = useMutation({
     mutationFn: (drafts: VariantDraft[]) => {
       if (!difficulty) throw new Error("difficulty is required")
-      const outboundTags = withCategoryTag(tags, category)
       if (question) {
         return updateScreeningQuestion(question._id, {
           // Order and every existing _id are preserved — the backend 422s
@@ -175,7 +131,8 @@ export function QuestionFormDialog({
             retired: v.retired
           })),
           difficultyLevel: difficulty,
-          tags: outboundTags
+          categoryId: categoryId ?? null,
+          tags,
         })
       }
       return createScreeningQuestion({
@@ -183,7 +140,8 @@ export function QuestionFormDialog({
         // all live, and the UI doesn't offer the toggle before first save.
         variants: drafts.map((v) => v.text.trim()),
         difficultyLevel: difficulty,
-        tags: outboundTags
+        ...(categoryId ? { categoryId } : {}),
+        tags,
       })
     },
     onSuccess: () => {
@@ -469,21 +427,11 @@ export function QuestionFormDialog({
                   Category{" "}
                   <span className="font-normal text-ink-subtle">· optional</span>
                 </label>
-                <Select
-                  value={category || undefined}
-                  onValueChange={(v) => setCategory(v as QuestionCategory)}
-                >
-                  <SelectTrigger className="h-11">
-                    <SelectValue placeholder="Select a category…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CATEGORY_OPTIONS.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {c}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <CategoryPicker
+                  value={categoryId}
+                  onChange={(id) => setCategoryId(id)}
+                  disabled={saveMutation.isPending}
+                />
               </div>
 
               <div>

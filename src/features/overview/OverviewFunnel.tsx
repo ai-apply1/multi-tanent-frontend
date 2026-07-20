@@ -6,6 +6,7 @@ import {
   SheetContent,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import type { OverviewStat } from "@/features/overview/types";
 import { cn } from "@/lib/utils";
 
@@ -245,50 +246,52 @@ export function OverviewFunnelDrawer({ open, onOpenChange, stats }: Props) {
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   Pipeline
                 </p>
-                <div className="flex items-stretch gap-1 overflow-x-auto pb-2">
-                  {stages.map((stage, i) => (
-                    <div key={stage.id} className="flex items-stretch gap-1">
-                      {i > 0 ? (
-                        <div className="flex shrink-0 flex-col items-center justify-center px-0.5">
-                          <ChevronRight className="h-4 w-4 text-muted-foreground/60" />
-                          <span className="text-[10px] tabular-nums text-muted-foreground/70">
-                            {formatPercent(stage.step)}
-                          </span>
-                        </div>
-                      ) : null}
-                      <div
-                        className={cn(
-                          "flex w-32 shrink-0 flex-col justify-between rounded-lg border border-border bg-card p-2.5",
-                          i === 0 && "border-primary/40",
-                        )}
-                      >
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            className="h-2.5 w-2.5 shrink-0 rounded-full"
-                            style={{ backgroundColor: stage.color }}
-                          />
-                          <span
-                            className="line-clamp-2 text-xs font-medium leading-snug"
-                            title={stage.title}
-                          >
-                            {stage.title}
-                          </span>
-                        </div>
-                        <div className="mt-2 flex items-baseline justify-between gap-1 tabular-nums">
-                          <span
-                            className="text-lg font-semibold leading-none"
-                            title={stage.count.toLocaleString()}
-                          >
-                            {formatCount(stage.count)}
-                          </span>
-                          <span className="text-[11px] text-muted-foreground">
-                            {formatPercent(stage.share)}
-                          </span>
+                <ScrollArea orientation="horizontal" className="w-full pb-2">
+                  <div className="flex items-stretch gap-1">
+                    {stages.map((stage, i) => (
+                      <div key={stage.id} className="flex items-stretch gap-1">
+                        {i > 0 ? (
+                          <div className="flex shrink-0 flex-col items-center justify-center px-0.5">
+                            <ChevronRight className="h-4 w-4 text-muted-foreground/60" />
+                            <span className="text-[10px] tabular-nums text-muted-foreground/70">
+                              {formatPercent(stage.step)}
+                            </span>
+                          </div>
+                        ) : null}
+                        <div
+                          className={cn(
+                            "flex w-32 shrink-0 flex-col justify-between rounded-lg border border-border bg-card p-2.5",
+                            i === 0 && "border-primary/40",
+                          )}
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className="h-2.5 w-2.5 shrink-0 rounded-full"
+                              style={{ backgroundColor: stage.color }}
+                            />
+                            <span
+                              className="line-clamp-2 text-xs font-medium leading-snug"
+                              title={stage.title}
+                            >
+                              {stage.title}
+                            </span>
+                          </div>
+                          <div className="mt-2 flex items-baseline justify-between gap-1 tabular-nums">
+                            <span
+                              className="text-lg font-semibold leading-none"
+                              title={stage.count.toLocaleString()}
+                            >
+                              {formatCount(stage.count)}
+                            </span>
+                            <span className="text-[11px] text-muted-foreground">
+                              {formatPercent(stage.share)}
+                            </span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                </ScrollArea>
               </div>
             </>
           )}
