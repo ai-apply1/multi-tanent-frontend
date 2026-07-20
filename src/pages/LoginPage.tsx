@@ -82,6 +82,7 @@ export function LoginPage() {
           <div className="mb-10 flex items-center gap-2.5">
             <OrgLogo
               logoUrl={organization?.logoUrl}
+              logoDarkUrl={organization?.logoDarkUrl}
               name={orgName}
               size="lg"
             />

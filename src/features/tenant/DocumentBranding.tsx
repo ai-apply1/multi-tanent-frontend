@@ -2,6 +2,7 @@ import { useEffect } from "react"
 import { useOrganization } from "@/features/organization/useOrganization"
 import { useTenantBranding } from "@/features/tenant/TenantBrandingContext"
 import { applyTenantTheme } from "@/features/tenant/applyTenantTheme"
+import { useTheme } from "@/features/theme/ThemeContext"
 import { PLATFORM_FAVICON, PLATFORM_NAME } from "@/lib/platform"
 
 /**
@@ -53,16 +54,22 @@ const applyFavicon = (href: string): void => {
 export function DocumentBranding() {
   const branding = useTenantBranding()
   const { data: org } = useOrganization()
+  const { setOrgMode } = useTheme()
 
   // Authenticated org first, then the host's public branding, then the
   // platform. Each rung is only used when the one above it has nothing.
   const name = org?.name || branding?.name || PLATFORM_NAME
   const faviconUrl = org?.faviconUrl || branding?.faviconUrl || ""
-  // The org profile carries no theme, so the accent still comes from the
-  // host-resolved branding. `applyTenantTheme` takes only `primary` (see its
-  // header for why the other eight colours are deliberately ignored), and a
-  // `null` there removes the override so the stylesheet's own colours resume.
-  const primary = branding?.theme.primary ?? null
+  // Same precedence as the two above, and it matters more here than it looks:
+  // the settings page writes the saved profile straight into the `organization`
+  // query cache, so saving a new primary repaints the dashboard's accent on the
+  // spot instead of on the next full reload. Falling back to the host-resolved
+  // branding keeps the login page (no session, no profile) branded.
+  //
+  // `applyTenantTheme` takes only `primary` — see its header for why the other
+  // eight colours are deliberately ignored — and a `null` removes the override
+  // so the stylesheet's own light/dark colours resume.
+  const primary = org?.theme.primary ?? branding?.theme.primary ?? null
 
   useEffect(() => {
     document.title = name
@@ -77,6 +84,21 @@ export function DocumentBranding() {
   useEffect(() => {
     applyTenantTheme(primary)
   }, [primary])
+
+  /*
+   * The org's saved light/dark mode drives this dashboard too, not just the
+   * candidate portals — an org that picks Light should get a light dashboard
+   * without every user flipping a switch.
+   *
+   * Same precedence as the name and icon above: the authenticated org wins, and
+   * the host-resolved branding covers the login screen where there is no
+   * session yet. `setOrgMode` only acts when the mode CHANGES, so a viewer's
+   * own toggle survives until the org changes its mind.
+   */
+  const orgMode = org?.theme.mode ?? branding?.theme.mode
+  useEffect(() => {
+    setOrgMode(orgMode)
+  }, [orgMode, setOrgMode])
 
   return null
 }

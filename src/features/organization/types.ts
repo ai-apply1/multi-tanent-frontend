@@ -159,6 +159,86 @@ export interface OrgApplyVideo {
 }
 
 /**
+ * How the candidate-facing portals render brand surfaces.
+ *
+ * `gradient` pairs `primary` into `secondary` on CTAs and the backdrop;
+ * `solid` collapses every gradient to flat `primary` and ignores `secondary`
+ * entirely. It records the INTENT of a single-colour brand rather than being
+ * inferred from "are these two the same?", so an org can keep a secondary on
+ * file for a later switch back without it silently taking effect.
+ */
+export type ThemeAccentMode = "gradient" | "solid"
+
+/**
+ * Whether the org's CANDIDATE-facing pages render light or dark.
+ *
+ * Stored, not inferred from the colours, and NOT the dashboard's own theme —
+ * that is a per-viewer toggle in `ThemeContext`. This one is a property of the
+ * org's brand and it decides which logo variant every portal shows.
+ */
+export type ThemeMode = "light" | "dark"
+
+/**
+ * The org's palette, as stored. Every colour is a hex string the backend
+ * normalises to lower case on write, so compare case-insensitively when
+ * diffing (see `sameColor` in OrgSettingsPage).
+ *
+ * Not every field reaches every surface, and the gap is deliberate:
+ * - the apply portal maps five (`primary`, `secondary`, `background`,
+ *   `surface`, `foreground`) onto CSS custom properties;
+ * - transactional emails use only `primary`, `secondary` and `accent`, because
+ *   a dark canvas colour that looks right in a portal renders as an unreadable
+ *   slab in a mail client that strips the surrounding styles;
+ * - this dashboard applies `primary` alone.
+ *
+ * `success` / `warning` / `danger` are carried for status surfaces that don't
+ * consume them yet. They are stored, not decorative.
+ */
+export interface OrganizationTheme {
+  /**
+   * Light or dark, for the candidate portals. Set together with the canvas
+   * colours below — nothing enforces that they agree, so the settings page
+   * warns when a hand-edit leaves them contradicting each other.
+   */
+  mode: ThemeMode
+  primary: string
+  secondary: string
+  accent: ThemeAccentMode
+  /** Page canvas on the candidate portals. */
+  background: string
+  /** Cards and raised panels sitting on `background`. */
+  surface: string
+  /** Body text. Must contrast against BOTH `background` and `surface`. */
+  foreground: string
+  success: string
+  warning: string
+  danger: string
+}
+
+/**
+ * State of the automatic light/dark logo derivation.
+ *
+ * The two `*IsGenerated` flags are computed server-side from the stored keys,
+ * not stored as booleans, so they cannot disagree with which logo is actually
+ * live. Exactly one can be true: only one counterpart is ever derived.
+ */
+export interface OrgLogoVariant {
+  status: "idle" | "processing" | "ready" | "failed"
+  /**
+   * Which way round the admin's upload was, as measured from its pixels.
+   * `light_ink` means they uploaded a white mark, so it became the
+   * dark-background variant and the main logo was derived from it.
+   */
+  sourcePolarity: "dark_ink" | "light_ink"
+  /** Why the last derivation failed. "" when it didn't. */
+  error: string
+  /** The dark-background logo is machine-derived, not an upload. */
+  darkIsGenerated: boolean
+  /** The MAIN logo is machine-derived (only on the `light_ink` path). */
+  mainIsGenerated: boolean
+}
+
+/**
  * `slug`, `status`, `seats` and `industry` are super-admin owned: they come
  * back on the profile but the org-settings PATCH ignores them.
  */
@@ -173,6 +253,16 @@ export interface OrgProfile {
    * hasn't uploaded one — the shell falls back to `<BrandLogo>`.
    */
   logoUrl: string
+  /**
+   * READ-ONLY, written back as `logoDarkKey`. The variant for DARK
+   * backgrounds — "dark" names the backdrop, so the artwork is usually white.
+   *
+   * `""` is the common case and means "use `logoUrl` on both themes", NOT "no
+   * logo". Most orgs upload a single mark that reads on either polarity.
+   */
+  logoDarkUrl: string
+  /** Progress and provenance of the automatic light/dark derivation. */
+  logoVariant: OrgLogoVariant
   /**
    * READ-ONLY, like `logoUrl`, and written back as `faviconKey` (see
    * `UpdateOrganizationPayload`).
@@ -193,6 +283,12 @@ export interface OrgProfile {
   /** The three branded portal domains + their DNS state. Read-only. */
   domains: OrgDomain[]
   settings: OrganizationSettings
+  /**
+   * The brand palette the candidate portals render with. Always populated:
+   * the backend materialises the platform defaults for an org that never set
+   * one, so this is never partial and never absent.
+   */
+  theme: OrganizationTheme
   /** The apply funnel's intro video. `url: ""` means the funnel skips it. */
   applyVideo: OrgApplyVideo
   /**
@@ -216,6 +312,12 @@ export interface OrgProfile {
 export interface UpdateOrganizationPayload {
   name?: string
   logoKey?: string
+  /*
+   * No `logoDarkKey`: the dark-background variant is DERIVED by the
+   * `logo-variant` worker from whatever `logoKey` is set to, and is not
+   * client-writable. `forbidNonWhitelisted` is on globally, so a client still
+   * sending it gets a loud 400 rather than a silently ignored field.
+   */
   /**
    * The key handed back by `presignFavicon()` after the file is in S3. Same
    * READ-`faviconUrl` / WRITE-`faviconKey` asymmetry as the logo; the backend
@@ -224,6 +326,12 @@ export interface UpdateOrganizationPayload {
    */
   faviconKey?: string
   settings?: Partial<OrganizationSettings>
+  /**
+   * Partial by design: the backend writes each colour as its own dot-path
+   * (`theme.primary`), so sending one field can't clobber the other eight.
+   * Send only what changed.
+   */
+  theme?: Partial<OrganizationTheme>
   /*
    * No `applyVideo` here: it is an ingested asset with its own upload/transcode
    * routes (`applyVideoApi.ts`), not a profile field. The backend rejects it on
