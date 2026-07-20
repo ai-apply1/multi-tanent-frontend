@@ -10,12 +10,12 @@ import {
   ChevronRight,
   Library,
   Loader2,
+  MessageCircleQuestion,
   MoreHorizontal,
   Pencil,
   Plus,
   Search,
   Sparkles,
-  Star,
   Trash2,
 } from "lucide-react";
 import toast from "react-hot-toast";
@@ -305,7 +305,7 @@ export function QuestionBankPage() {
                     className="flex cursor-pointer items-start gap-3.5 border-b border-line bg-surface px-[18px] py-[15px] last:border-b-0 hover:bg-hover"
                   >
                     <span className="mt-0.5 flex h-[30px] w-[30px] flex-shrink-0 items-center justify-center rounded-lg bg-surface-3 text-ink-subtle">
-                      <Star className="h-4 w-4" strokeWidth={1.6} />
+                      <MessageCircleQuestion className="h-4 w-4" strokeWidth={1.6} />
                     </span>
                     <div className="min-w-0 flex-1">
                       <p

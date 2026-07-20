@@ -78,7 +78,7 @@ const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 const DEFAULT_PAGE_SIZE = 25;
 
 /**
- * DevExcel grid columns — Candidate / Role / Status / AI score / Manual / Date / kebab.
+ * DevExcel grid columns — Candidate / Role / Status / AI score / Date / kebab.
  *
  * Every column is a fixed `fr` (or px), NEVER `auto`. The header and each data
  * row are SEPARATE grid containers, so an `auto` column sizes to whatever THAT
@@ -87,7 +87,7 @@ const DEFAULT_PAGE_SIZE = 25;
  * means every column after it lands at a different x per row. `fr` units are a
  * fraction of the shared container width, so they line up across all rows.
  */
-const ROW_GRID = "grid-cols-[1.7fr_1.3fr_1.1fr_1.1fr_1fr_0.8fr_40px]";
+const ROW_GRID = "grid-cols-[1.7fr_1.3fr_1.1fr_1.1fr_0.8fr_40px]";
 
 /**
  * Stage badge tint. The org owns the hue (custom columns included), so the
@@ -553,7 +553,7 @@ export function CandidatesPage() {
     : "Candidates";
   const subtitle = routeJobId
     ? "Applicants for this job — CVs, pre-screen verdicts, interview results and funnel stage."
-    : "Every applicant across your jobs — CVs, pre-screen verdicts, interview results, and where each one sits in the funnel.";
+    : "Every applicant across your jobs CVs, pre-screen verdicts, interview results, and where each one sits in the funnel.";
   const cardTitle = selectedJob ? "Applicants" : "All candidates";
   const cardSubline =
     total > 0
@@ -805,7 +805,6 @@ export function CandidatesPage() {
               <span>Role</span>
               <span>Status</span>
               <span className="text-center">AI score</span>
-              <span className="text-center">Manual score</span>
               <span>Date</span>
               <span />
             </div>
@@ -1036,9 +1035,9 @@ function AiScoreCell({
   hasInterview: boolean;
 }) {
   if (value == null) {
-    // Same subtle icon + label as the Manual Score cell, so the two score
-    // columns read consistently. `Pending` (an interview is being scored) is
-    // the one state that differs, because it genuinely is a different one.
+    // A subtle icon + label for the "no score yet" state. `Pending` (an
+    // interview is being scored) is the one state that differs, because it
+    // genuinely is a different one.
     return (
       <span className="inline-flex items-center gap-1.5 text-[13px] text-ink-subtle">
         {hasInterview ? (
@@ -1080,33 +1079,10 @@ function AiScoreCell({
 }
 
 /**
- * Manual score readout — mono `N/100` when a reviewer has scored the
- * candidate, or a subtle "Not scored" chip otherwise. Reads the same field
- * as the AI cell today (list projection doesn't carry it), so it's the
- * "Not scored" state until the drawer populates.
- */
-function ManualScoreCell({ value }: { value: number | null }) {
-  if (value == null) {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-[13px] text-ink-subtle">
-        <Clock className="h-3.5 w-3.5" strokeWidth={1.7} />
-        Not scored
-      </span>
-    );
-  }
-  return (
-    <span className="mono text-[13px]">
-      <span className="font-bold text-ink">{value}</span>
-      <span className="text-ink-subtle"> /100</span>
-    </span>
-  );
-}
-
-/**
  * Loading placeholder for the candidate table. Renders skeleton rows on the
  * SAME `ROW_GRID` as `CandidateRow` (and the live header above it), so the
- * seven columns — checkbox+avatar+name, role, status pill, AI score, manual
- * score, date, kebab — stay aligned and nothing reflows when data arrives.
+ * six columns — checkbox+avatar+name, role, status pill, AI score, date,
+ * kebab — stay aligned and nothing reflows when data arrives.
  */
 function CandidatesTableSkeleton() {
   return (
@@ -1133,8 +1109,6 @@ function CandidatesTableSkeleton() {
           {/* Status pill */}
           <Skeleton className="h-5 w-20 rounded-full" />
           {/* AI score — centered */}
-          <Skeleton className="mx-auto h-5 w-9 rounded-full" />
-          {/* Manual score — centered */}
           <Skeleton className="mx-auto h-5 w-9 rounded-full" />
           {/* Date */}
           <Skeleton className="h-3 w-16" />
@@ -1178,11 +1152,10 @@ function CandidateRow({
   // INVALID_STATUS, so the action is gated rather than offered-then-refused.
   const canInvite = status?.key === INVITABLE_STATUS_KEY;
   const hasInterview = Boolean(row.latestInterviewId);
-  // The list projection doesn't ship scores; the drawer is where the actual
-  // number lives. Kept as explicit locals so the cells' contract is obvious
-  // when a future endpoint starts populating them.
+  // The list projection doesn't ship the score; the drawer is where the actual
+  // number lives. Kept as an explicit local so the cell's contract is obvious
+  // when a future endpoint starts populating it.
   const aiScore: number | null = null;
-  const manualScore: number | null = null;
 
   return (
     <div
@@ -1291,11 +1264,6 @@ function CandidateRow({
       {/* AI score — centered under its header */}
       <div className="flex justify-center">
         <AiScoreCell value={aiScore} hasInterview={hasInterview} />
-      </div>
-
-      {/* Manual score — centered under its header */}
-      <div className="flex justify-center">
-        <ManualScoreCell value={manualScore} />
       </div>
 
       {/* Date */}
