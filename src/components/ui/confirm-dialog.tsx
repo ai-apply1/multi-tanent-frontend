@@ -72,25 +72,38 @@ export function ConfirmDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-[420px] p-0 gap-0">
-        <div className="p-6 pb-2">
+      {/* `overflow-hidden` so the tinted footer bar can bleed to the
+          rounded corners; the X is hidden mid-request because the only
+          honest way out at that point is to wait. */}
+      <DialogContent
+        className="max-w-[440px] gap-0 overflow-hidden p-0"
+        hideCloseButton={loading}
+      >
+        <div className="flex gap-4 p-6">
+          {/* Icon sits BESIDE the copy rather than above it: the block
+              reads as one sentence, and it buys ~50px of height back on
+              short viewports. The ring keeps the soft fill from looking
+              like a flat blob against the card. */}
           <span
             className={
               destructive
-                ? "h-11 w-11 rounded-xl bg-[var(--danger-soft)] text-[var(--danger)] inline-flex items-center justify-center mb-3.5"
-                : "h-11 w-11 rounded-xl bg-[var(--accent-soft)] text-primary inline-flex items-center justify-center mb-3.5"
+                ? "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--danger-soft)] text-[var(--danger)] ring-1 ring-[color-mix(in_srgb,var(--danger),transparent_78%)]"
+                : "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent-soft)] text-primary ring-1 ring-[color-mix(in_srgb,var(--accent),transparent_78%)]"
             }
           >
-            <Icon className="h-[22px] w-[22px]" strokeWidth={1.7} />
+            <Icon className="h-5 w-5" strokeWidth={1.9} />
           </span>
-          <DialogTitle className="text-[18px] font-semibold text-ink">
-            {title}
-          </DialogTitle>
-          <DialogDescription className="mt-2 text-[13.5px] text-ink-muted leading-relaxed">
-            {description}
-          </DialogDescription>
+          <div className="min-w-0 flex-1 pt-0.5">
+            {/* pr-6 keeps a long title clear of the close button. */}
+            <DialogTitle className="pr-6 text-[16.5px] font-semibold leading-snug tracking-[-0.01em] text-ink">
+              {title}
+            </DialogTitle>
+            <DialogDescription className="mt-1.5 text-[13px] leading-[1.55] text-ink-muted">
+              {description}
+            </DialogDescription>
+          </div>
         </div>
-        <div className="border-t border-line px-6 py-4 flex justify-end gap-2.5">
+        <div className="flex justify-end gap-2 border-t border-line bg-[var(--surface-2)] px-5 py-3.5">
           <Button
             variant="secondary"
             size="sm"
@@ -99,11 +112,16 @@ export function ConfirmDialog({
           >
             {cancelLabel}
           </Button>
+          {/* Solid red, not the outlined `danger` pill: this is the
+              dialog's primary action and has to out-weigh Cancel.
+              `min-w` stops the button from resizing when the label
+              swaps for the spinner. */}
           <Button
-            variant={destructive ? "danger" : "default"}
+            variant={destructive ? "destructive" : "default"}
             size="sm"
             onClick={onConfirm}
             disabled={loading}
+            className="min-w-[92px]"
           >
             {loading ? (
               <>

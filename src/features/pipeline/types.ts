@@ -1,52 +1,18 @@
 /**
  * Pipeline feature types.
  *
- * The backend today stores a FLAT catalog of statuses (`/admin/statuses`)
- * with `stageOrder`, `key`, `label`, `color`. The Pipeline page's design
- * wants a two-level model — groups (single-select stages) that OWN statuses
- * — plus gating and auto-seed rules.
+ * The pipeline IS the org's candidate-status catalog — one flat, ordered
+ * list of kanban columns under `/admin/statuses`. There is no group layer,
+ * no gating field and no auto-seed rule in the backend model, so there is
+ * none here either: this file mirrors `CreateStatusDto` / `UpdateStatusDto`
+ * exactly and nothing more.
  *
- * Rather than block the UI on backend changes, we synthesise groups from
- * the flat catalog by bucketing `stageOrder`, and keep the extra fields
- * (gate/system/auto-seed) as UI-only stubs. The two shapes below are the
- * page's props; the transform lives in `pipelineApi.ts`.
+ * The row shape itself is `CandidateStatus` in `@/features/candidates/types`
+ * — the same rows the Candidates page filters and the kanban board renders,
+ * so it is not duplicated here.
  */
 
-export interface PipelineStatus {
-  /** Stable id — the underlying `CandidateStatus._id` when synthesised. */
-  id: string
-  /** Immutable machine key from the backend catalog. */
-  key: string
-  /** Human-readable label. */
-  label: string
-  /** Hex color, always present (falls back to a slate default upstream). */
-  color: string
-  /**
-   * True when the status is driven by automation (i.e. builtin +
-   * non-manual). Rendered as a small muted "system" hint on the row.
-   */
-  system?: boolean
-  /**
-   * Gating label — what has to happen before an operator may set this
-   * status. UI-only for now: derived from the builtin key.
-   */
-  gate?: string | null
-}
-
-export interface PipelineGroup {
-  /** Synthetic id — deterministic per bucket so re-fetches don't remount. */
-  id: string
-  /** Group name shown as the card heading. */
-  name: string
-  /** True for the buckets that map to shipped, coded behaviour. */
-  builtin: boolean
-  /** Sub-line under the card heading. */
-  description: string
-  /** Statuses inside the group, in the backend's `stageOrder`. */
-  statuses: PipelineStatus[]
-}
-
-/** Preset colors offered in the New Status dialog. */
+/** Preset colors offered in the status dialog. */
 export interface StatusColorPreset {
   name: string
   hex: string
@@ -64,36 +30,61 @@ export const STATUS_COLORS: StatusColorPreset[] = [
   { name: "Purple", hex: "#7C3AED" },
 ]
 
-export const STATUS_KINDS = [
-  { value: "assignable", label: "Assignable (operator sets it)" },
-  { value: "system", label: "System (set by automation)" },
-] as const
+/**
+ * The 8 builtin columns occupy `stageOrder` 10..80. A custom column is
+ * slotted between them (e.g. 65 to sit after Shortlisted), so the dialog
+ * defaults new rows past the last builtin rather than to 0.
+ */
+export const BUILTIN_STAGE_ORDER_MAX = 80
 
-export const STATUS_GATES = [
-  { value: "none", label: "No gating" },
-  { value: "initial", label: "After Initial Pass" },
-  { value: "ai", label: "After AI interview" },
-  { value: "manual", label: "After Manual Pass" },
-] as const
+/**
+ * `key` must match the backend's slug rule verbatim — lowercase alnum,
+ * optionally separated by `-` or `_`, and it is IMMUTABLE once created
+ * (activities and funnel automations address columns by key). Validating
+ * client-side only saves a round trip; the server rule is the real one.
+ */
+export const STATUS_KEY_PATTERN = /^[a-z0-9][a-z0-9_-]*$/
 
-export const AUTO_SEED_OPTIONS = [
-  "No Reply",
-  "Not Interested",
-  "Backlog",
-  "Manual Decision Pending",
-  "Manual Pass",
-  "Manual Reject",
-]
-
-export interface CreateGroupPayload {
-  name: string
+/** Body of `POST /admin/statuses` — mirrors `CreateStatusDto`. */
+export interface CreateStatusPayload {
+  key: string
+  label: string
+  color?: string
+  stageOrder: number
+  isTerminal?: boolean
 }
 
-export interface CreateStatusPayload {
-  name: string
-  color: string
-  kind: (typeof STATUS_KINDS)[number]["value"]
-  gate: (typeof STATUS_GATES)[number]["value"]
-  autoSeed: string[]
-  prerequisites: string[]
+/**
+ * Body of `PATCH /admin/statuses/:id` — mirrors `UpdateStatusDto`. Display
+ * fields only: `key` and the builtin/protected flags are not editable and
+ * are stripped server-side by the global `whitelist: true` pipe.
+ */
+export interface UpdateStatusPayload {
+  label?: string
+  color?: string
+  stageOrder?: number
+}
+
+/**
+ * Gap between adjacent columns when a drag-and-drop reorder renumbers the
+ * board. Matches the builtins' own 10/20/…/80 spacing, so a reordered
+ * catalog stays readable and a later hand-typed position still has room to
+ * slot between two neighbours.
+ */
+export const STAGE_ORDER_STEP = 10
+
+/**
+ * Derive a legal `key` from a label: "Reference check" → "reference-check".
+ * The dialog seeds the key field with this while the user is still typing
+ * the label, and stops the moment they edit the key by hand.
+ */
+export function slugifyStatusKey(label: string): string {
+  return label
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s_-]/g, "")
+    .replace(/[\s]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-_]+/, "")
+    .slice(0, 50)
 }

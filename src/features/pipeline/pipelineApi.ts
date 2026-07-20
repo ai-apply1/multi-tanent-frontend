@@ -1,222 +1,87 @@
 /**
- * Pipeline data layer.
+ * Pipeline data layer — the org's candidate-status catalog CRUD.
  *
- * The backend has NO dedicated pipeline endpoints — statuses live in a flat
- * catalog under `/admin/statuses` (managed by `candidatesApi`). The Pipeline
- * page's design expects a two-level model (groups → statuses) plus gating
- * and auto-seed rules that the backend simply doesn't model today. So:
+ * Every call here is a real endpoint on `/admin/statuses`:
  *
- *   1. `listPipelineGroups()` READS the real catalog and derives groups by
- *      bucketing `stageOrder`. If the shape doesn't fit any of the buckets
- *      (older org, custom-only catalog) we degrade to a single "Statuses"
- *      group so the page still renders something useful.
+ *   GET    /admin/statuses      → `listCandidateStatuses` (candidatesApi —
+ *                                 shared with the Candidates page's filter
+ *                                 and the kanban headers, so it is NOT
+ *                                 duplicated here; re-exported for symmetry)
+ *   POST   /admin/statuses      → createStatusColumn
+ *   PATCH  /admin/statuses/:id  → updateStatusColumn
+ *   DELETE /admin/statuses/:id  → deleteStatusColumn
  *
- *   2. The four mutations are STUBS. They resolve immediately and log a
- *      warning — swap them out the moment a real endpoint lands. The page's
- *      onSuccess handlers should show a "(dummy)" toast so operators aren't
- *      surprised when their edits don't persist.
+ * The mutations are named `*StatusColumn` rather than `*CandidateStatus` to
+ * keep them distinct from `updateCandidateStatus` in `candidatesApi`, which
+ * moves ONE CANDIDATE between columns. These edit the columns themselves.
  */
 
-import { listCandidateStatuses } from "@/features/candidates/candidatesApi"
+import api from "@/lib/api"
 import type { CandidateStatus } from "@/features/candidates/types"
-import type {
-  CreateGroupPayload,
-  CreateStatusPayload,
-  PipelineGroup,
-  PipelineStatus,
-} from "./types"
+import { listCandidateStatuses } from "@/features/candidates/candidatesApi"
+import type { CreateStatusPayload, UpdateStatusPayload } from "./types"
+
+export { listCandidateStatuses }
 
 /**
- * Bucket definitions in `stageOrder` order. Kept as a small data table so
- * the group split stays reviewable — the shape is "0..1 → Candidate
- * Response", "2 → Screening", "3..4 → Interview", "5+ → Decision".
- *
- * `builtin: true` matches every bucket because the source catalog rows all
- * carry `builtin` today; if a custom column ever lands in one, we flip
- * `builtin` for the group off in the transform below.
+ * Create a CUSTOM column. `key` is validated server-side as a slug and is
+ * immutable afterwards; a duplicate key in this org is a 409. The
+ * `builtin` / `isProtected` flags are server-owned and always false here,
+ * whatever the client sends.
  */
-interface Bucket {
-  id: string
-  name: string
-  description: string
-  match: (stageOrder: number) => boolean
-}
-
-const BUCKETS: Bucket[] = [
-  {
-    id: "response",
-    name: "Candidate Response",
-    description:
-      "Applications land here. Statuses in this group are set by the applicant or by initial screening.",
-    match: (s) => s <= 1,
-  },
-  {
-    id: "screening",
-    name: "Screening",
-    description:
-      "AI-driven pre-screening. Candidates move on once they've passed or been rejected here.",
-    match: (s) => s === 2,
-  },
-  {
-    id: "interview",
-    name: "Interview",
-    description:
-      "The interview loop — invited, in progress, and scored candidates live here.",
-    match: (s) => s >= 3 && s <= 4,
-  },
-  {
-    id: "decision",
-    name: "Decision",
-    description:
-      "Terminal outcomes. Once a candidate reaches this group, they've exited the funnel one way or the other.",
-    match: (s) => s >= 5,
-  },
-]
-
-/**
- * Gating hints for the eight builtin statuses. Kept UI-only until the
- * backend grows a real `gate` field — swapping this map is how we'd retire
- * the stub.
- */
-const GATE_BY_KEY: Record<string, string | null> = {
-  applied: null,
-  prescreened: "After Initial Pass",
-  invited: "After Initial Pass",
-  interviewing: "After Invite",
-  scored: "After AI interview",
-  shortlisted: "After Manual Pass",
-  hired: "After Manual Pass",
-  rejected: null,
+export async function createStatusColumn(payload: CreateStatusPayload) {
+  const { data } = await api.post<CandidateStatus>("/admin/statuses", payload)
+  return data
 }
 
 /**
- * Statuses that fire automatically — the small "system" hint on the row is
- * driven off this set, not off `builtin`, so a builtin that a human still
- * clicks (e.g. `shortlisted`) doesn't read as automated.
+ * Edit a column's DISPLAY fields — label / color / stageOrder. Works on
+ * protected builtins too: an org may rename "Pre-screened" to "CV review"
+ * without breaking anything, because automations address columns by `key`
+ * and `key` cannot be edited.
  */
-const SYSTEM_KEYS = new Set(["scored", "interviewing"])
-
-const FALLBACK_COLOR = "#64748B"
-
-function toPipelineStatus(row: CandidateStatus): PipelineStatus {
-  return {
-    id: row._id,
-    key: row.key,
-    label: row.label,
-    color: row.color ?? FALLBACK_COLOR,
-    system: SYSTEM_KEYS.has(row.key) || undefined,
-    gate: GATE_BY_KEY[row.key] ?? null,
-  }
-}
-
-export async function listPipelineGroups(): Promise<PipelineGroup[]> {
-  const raw = await listCandidateStatuses()
-
-  // Sort by the catalog's own order so grouping is stable — the backend
-  // returns rows without a guaranteed order otherwise.
-  const sorted = [...raw].sort((a, b) => a.stageOrder - b.stageOrder)
-
-  // Distribute rows into buckets. Rows that don't match any bucket (a
-  // theoretical stageOrder < 0) go into a spare "Other" group so nothing is
-  // silently dropped.
-  const bucketed = new Map<string, CandidateStatus[]>()
-  const orphans: CandidateStatus[] = []
-  for (const row of sorted) {
-    const bucket = BUCKETS.find((b) => b.match(row.stageOrder))
-    if (!bucket) {
-      orphans.push(row)
-      continue
-    }
-    const list = bucketed.get(bucket.id) ?? []
-    list.push(row)
-    bucketed.set(bucket.id, list)
-  }
-
-  // Degraded fallback: no bucket matched any row (e.g. empty catalog, or
-  // heuristics are wrong for this org). Return one flat group so the page
-  // still shows the raw catalog rather than a mystifying blank state.
-  const anyBucketHit = bucketed.size > 0
-  if (!anyBucketHit) {
-    return [
-      {
-        id: "all",
-        name: "Statuses",
-        builtin: false,
-        description:
-          "Every status in your catalog. Grouping will appear once your pipeline shape is recognised.",
-        statuses: sorted.map(toPipelineStatus),
-      },
-    ]
-  }
-
-  const groups: PipelineGroup[] = BUCKETS
-    .map((b) => {
-      const rows = bucketed.get(b.id) ?? []
-      const builtin = rows.every((r) => r.builtin)
-      return {
-        id: b.id,
-        name: b.name,
-        builtin,
-        description: b.description,
-        statuses: rows.map(toPipelineStatus),
-      }
-    })
-    .filter((g) => g.statuses.length > 0)
-
-  if (orphans.length > 0) {
-    groups.push({
-      id: "other",
-      name: "Other",
-      builtin: false,
-      description: "Custom statuses that don't fit the standard buckets.",
-      statuses: orphans.map(toPipelineStatus),
-    })
-  }
-
-  return groups
-}
-
-// ---------------------------------------------------------------------
-// Mutations
-//
-// TODO: no backend — these are stubs. Every one just resolves; the caller
-// still invalidates the react-query cache so the UI re-fetches (which will
-// simply return the same data). Swap the bodies once the backend gains a
-// real pipeline schema.
-// ---------------------------------------------------------------------
-
-export async function createPipelineGroup(payload: CreateGroupPayload): Promise<void> {
-  // TODO: no backend
-  console.warn("[pipelineApi] createPipelineGroup is a stub — backend not implemented.", payload)
-  return Promise.resolve()
-}
-
-export async function createPipelineStatus(
-  groupId: string,
-  payload: CreateStatusPayload,
-): Promise<void> {
-  // TODO: no backend
-  console.warn(
-    "[pipelineApi] createPipelineStatus is a stub — backend not implemented.",
-    { groupId, payload },
-  )
-  return Promise.resolve()
-}
-
-export async function updatePipelineGroup(
-  id: string,
-  payload: { name: string },
-): Promise<void> {
-  // TODO: no backend
-  console.warn("[pipelineApi] updatePipelineGroup is a stub — backend not implemented.", {
-    id,
+export async function updateStatusColumn(
+  statusId: string,
+  payload: UpdateStatusPayload,
+) {
+  const { data } = await api.patch<CandidateStatus>(
+    `/admin/statuses/${statusId}`,
     payload,
-  })
-  return Promise.resolve()
+  )
+  return data
 }
 
-export async function deletePipelineGroup(id: string): Promise<void> {
-  // TODO: no backend
-  console.warn("[pipelineApi] deletePipelineGroup is a stub — backend not implemented.", id)
-  return Promise.resolve()
+/**
+ * Delete a CUSTOM column. Two server guards the UI surfaces verbatim:
+ * 403 for a protected builtin (the funnel automations must always find
+ * them) and 409 while any candidate still sits in the column.
+ */
+export async function deleteStatusColumn(statusId: string) {
+  const { data } = await api.delete<{ deleted: true; statusId: string }>(
+    `/admin/statuses/${statusId}`,
+  )
+  return data
+}
+
+/**
+ * Persist a drag-and-drop reorder in ONE atomic request.
+ *
+ * Send the COMPLETE catalog in its new order — not just the rows that
+ * moved, and no `stageOrder` values. The server derives the numbering
+ * (10, 20, 30 …) and applies the whole board in a single transaction, so
+ * the catalog is never observable in a half-renumbered state.
+ *
+ * Sending the whole list is also the concurrency check: a 409 means a
+ * column was added or deleted since the drag began, and the correct
+ * response is to refetch rather than to retry.
+ *
+ * Returns the reordered catalog, so the caller can drop it straight into
+ * the query cache without a follow-up read.
+ */
+export async function reorderStatusColumns(statusIds: string[]) {
+  const { data } = await api.patch<CandidateStatus[]>(
+    "/admin/statuses/reorder",
+    { statusIds },
+  )
+  return data
 }
