@@ -22,6 +22,11 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
+  OTHER_CITY_VALUE,
+  PAKISTAN_CITIES,
+  PAKISTAN_CITY_SET,
+} from "@/features/candidates/cities"
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -242,14 +247,14 @@ export function UploadCvsDialog({
     }
     if (rejected > 0) {
       toast.error(
-        `Skipped ${rejected} file${rejected === 1 ? "" : "s"} — only PDF, DOC and DOCX are accepted.`
+        `Skipped ${rejected} file${rejected === 1 ? "" : "s"}. Only PDF, DOC and DOCX are accepted.`
       )
     }
     setRows((prev) => {
       const room = MAX_CV_UPLOAD_FILES - prev.length
       if (built.length > room) {
         toast.error(
-          `You can import ${MAX_CV_UPLOAD_FILES} CVs at a time — the extra ${
+          `You can import ${MAX_CV_UPLOAD_FILES} CVs at a time, so the extra ${
             built.length - room
           } were left out.`
         )
@@ -287,7 +292,7 @@ export function UploadCvsDialog({
         }
       }
       if (truncated) {
-        toast.error("That archive was too large — only part of it was read.")
+        toast.error("That archive was too large, so only part of it was read.")
       }
       if (fromZips.length === 0 && skipped === 0) {
         toast.error("No PDF, DOC or DOCX files were found in that ZIP.")
@@ -307,7 +312,7 @@ export function UploadCvsDialog({
   }
 
   const emailError = (row: UploadRow): string | null => {
-    if (!row.email.trim()) return "Email is required — the CV didn't have one."
+    if (!row.email.trim()) return "Email is required. The CV didn't have one."
     if (!EMAIL_RE.test(row.email.trim())) return "Enter a valid email."
     return null
   }
@@ -316,7 +321,7 @@ export function UploadCvsDialog({
     row.fullName.trim() ? null : "Name is required."
 
   const phoneError = (row: UploadRow): string | null =>
-    row.phone.trim() ? null : "Phone is required — the CV didn't have one."
+    row.phone.trim() ? null : "Phone is required. The CV didn't have one."
 
   /**
    * City is required because the job's city gate compares against it. A CV
@@ -324,7 +329,7 @@ export function UploadCvsDialog({
    * stops here rather than guessing.
    */
   const cityError = (row: UploadRow): string | null =>
-    row.city.trim() ? null : "City is required — the CV didn't have one."
+    row.city.trim() ? null : "City is required. Pick one from the list."
 
   const rowIncomplete = (row: UploadRow): boolean =>
     Boolean(emailError(row) || nameError(row) || phoneError(row) || cityError(row))
@@ -379,7 +384,7 @@ export function UploadCvsDialog({
       })
 
       if (uploaded.length === 0) {
-        throw new Error("Every upload failed — no CVs could be read.")
+        throw new Error("Every upload failed, so no CVs could be read.")
       }
 
       // 3. Read them. Sequential small batches, so the progress counter is
@@ -471,7 +476,20 @@ export function UploadCvsDialog({
         onOpenChange(next)
       }}
     >
-      <DialogContent className="flex max-h-[90vh] max-w-[480px] flex-col gap-0 p-0">
+      {/*
+        Sized for the REVIEW step, which is the widest thing this dialog shows:
+        four labelled fields per CV in a two-column grid. At the old 480px each
+        column was ~200px, so a full name or an email wrapped or truncated in
+        the very form whose job is checking them before an invite goes out, and
+        the extra wrapping made the dialog taller than it needed to be.
+
+        The height cap is on the DIALOG, and the CV list inside it scrolls
+        (`min-h-0 flex-1 overflow-y-auto` below), so the title and the Import
+        button stay on screen no matter how many CVs were dropped. 85vh rather
+        than 90vh leaves the backdrop visible top and bottom, which is what
+        makes it read as a dialog rather than a page.
+      */}
+      <DialogContent className="flex max-h-[85vh] w-full max-w-[760px] flex-col gap-0 p-0">
         <div className="flex items-start justify-between gap-4 px-6 pt-[22px] pb-[14px]">
           <div className="min-w-0">
             <DialogTitle className="text-[18px] font-semibold leading-tight">
@@ -483,12 +501,12 @@ export function UploadCvsDialog({
               ) : phase === "review" ? (
                 <>
                   Read from {importable.length} CV{importable.length === 1 ? "" : "s"}. Fix
-                  anything wrong before importing — the email is where the interview invite
+                  anything wrong before importing. The email is where the interview invite
                   (or rejection) goes, and it can't be unsent.
                 </>
               ) : (
                 <>
-                  Add up to {MAX_CV_UPLOAD_FILES} CVs — drop a{" "}
+                  Add up to {MAX_CV_UPLOAD_FILES} CVs. Drop a{" "}
                   <strong>ZIP</strong> or pick files. Each becomes a candidate at{" "}
                   <em>Applied</em>, and the CV is parsed and pre-screened automatically. PDF,
                   DOC and DOCX only.
@@ -617,8 +635,8 @@ export function UploadCvsDialog({
               {phase === "select" ? (
                 rows.length === 0 ? (
                   <p className="text-center text-[12px] text-ink-muted">
-                    Drop a ZIP of CVs and the details are read from each one —
-                    you check them on the next step before anything is created.
+                    Drop a ZIP of CVs and the details are read from each one.
+                    You check them on the next step before anything is created.
                   </p>
                 ) : (
                   <SelectList rows={rows} busy={busy} onRemove={removeRow} />
@@ -633,7 +651,7 @@ export function UploadCvsDialog({
                           {needsAttention.length} CV
                           {needsAttention.length === 1 ? "" : "s"}
                         </strong>{" "}
-                        need a detail typed in — they're listed first. The rest are ready.
+                        need a detail typed in, so they're listed first. The rest are ready.
                       </p>
                     </div>
                   ) : null}
@@ -909,7 +927,7 @@ function ReviewRow({
             disabled={busy}
             aria-invalid={Boolean(emailMsg)}
             maxLength={320}
-            placeholder="Not found — type it"
+            placeholder="Not found, type it"
             onChange={(e) => onPatch({ email: e.target.value })}
             onBlur={onTouch}
           />
@@ -925,33 +943,141 @@ function ReviewRow({
             disabled={busy}
             aria-invalid={Boolean(phoneMsg)}
             maxLength={40}
-            placeholder="Not found — type it"
+            placeholder="Not found, type it"
             onChange={(e) => onPatch({ phone: e.target.value })}
             onBlur={onTouch}
           />
           {phoneMsg ? <p className="text-xs text-[var(--danger)]">{phoneMsg}</p> : null}
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor={`city-${row.id}`} className="text-xs text-ink">
-            City
-          </Label>
-          <Input
-            id={`city-${row.id}`}
-            value={row.city}
-            disabled={busy}
-            aria-invalid={Boolean(cityMsg)}
-            maxLength={120}
-            placeholder="Not found — type it"
-            onChange={(e) => onPatch({ city: e.target.value })}
-            onBlur={onTouch}
-          />
-          {cityMsg ? <p className="text-xs text-[var(--danger)]">{cityMsg}</p> : null}
-        </div>
+        <CityField
+          rowId={row.id}
+          value={row.city}
+          disabled={busy}
+          invalid={Boolean(cityMsg)}
+          message={cityMsg}
+          onChange={(city) => onPatch({ city })}
+          onTouch={onTouch}
+        />
       </div>
     </div>
   )
 }
 
+/**
+ * City picker for one review row: a dropdown of known cities plus an "Other"
+ * escape hatch that reveals a free text input.
+ *
+ * Mirrors the apply portal's `ApplyCityField`, and for the same reason: both
+ * funnels write `candidates.city`, and free text produced "Lahore", "lahore"
+ * and "Lahore, Pakistan" as three different cities, which the job's city gate
+ * and every location segment then treated as three places.
+ *
+ * The escape hatch is NOT optional here. On the apply form a human types their
+ * own city; here the value was extracted from a PDF by a model, so it can be a
+ * town that is not on the list, a misread, or empty. Forcing the list would
+ * make those rows unimportable, and the import is the whole point of this
+ * dialog. So: an unrecognised extracted value opens in free text with the
+ * value KEPT, rather than being silently discarded for not matching.
+ */
+function CityField({
+  rowId,
+  value,
+  disabled,
+  invalid,
+  message,
+  onChange,
+  onTouch,
+}: {
+  rowId: string
+  value: string
+  disabled: boolean
+  invalid: boolean
+  message: string | null
+  onChange: (city: string) => void
+  onTouch: () => void
+}) {
+  // Seeded from the extracted value so a city the parser found but the list
+  // does not carry re-opens in free text instead of looking like nothing was
+  // read. Re-seeding on every change would fight the user, so this is state,
+  // not a derived value.
+  const [isOther, setIsOther] = useState(
+    () => value.trim().length > 0 && !PAKISTAN_CITY_SET.has(value.trim()),
+  )
+
+  const selectValue = isOther
+    ? OTHER_CITY_VALUE
+    : PAKISTAN_CITY_SET.has(value)
+      ? value
+      : ""
+
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={`city-${rowId}`} className="text-xs text-ink">
+        City
+      </Label>
+      {isOther ? (
+        <div className="flex gap-1.5">
+          <Input
+            id={`city-${rowId}`}
+            value={value}
+            disabled={disabled}
+            aria-invalid={invalid}
+            maxLength={120}
+            autoFocus
+            placeholder="Type the city"
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={onTouch}
+          />
+          <button
+            type="button"
+            disabled={disabled}
+            // Back to the list, clearing the typed value: leaving it would
+            // show a dropdown whose selection contradicts the stored city.
+            onClick={() => {
+              setIsOther(false)
+              onChange("")
+            }}
+            className="shrink-0 rounded-md px-2 text-xs font-medium text-ink-muted transition-colors hover:text-ink disabled:pointer-events-none disabled:opacity-50"
+          >
+            List
+          </button>
+        </div>
+      ) : (
+        <Select
+          value={selectValue}
+          disabled={disabled}
+          onValueChange={(selected) => {
+            if (selected === OTHER_CITY_VALUE) {
+              setIsOther(true)
+              onChange("")
+              return
+            }
+            onChange(selected)
+            onTouch()
+          }}
+        >
+          <SelectTrigger
+            id={`city-${rowId}`}
+            aria-invalid={invalid}
+            onBlur={onTouch}
+            className="w-full"
+          >
+            <SelectValue placeholder="Select a city" />
+          </SelectTrigger>
+          <SelectContent className="max-h-72">
+            {PAKISTAN_CITIES.map((city) => (
+              <SelectItem key={city} value={city}>
+                {city}
+              </SelectItem>
+            ))}
+            <SelectItem value={OTHER_CITY_VALUE}>Other</SelectItem>
+          </SelectContent>
+        </Select>
+      )}
+      {message ? <p className="text-xs text-[var(--danger)]">{message}</p> : null}
+    </div>
+  )
+}
 /**
  * The honest two-column outcome. `created` and `skipped` are independent —
  * showing only the first would quietly lose candidates the user believes they
@@ -1017,7 +1143,7 @@ function ImportSummary({ result }: { result: BulkConfirmResult }) {
             ))}
           </ul>
           <p className="text-[11px] text-ink-muted">
-            Skipped rows created nothing — nothing to undo. Re-upload after
+            Skipped rows created nothing, so there's nothing to undo. Re-upload after
             fixing the email, or open the existing candidate if they already
             applied to this job.
           </p>
