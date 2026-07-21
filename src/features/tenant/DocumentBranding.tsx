@@ -8,23 +8,28 @@ import { PLATFORM_FAVICON, PLATFORM_NAME } from "@/lib/platform"
 /**
  * Swap the tab's favicon.
  *
- * Rewrites the EXISTING `<link rel="icon">` from `index.html` rather than
- * appending a second one: browsers are inconsistent about which of several
- * icons they pick, so appending gives a coin flip between the platform's icon
- * and the tenant's. Falls back to creating the link only if the static one has
- * been removed.
+ * `index.html` ships NO static icon (white-label: the platform has no mark to
+ * show), so this is the only writer. Rewrites an existing `<link rel="icon">`
+ * rather than appending a second one — browsers are inconsistent about which
+ * of several icons they pick — and REMOVES the link entirely when there is
+ * nothing to show: an empty `href` resolves to the page URL itself, which
+ * browsers then fetch and fail on, so "no icon" must mean no link at all.
  */
 const applyFavicon = (href: string): void => {
+  const existing = document.querySelector<HTMLLinkElement>("link[rel~='icon']")
+  if (!href) {
+    existing?.remove()
+    return
+  }
   const link =
-    document.querySelector<HTMLLinkElement>("link[rel~='icon']") ??
+    existing ??
     document.head.appendChild(
       Object.assign(document.createElement("link"), { rel: "icon" }),
     )
   link.href = href
-  // An org's icon may be a .png, .svg or .ico, and the platform default is an
-  // .ico — we can't tell the type from the URL. A wrong `type` is a rendering
-  // coin flip, so assert nothing and let the server's Content-Type decide.
-  // (`index.html` omits it for the same reason.)
+  // An org's icon may be a .png, .svg or .ico — we can't tell the type from
+  // the URL. A wrong `type` is a rendering coin flip, so assert nothing and
+  // let the server's Content-Type decide.
   link.removeAttribute("type")
 }
 
