@@ -54,13 +54,21 @@ export function VariantAudioPlayer({
     setLoading(true)
     try {
       const next = await ensureUrl()
-      // `setUrl` above is async to the DOM, so point the element at the fresh
-      // URL directly for this press; React reconciles the same value into the
-      // `src` prop on the next render.
-      if (el.currentSrc !== next && el.src !== next) el.src = next
+      // Drive `src` PURELY through the ref — never also through a React prop.
+      // Binding it to state as well meant the `setUrl` inside `ensureUrl`
+      // re-rendered and made React write `src` a SECOND time; that load landed
+      // while the `play()` below was still pending and interrupted it —
+      // "The play() request was interrupted by a new load request". Assign once,
+      // only when it actually changed, then play.
+      if (el.src !== next && el.currentSrc !== next) el.src = next
       await el.play()
     } catch (err) {
-      toast.error(apiError(err, "Could not play this clip."))
+      // A load or pause that lands while play() is still pending rejects it
+      // with AbortError — benign (the operator paused or re-pressed). Only real
+      // failures (expired URL → 403, network, decode) should surface.
+      if (!(err instanceof DOMException && err.name === "AbortError")) {
+        toast.error(apiError(err, "Could not play this clip."))
+      }
       setPlaying(false)
     } finally {
       setLoading(false)
@@ -69,9 +77,10 @@ export function VariantAudioPlayer({
 
   return (
     <>
+      {/* `src` is set imperatively in `toggle` (via the ref), never here — a
+          React-managed `src` would re-load the element and interrupt play(). */}
       <audio
         ref={audioRef}
-        src={url || undefined}
         preload="none"
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
