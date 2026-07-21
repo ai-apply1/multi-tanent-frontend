@@ -444,6 +444,21 @@ function QuestionRow({
     if (parsed !== question.weightPct) onWeight(parsed)
   }
 
+  // Arrow-key stepping (↑/↓ by 1, Shift+↑/↓ by 10), like a number spinner.
+  // Steps from whatever the box currently shows, falling back to the committed
+  // value when it's mid-edit (empty/non-integer). Clamped to 0–100 and pushed
+  // straight to the staged list so the total-weight footer updates live.
+  const step = (delta: number) => {
+    const parsed = Number(weightDraft.trim())
+    const base =
+      weightDraft.trim() && Number.isInteger(parsed)
+        ? parsed
+        : question.weightPct
+    const next = Math.min(100, Math.max(0, base + delta))
+    setWeightDraft(String(next))
+    if (next !== question.weightPct) onWeight(next)
+  }
+
   const diffClass = question.difficultyLevel
     ? DIFFICULTY_CHIP[question.difficultyLevel]
     : ""
@@ -522,6 +537,15 @@ function QuestionRow({
             onChange={(e) =>
               setWeightDraft(e.target.value.replace(/[^0-9]/g, ""))
             }
+            onKeyDown={(e) => {
+              if (e.key === "ArrowUp") {
+                e.preventDefault()
+                step(e.shiftKey ? 10 : 1)
+              } else if (e.key === "ArrowDown") {
+                e.preventDefault()
+                step(e.shiftKey ? -10 : -1)
+              }
+            }}
             onBlur={commitWeight}
             className="mono h-full w-[44px] border-0 bg-transparent px-1 text-right text-[13px] font-bold text-primary outline-none"
             inputMode="numeric"

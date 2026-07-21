@@ -134,7 +134,7 @@ export function JobShareDialog({ jobId, open, onOpenChange }: JobShareDialogProp
                   <span className="font-semibold text-ink">
                     {linkQuery.data.jobTitle}
                   </span>{" "}
-                  to candidates — anyone with the link can apply.
+                  to candidates - anyone with the link can apply.
                 </>
               ) : (
                 "Send the invite link to candidates — anyone with the link can apply."
