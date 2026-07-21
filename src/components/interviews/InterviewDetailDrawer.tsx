@@ -892,11 +892,10 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
     }
   };
 
-  // Candidate-scoped invite — the drawer's "Resend invite" empty-state action.
-  // Only pre-screened candidates can be manually invited (API returns 409
-  // otherwise), so the button is disabled with a tooltip in every other state.
-  const canSendCandidateInvite =
-    candidate?.currentStatusId.key === INVITABLE_STATUS_KEY;
+  // Candidate-scoped invite — the drawer's "Resend invite" action. Always
+  // available: the admin can send a fresh link from any status (the backend
+  // only refuses on a closed job / spent attempt cap, with a clear message).
+  const canSendCandidateInvite = Boolean(candidateId);
   const handleSendCandidateInvite = async () => {
     if (!candidateId || invitingCand) return;
     setInvitingCand(true);
