@@ -3,7 +3,9 @@
 
 <head>
   <meta charset="UTF-8" />
-  <link rel="icon" href="/favicon.ico" />
+  <!-- No static favicon: the platform ships none (white-label), and
+       `DocumentBranding` injects the tenant's own icon once branding
+       resolves. A static link here would flash a wrong/dead icon first. -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
