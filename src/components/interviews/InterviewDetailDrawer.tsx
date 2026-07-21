@@ -1134,17 +1134,17 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">
-                  {/* Resend invite — re-sends the link for the candidate's
-                      CURRENT attempt; it does NOT create a new one (that is
-                      "Reattempt interview" below). Available from any status;
-                      the backend only refuses on a closed job / spent attempt
-                      cap, with a clear message. */}
+                  {/* Resend invite — re-sends the link for the CURRENT attempt,
+                      valid only while it's still pending (invited, not started).
+                      Once the attempt has been started/submitted the backend
+                      refuses with a message pointing at "Reattempt interview"
+                      below, which opens a new attempt. */}
                   <DropdownMenuItem
                     disabled={
                       !candidateId || !canSendCandidateInvite || invitingCand
                     }
                     onSelect={handleSendCandidateInvite}
-                    title="Re-send the interview link for the current attempt (no new attempt)"
+                    title={'Re-sends the link while the invite is still pending — once started, use "Reattempt interview"'}
                   >
                     <Send className="h-3.5 w-3.5" strokeWidth={1.7} />
                     Resend invite
