@@ -51,14 +51,17 @@ export interface CreateStatusPayload {
 }
 
 /**
- * Body of `PATCH /admin/statuses/:id` — mirrors `UpdateStatusDto`. Display
- * fields only: `key`, the builtin/protected flags and `stageOrder` are not
- * editable here (position is owned by drag-and-drop) and are stripped
- * server-side by the global `whitelist: true` pipe.
+ * Body of `PATCH /admin/statuses/:id` — mirrors `UpdateStatusDto`. `key`,
+ * the builtin/protected flags and `stageOrder` are not editable here
+ * (position is owned by drag-and-drop) and are stripped server-side by the
+ * global `whitelist: true` pipe. `isTerminal` IS patchable, but the server
+ * silently ignores it for protected built-in columns — their terminality is
+ * part of the funnel contract.
  */
 export interface UpdateStatusPayload {
   label?: string
   color?: string
+  isTerminal?: boolean
 }
 
 /**

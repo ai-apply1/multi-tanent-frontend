@@ -32,12 +32,12 @@ interface StatusDialogProps {
  * Create / edit one kanban column.
  *
  * The two modes differ by exactly what the backend allows: CREATE sends
- * `key` + `isTerminal` alongside the display fields; EDIT sends display
- * fields ONLY, because `key` is immutable and the builtin/terminal flags
- * are server-owned. Board position is never sent — the server appends a new
- * column and drag-and-drop reorders it. So the key and terminal inputs are
- * not merely disabled in edit mode — they are not sent at all, and the
- * global `whitelist: true` pipe would strip them anyway.
+ * `key` + `isTerminal` alongside the display fields; EDIT sends the display
+ * fields plus, for CUSTOM columns only, `isTerminal` — `key` is immutable
+ * and a protected built-in's terminality is server-owned (the service
+ * ignores the flag for those, so we don't offer the toggle either). Board
+ * position is never sent — the server appends a new column and
+ * drag-and-drop reorders it.
  */
 export function StatusDialog({
   open,
@@ -73,6 +73,9 @@ export function StatusDialog({
         return updateStatusColumn(status!._id, {
           label: label.trim(),
           color,
+          // Only custom columns may change terminality — the server ignores
+          // the flag on protected built-ins, so don't send it for those.
+          ...(pinned ? {} : { isTerminal }),
         });
       }
       return createStatusColumn({
@@ -127,7 +130,7 @@ export function StatusDialog({
               {pinned
                 ? "A built-in stage. Rename and recolour it freely — the key and its position in the funnel are fixed, because the hiring automations run in that order and reference this column by key."
                 : isEdit
-                  ? "Name and colour are editable. The key is fixed — automations and the activity timeline reference this column by it. Drag the row on the board to change its position."
+                  ? "Name, colour and the freeze setting are editable. The key is fixed — automations and the activity timeline reference this column by it. Drag the row on the board to change its position."
                   : "A new column on the candidate board. It's added at the end — drag it into place afterward. The key is permanent, so pick it deliberately."}
             </DialogDescription>
           </div>
@@ -219,9 +222,10 @@ export function StatusDialog({
                 what they actually mean is "hold this person here until I say
                 otherwise". Same flag, same behaviour.
 
-                Create-only: `UpdateStatusDto` has no `isTerminal` field, so
-                the server cannot patch it. */}
-            {!isEdit ? (
+                Hidden for protected built-ins only: their terminality is part
+                of the funnel contract and the server ignores the field for
+                them. Custom columns can toggle it in create AND edit. */}
+            {!pinned ? (
               <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-line p-3">
                 <input
                   type="checkbox"

@@ -677,7 +677,13 @@ function countLabel(count: number | null): string {
  * Labels and dot colours come from the catalog, so a renamed or recoloured
  * column carries through. While the board is loading (`columns` undefined) the
  * previous three static rows render with dashes — never a flash of zeros.
+ *
+ * Long pipelines collapse to the first `FUNNEL_COLLAPSED_ROWS` stages (board
+ * order, so the top of the funnel) behind a "View all" toggle — the card sits
+ * in the sticky right rail and must not grow past the viewport.
  */
+const FUNNEL_COLLAPSED_ROWS = 6;
+
 function FunnelCard({
   kpi,
   columns,
@@ -685,6 +691,7 @@ function FunnelCard({
   kpi: JobKpi;
   columns: KanbanColumn[] | undefined;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const rows: { key: string; label: string; count: number | null; tint: string }[] =
     columns
       ? columns.map((column) => ({
@@ -724,7 +731,7 @@ function FunnelCard({
         </span>
       </div>
       <div className="grid gap-3">
-        {rows.map((r) => {
+        {(expanded ? rows : rows.slice(0, FUNNEL_COLLAPSED_ROWS)).map((r) => {
           /*
            * Share of all applicants. The 6% floor keeps a real-but-tiny bar
            * visible (1 of 900 rounds to 0%) and must NOT apply to zero — a
@@ -760,6 +767,15 @@ function FunnelCard({
           );
         })}
       </div>
+      {rows.length > FUNNEL_COLLAPSED_ROWS ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((e) => !e)}
+          className="mt-4 w-full rounded-lg border border-line py-1.5 text-center text-[12.5px] font-semibold text-primary transition-colors hover:bg-surface-2"
+        >
+          {expanded ? "Show less" : `View all ${rows.length} stages`}
+        </button>
+      ) : null}
     </div>
   );
 }
