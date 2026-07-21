@@ -183,7 +183,10 @@ export function ForgotPasswordPage() {
   const orgName = organization?.name || PLATFORM_NAME
 
   return (
-    <div className="grid min-h-screen w-full bg-[var(--surface)] lg:grid-cols-2">
+    // `h-full overflow-y-auto`, not `min-h-screen`: the document itself no
+    // longer scrolls (see globals.css), so a standalone screen has to own its
+    // scrolling or the tall "code" step would be clipped on a short viewport.
+    <div className="grid h-full w-full overflow-y-auto bg-[var(--surface)] lg:grid-cols-2">
       {/* -------- Form panel -------- */}
       <div className="flex items-center justify-center px-6 py-10 lg:px-10">
         <div className="w-full max-w-[340px]">

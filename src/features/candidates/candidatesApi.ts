@@ -1,5 +1,5 @@
 import axios from "axios"
-import api from "@/lib/api"
+import api, { apiUrl } from "@/lib/api"
 import type {
   BulkConfirmResult,
   BulkConfirmRow,
@@ -74,12 +74,11 @@ export async function getCandidateCvUrl(candidateId: string) {
 }
 
 /**
- * Mint a same-domain, inline CV view URL. Returns a RELATIVE path
- * (`/cv/<id>/<name>.pdf?t=<token>`) that the caller opens on the current
- * origin, so the reviewer sees the portal's own domain and the PDF renders in
- * the tab, rather than the raw S3 link. A reverse-proxy rewrite (Vite in dev,
- * Vercel in prod) forwards `/cv/*` to the backend, which verifies the token and
- * streams the file. See the backend `CvViewController`.
+ * Mint a short-lived, inline CV view URL. Returns a RELATIVE path
+ * (`/cv/<id>/<name>?t=<token>`) that `fetchCandidateCvBlobUrl` resolves against
+ * the backend API origin — the same host every other call uses — so the backend
+ * verifies the one-time token and streams the file for rendering as an in-tab
+ * blob, rather than exposing the raw S3 link. See the backend `CvViewController`.
  */
 export async function getCandidateCvViewUrl(candidateId: string) {
   const { data } = await api.post<{ url: string; expiresIn: number }>(
@@ -111,12 +110,19 @@ export async function fetchCandidateCvBlobUrl(
   candidateId: string
 ): Promise<string> {
   const { url } = await getCandidateCvViewUrl(candidateId)
-  const res = await fetch(window.location.origin + url)
+  // Fetch from the backend API origin (like every other call), NOT the page
+  // origin: the relative `/cv/...` path is served by the backend, and routing
+  // it through the API host keeps the token's mint host and its redeem host
+  // identical in every environment. A Vercel `/cv` rewrite can't do this —
+  // its destination is a static string that can't read `VITE_API_BASE_URL`.
+  const res = await fetch(apiUrl(`/api/v1${url}`))
   if (!res.ok) throw new Error(`Could not load the CV (${res.status}).`)
   // The route serves the bytes as `text/plain` so a download manager (IDM)
   // ignores the fetch; the REAL type comes back in `X-Cv-Content-Type`. Build
-  // the blob from that so it renders as a PDF (same-origin fetch, so the header
-  // is readable). Never trust `res.blob()`'s type here — it would be text/plain.
+  // the blob from that so it renders as a PDF. This is a CROSS-origin fetch, so
+  // the header is only readable because the backend lists `X-Cv-Content-Type`
+  // in its CORS `exposedHeaders` — keep the two in sync. Never trust
+  // `res.blob()`'s type here — it would be text/plain.
   const type = res.headers.get("x-cv-content-type") || "application/pdf"
   const buf = await res.arrayBuffer()
   return URL.createObjectURL(new Blob([buf], { type }))

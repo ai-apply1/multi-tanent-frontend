@@ -5,7 +5,15 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
-import { Link as LinkIcon, Loader2, Mail, Send, Trash2, X } from "lucide-react"
+import {
+  AlertTriangle,
+  Link as LinkIcon,
+  Loader2,
+  Mail,
+  Send,
+  Trash2,
+  X,
+} from "lucide-react"
 import toast from "react-hot-toast"
 import {
   Dialog,
@@ -25,7 +33,16 @@ import { errorMessage as apiError } from "@/lib/errors"
 import { cn } from "@/lib/utils"
 
 const MAX_EMAILS = 25
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+// Kept in step with the backend's `@IsEmail({}, { each: true })` on
+// SendJobInvitesDto: the DTO validates the whole array, so a single address that
+// passes a looser client check but fails validator.js 400s the ENTIRE batch —
+// every valid recipient in the same send is dropped, and the class-validator
+// message never names the offender. This mirrors validator.js's common domain
+// rejections (empty/leading/trailing dots, a 1-char TLD, leading/trailing-hyphen
+// labels) so the chip-commit toast rejects the bad address by name before it can
+// ever reach the send.
+const EMAIL_RE =
+  /^[^\s@]+@(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/
 
 interface JobShareDialogProps {
   jobId: string
@@ -120,6 +137,13 @@ export function JobShareDialog({ jobId, open, onOpenChange }: JobShareDialogProp
   }
 
   const shareUrl = linkQuery.data?.url ?? ""
+  // The apply portal only serves an application form for OPEN jobs — a link to a
+  // draft/closed/archived job resolves to its "not available" gate (or a 404 for
+  // a draft). The backend builds the URL regardless of status, so we gate the
+  // whole dialog — copy AND email invite — on the status it already returns,
+  // rather than hand out a link that silently dead-ends for the candidate.
+  const status = linkQuery.data?.status
+  const isNonOpen = status !== undefined && status !== "open"
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -134,8 +158,11 @@ export function JobShareDialog({ jobId, open, onOpenChange }: JobShareDialogProp
                   <span className="font-semibold text-ink">
                     {linkQuery.data.jobTitle}
                   </span>{" "}
-                  to candidates - anyone with the link can apply.
+                  to candidates
+                  {isNonOpen ? "." : " - anyone with the link can apply."}
                 </>
+              ) : isNonOpen ? (
+                "Send the invite link to candidates."
               ) : (
                 "Send the invite link to candidates — anyone with the link can apply."
               )}
@@ -150,6 +177,20 @@ export function JobShareDialog({ jobId, open, onOpenChange }: JobShareDialogProp
             <X className="h-4 w-4" strokeWidth={1.9} />
           </button>
         </div>
+
+        {isNonOpen ? (
+          <div className="mb-3 flex items-start gap-2 rounded-lg border border-[var(--warning)]/40 bg-[var(--warning-soft)] px-3 py-2">
+            <AlertTriangle
+              className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warning)]"
+              strokeWidth={1.9}
+            />
+            <p className="text-[12.5px] text-[var(--warning)]">
+              {status === "draft"
+                ? "This job isn't published yet — the link won't work for candidates until you publish it."
+                : `This job isn't open (${status}) — the link won't work for candidates until it's reopened.`}
+            </p>
+          </div>
+        ) : null}
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {/* Invite by email */}
@@ -207,7 +248,9 @@ export function JobShareDialog({ jobId, open, onOpenChange }: JobShareDialogProp
               size="sm"
               className="mt-3 w-full"
               onClick={handleSend}
-              disabled={sendMutation.isPending || emails.length === 0}
+              disabled={
+                sendMutation.isPending || emails.length === 0 || isNonOpen
+              }
             >
               {sendMutation.isPending ? (
                 <>
@@ -264,7 +307,9 @@ export function JobShareDialog({ jobId, open, onOpenChange }: JobShareDialogProp
                   Share interview link
                 </h3>
                 <p className="text-[12px] text-ink-muted">
-                  Anyone with the link can apply.
+                  {isNonOpen
+                    ? "The link goes live once this job is open."
+                    : "Anyone with the link can apply."}
                 </p>
               </div>
             </header>
@@ -283,6 +328,14 @@ export function JobShareDialog({ jobId, open, onOpenChange }: JobShareDialogProp
                 <div className="text-[12.5px] text-[var(--danger)]">
                   Could not load link.
                 </div>
+              ) : isNonOpen ? (
+                // The URL dead-ends at the apply portal's "not available" gate
+                // while the job isn't open, so we withhold the copy affordance
+                // rather than let it be handed out.
+                <div className="flex items-center gap-2 text-[12.5px] text-ink-muted">
+                  <LinkIcon className="h-4 w-4 shrink-0" strokeWidth={1.8} />
+                  The share link activates once this job is open.
+                </div>
               ) : (
                 <>
                   <span
@@ -296,7 +349,9 @@ export function JobShareDialog({ jobId, open, onOpenChange }: JobShareDialogProp
               )}
             </div>
             <p className="mt-2 text-[11.5px] text-ink-muted">
-              Post it anywhere — a job board, a Slack message, a QR code.
+              {isNonOpen
+                ? "It won't reach candidates until the job is open."
+                : "Post it anywhere — a job board, a Slack message, a QR code."}
             </p>
           </section>
         </div>

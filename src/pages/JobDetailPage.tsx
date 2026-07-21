@@ -54,7 +54,7 @@ import {
   listCandidateStatuses,
   listCandidates,
 } from "@/features/candidates/candidatesApi";
-import { invalidateCandidateData } from "@/features/candidates/candidatesCache";
+import { invalidateCandidateDataAndJobCounts } from "@/features/candidates/candidatesCache";
 import { aiScoreState, type AiScoreState } from "@/features/candidates/aiScore";
 import type {
   CandidateListItem,
@@ -206,7 +206,11 @@ export function JobDetailPage() {
     setDrawerCandidateId(null);
   }, [detailQuery.isError, detailQuery.error]);
 
-  const invalidateCandidates = () => invalidateCandidateData(queryClient);
+  // Import CREATES candidates, which moves this job's total applicant count —
+  // so the CV-import callback below refreshes the Jobs list too, not just the
+  // candidate-derived surfaces.
+  const invalidateCandidates = () =>
+    invalidateCandidateDataAndJobCounts(queryClient);
 
   if (isLoading) {
     return <JobDetailSkeleton />;
@@ -519,9 +523,6 @@ function OverviewTab({ job, kpi }: { job: Job; kpi: JobKpi }) {
               ) : (
                 <span className="mono">{job.maxAttempts}</span>
               )}
-            </MetaCell>
-            <MetaCell label="Shortlist threshold">
-              <span className="mono">{job.rejectionThreshold}</span>
             </MetaCell>
           </div>
         </SectionCard>

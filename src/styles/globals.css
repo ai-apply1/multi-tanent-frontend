@@ -255,8 +255,8 @@
    * relying on nothing ever being appended.
    *
    * The trade this accepts: a screen that wants to scroll must say so itself.
-   * That is already how the shell works, and the two standalone screens
-   * (login, 404) carry `overflow-y-auto` for exactly this reason.
+   * That is already how the shell works, and the standalone screens
+   * (login, 404, forgot-password) carry `overflow-y-auto` for exactly this reason.
    */
   html,
   body {

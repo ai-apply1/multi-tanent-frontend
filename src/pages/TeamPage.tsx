@@ -321,7 +321,9 @@ export function TeamPage() {
                     ) : null}
                   </div>
                   <div className="mono truncate text-[12.5px] text-ink-muted">
-                    {titleCase(row.userName)}
+                    {/* Usernames are canonical lowercase login handles — show
+                        them verbatim, never title-cased. */}
+                    {row.userName}
                   </div>
                   <div className="truncate text-[13px] text-ink-2">
                     {row.email}

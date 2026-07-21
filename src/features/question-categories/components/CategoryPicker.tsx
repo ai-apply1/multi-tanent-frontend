@@ -13,7 +13,8 @@ import { cn } from "@/lib/utils"
 
 interface CategoryPickerProps {
   value: string | null | undefined
-  onChange: (id: string) => void
+  /** `null` clears the category — the backend PATCH honours it (see the DTO). */
+  onChange: (id: string | null) => void
   placeholder?: string
   disabled?: boolean
 }
@@ -107,9 +108,43 @@ export function CategoryPicker({
         <ChevronDown className="h-4 w-4 shrink-0 text-ink-muted" strokeWidth={1.7} />
       </button>
 
+      {/* Clear affordance — a sibling of the trigger (never nested, which would
+          be invalid) so an assigned category can be removed without opening the
+          popup. `onChange(null)` is what the backend reads as "clear". */}
+      {selected && !disabled ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            onChange(null)
+          }}
+          aria-label="Clear category"
+          className="absolute right-9 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-ink-muted transition hover:bg-surface-3 hover:text-ink"
+        >
+          <X className="h-3.5 w-3.5" strokeWidth={1.8} />
+        </button>
+      ) : null}
+
       {open ? (
         <div className="absolute z-40 mt-1 w-full overflow-hidden rounded-lg border border-line bg-surface shadow-lg">
           <div className="max-h-56 overflow-y-auto py-1">
+            {/* Always-available clear row — the only path back to "no
+                category" once one is assigned (the backend PATCH clears on a
+                null categoryId). Active whenever nothing is selected. */}
+            <button
+              type="button"
+              onClick={() => {
+                onChange(null)
+                setOpen(false)
+              }}
+              className={cn(
+                "flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-[13px] transition hover:bg-surface-3",
+                value ? "text-ink-muted" : "bg-accent text-primary",
+              )}
+            >
+              <span className="truncate">No category</span>
+              {value ? null : <Check className="h-3.5 w-3.5" strokeWidth={2.2} />}
+            </button>
             {query.isLoading ? (
               <div className="flex items-center gap-2 px-3 py-2 text-[12.5px] text-ink-muted">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />

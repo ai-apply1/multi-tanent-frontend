@@ -79,7 +79,10 @@ import {
   sendCandidateInvite,
   updateCandidateStatus,
 } from "@/features/candidates/candidatesApi";
-import { invalidateCandidateData } from "@/features/candidates/candidatesCache";
+import {
+  invalidateCandidateData,
+  invalidateCandidateDataAndJobCounts,
+} from "@/features/candidates/candidatesCache";
 import { toDisplayScore } from "@/features/candidates/aiScore";
 import {
   INVITABLE_STATUS_KEY,
@@ -99,6 +102,8 @@ import {
 import type {
   AdminInterviewAttempt,
   AdminInterviewQuestionItem,
+  InterviewScores,
+  Recommendation,
   ScoredAnswer,
   ScoringStatus,
 } from "@/features/interviews/types";
@@ -174,30 +179,50 @@ function StageBadge({ status }: { status: CandidateStatus | null | undefined }) 
   );
 }
 
-/** Score-band color used by the ring + reco chip. `overall` is 0-10. */
-function scoreBandColor(overall100: number): string {
-  if (overall100 >= 86) return "var(--success)";
-  if (overall100 >= 70) return "var(--primary)";
-  if (overall100 >= 60) return "var(--warning)";
-  return "var(--danger)";
+/**
+ * The AI hire/no-hire verdict is threshold-relative and decided server-side —
+ * NEVER reband a raw score here. The cut line is the JOB's `rejectionThreshold`
+ * (default 70, but HR-editable 0-100), so a fixed 70/86 band contradicts the
+ * candidate's actual pipeline decision on any other threshold. `resolveVerdict`
+ * therefore trusts the persisted `scores.recommendation` (the same value
+ * `resolveRecommendation` in the backend aggregator writes) and only falls back
+ * to the backend's own bands — against `scores.rejectionThreshold`, defaulting
+ * to 70 — for legacy rows scored before those fields were persisted.
+ */
+const DEFAULT_REJECTION_THRESHOLD = 70;
+
+function resolveVerdict(scores: InterviewScores): Recommendation {
+  if (scores.recommendation) return scores.recommendation;
+  const raw = scores.rejectionThreshold;
+  const threshold =
+    typeof raw === "number" && Number.isFinite(raw)
+      ? Math.min(100, Math.max(0, raw))
+      : DEFAULT_REJECTION_THRESHOLD;
+  const scaled = toDisplayScore(scores.overall);
+  if (scaled >= Math.min(threshold + 20, 90)) return "strong_yes";
+  if (scaled >= threshold) return "yes";
+  return "no";
 }
 
-/** Recommendation label + tone based on a 0-100 overall score. */
-function recommendationFrom(overall100: number): {
+/**
+ * Verdict label + tone. `strong_yes`/`yes` read as a hire (green), `no` as a
+ * reject (red); there is no "Maybe" band because the backend has no such state —
+ * the cut line already lives in the threshold. The same tone colours the score
+ * ring so the ring, the chip, and the pipeline banner all agree with the server.
+ */
+function verdictDisplay(rec: Recommendation): {
   label: string;
   bg: string;
   fg: string;
 } {
-  if (overall100 >= 86)
+  if (rec === "strong_yes")
     return {
       label: "Strong Hire",
       bg: "var(--success-soft)",
       fg: "var(--success)",
     };
-  if (overall100 >= 70)
+  if (rec === "yes")
     return { label: "Hire", bg: "var(--success-soft)", fg: "var(--success)" };
-  if (overall100 >= 60)
-    return { label: "Maybe", bg: "var(--warning-soft)", fg: "var(--warning)" };
   return { label: "No Hire", bg: "var(--danger-soft)", fg: "var(--danger)" };
 }
 
@@ -308,11 +333,14 @@ function InterviewDetailSkeleton() {
 
 function AiScoreCard({
   overall,
+  recommendation,
   narrative,
   answeredCount,
 }: {
   /** 0-10 (backend scale). */
   overall: number;
+  /** The AI's threshold-relative verdict, resolved from `scores` by the caller. */
+  recommendation: Recommendation;
   narrative: string;
   answeredCount: number;
 }) {
@@ -321,8 +349,8 @@ function AiScoreCard({
   // one copy of the maths is what keeps the drawer and the list from
   // disagreeing about the same candidate.
   const score = toDisplayScore(overall);
-  const color = scoreBandColor(score);
-  const reco = recommendationFrom(score);
+  const reco = verdictDisplay(recommendation);
+  const color = reco.fg;
   return (
     <div className="rounded-2xl bg-gradient-to-br from-primary to-[color-mix(in_oklab,var(--primary),white_35%)] p-[1.5px] shadow-[0_10px_30px_color-mix(in_srgb,var(--primary),transparent_84%)]">
       <div className="rounded-2xl bg-surface p-5">
@@ -437,14 +465,19 @@ function PipelineCard({
   candidate,
   statuses,
   overall100,
+  recommendation,
   onStatusChange,
   pending,
 }: {
   candidate: CandidateDetail | null | undefined;
   /** The org's column catalog, in any order — this card sorts it. */
   statuses: CandidateStatus[];
-  /** 0-100 overall score — used to render the AI recommendation line. */
+  /** 0-100 overall score — gates whether the AI recommendation line renders. */
   overall100: number | null;
+  /** The AI's threshold-relative verdict (resolved from `scores`); null when
+   *  there is no score yet. The banner reads THIS, not a hardcoded score band,
+   *  so it agrees with the candidate's actual pipeline decision. */
+  recommendation: Recommendation | null;
   onStatusChange: (statusKey: string) => void;
   pending: boolean;
 }) {
@@ -567,7 +600,7 @@ function PipelineCard({
             <p className="text-[12px] leading-snug text-ink-2">
               The AI recommends{" "}
               <strong className="font-bold">
-                {overall100 >= 70 ? "Hire" : "No Hire"}
+                {recommendation === "no" ? "No Hire" : "Hire"}
               </strong>
               . Your confirmation is required — nothing advances automatically.
             </p>
@@ -881,10 +914,19 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
       // not exist the instant this POST returns. Refresh the attempts
       // dropdown + the interviews list so it appears as soon as prep lands;
       // if the worker is slow/down, reopening the drawer picks it up later.
+      //
+      // Reinvite also moves the candidate server-side (scored → invited, and
+      // latestInterviewId repoints to the fresh attempt), so mirror the
+      // sibling handlers: refetch the drawer's own detail (header badge +
+      // PipelineCard) and fan out to every candidate-derived surface —
+      // otherwise the lists and Overview keep showing "Scored" with decision
+      // buttons for a candidate who is back to Invited.
       await Promise.all([
         attemptsQuery.refetch(),
+        candidateQuery.refetch(),
         queryClient.invalidateQueries({ queryKey: ["interviews"] }),
       ]);
+      invalidateCandidateData(queryClient);
     } catch (err) {
       toast.error(errorMessage(err, "Could not resend invite."));
     } finally {
@@ -953,7 +995,9 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
     onSuccess: async () => {
       toast.success("Candidate deleted.");
       setConfirmDeleteCandidate(false);
-      invalidateCandidateData(queryClient);
+      // Delete changes the job's TOTAL candidate count, so this is one of the
+      // few sites that also refreshes the Jobs list's "Applicants" column.
+      invalidateCandidateDataAndJobCounts(queryClient);
       onOpenChange(false);
     },
     onError: (err) =>
@@ -1310,6 +1354,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                   <div className="mb-4">
                     <AiScoreCard
                       overall={data.scores.overall}
+                      recommendation={resolveVerdict(data.scores)}
                       narrative={
                         data.scores.summary ||
                         data.scores.qualitative?.strengths?.[0] ||
@@ -1547,6 +1592,9 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                     candidate={candidate}
                     statuses={statuses}
                     overall100={overallScore100}
+                    recommendation={
+                      data?.scores ? resolveVerdict(data.scores) : null
+                    }
                     onStatusChange={handleStatusChange}
                     pending={statusPending}
                   />
@@ -2346,8 +2394,14 @@ function AnswerRow({
                 Communication:{" "}
                 {formatScore(scored.communication, { suffix: " / 10" })}
               </span>
-              {typeof scored.weight === "number" && scored.weight !== 1 ? (
-                <span className="text-ink-muted">Weight x{scored.weight}</span>
+              {/* `weight` is a PERCENT share of the overall score (backend
+                  normalises per-question weights to sum to 100), not a
+                  multiplier — "x25" read as a 25x boost. Weight 0 means the
+                  question was asked but not scored, so it stays hidden. */}
+              {typeof scored.weight === "number" && scored.weight > 0 ? (
+                <span className="text-ink-muted">
+                  Weight {Math.round(scored.weight)}%
+                </span>
               ) : null}
             </div>
           ) : typeof question.score === "number" ? (

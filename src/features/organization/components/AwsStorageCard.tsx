@@ -359,7 +359,7 @@ export function AwsStorageCard({ awsStorage, canWrite }: AwsStorageCardProps) {
               locked-down access role stays.
             </p>
 
-            <Button onClick={submit} disabled={mutation.isPending}>
+            <Button type="button" onClick={submit} disabled={mutation.isPending}>
               {mutation.isPending ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" strokeWidth={1.9} />
               ) : (
