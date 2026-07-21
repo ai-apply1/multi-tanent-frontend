@@ -8,6 +8,7 @@ import { AuthProvider } from "@/features/auth/AuthContext"
 import { TenantBrandingProvider } from "@/features/tenant/TenantBrandingContext"
 import { DocumentBranding } from "@/features/tenant/DocumentBranding"
 import { DevTenantSync } from "@/features/tenant/DevTenantSync"
+import { NotificationsSocket } from "@/features/notifications/NotificationsSocket"
 import { ThemeProvider } from "@/features/theme/ThemeContext"
 import { ensureCryptoReady } from "@/lib/crypto"
 import "@/styles/globals.css"
@@ -51,6 +52,10 @@ createRoot(root).render(
                   AuthProvider so it can prefer the AUTHENTICATED org over the
                   host's public branding once someone signs in. */}
               <DocumentBranding />
+              {/* Headless: opens the notifications socket for the signed-in
+                  user (needs the session from AuthProvider and the cache from
+                  QueryClientProvider, both above). Renders nothing. */}
+              <NotificationsSocket />
               <App />
               <Toaster
                 position="top-right"
