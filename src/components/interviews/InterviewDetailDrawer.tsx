@@ -876,6 +876,15 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
     try {
       await reinviteInterview(activeSessionId);
       toast.success("Fresh invite email sent.");
+      // The new attempt (N+1) is prepared asynchronously (the question-prep
+      // worker) or lazily when the candidate opens the link, so its row may
+      // not exist the instant this POST returns. Refresh the attempts
+      // dropdown + the interviews list so it appears as soon as prep lands;
+      // if the worker is slow/down, reopening the drawer picks it up later.
+      await Promise.all([
+        attemptsQuery.refetch(),
+        queryClient.invalidateQueries({ queryKey: ["interviews"] }),
+      ]);
     } catch (err) {
       toast.error(errorMessage(err, "Could not resend invite."));
     } finally {
