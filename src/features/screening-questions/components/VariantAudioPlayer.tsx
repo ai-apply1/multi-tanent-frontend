@@ -10,6 +10,42 @@ interface VariantAudioPlayerProps {
 }
 
 /**
+ * Cross-player playback coordinator — module scope, so every
+ * `VariantAudioPlayer` on the page shares it and only ONE ever sounds.
+ *
+ * Two things have to be coordinated, and the async URL fetch is why the
+ * simple "onPlay, pause the others" approach isn't enough:
+ *
+ *   1. When a player STARTS, pause whoever is currently active.
+ *   2. A player whose presigned-URL fetch is still in flight when another is
+ *      clicked must NOT start once its fetch finally resolves. `claim()` is
+ *      called synchronously at click time (before the await) and returns a
+ *      token; after the await the player checks it still holds the latest
+ *      token, and bails if a later click superseded it. Without this, clicking
+ *      B while A is still loading lets both play — the reported bug.
+ */
+let activeEl: HTMLAudioElement | null = null
+let activeToken = 0
+
+/** Take playback: pause any current holder, become the active one. */
+function claimPlayback(el: HTMLAudioElement): number {
+  if (activeEl && activeEl !== el) activeEl.pause()
+  activeEl = el
+  activeToken += 1
+  return activeToken
+}
+
+/** Still the most recent claimant? False means a later click superseded us. */
+function holdsPlayback(token: number): boolean {
+  return token === activeToken
+}
+
+/** Release on pause/end so a stale element is never re-paused. */
+function releasePlayback(el: HTMLAudioElement): void {
+  if (activeEl === el) activeEl = null
+}
+
+/**
  * Play/pause a bank wording's generated clip.
  *
  * The clip lives under a private S3 prefix, so it can't be linked directly —
@@ -51,9 +87,17 @@ export function VariantAudioPlayer({
       el.pause()
       return
     }
+    // Claim playback NOW, synchronously — this pauses any sibling that is
+    // currently sounding and records our token, even though the URL may still
+    // need fetching below. A second click on another player will supersede
+    // this token and our post-await guard will bail.
+    const token = claimPlayback(el)
     setLoading(true)
     try {
       const next = await ensureUrl()
+      // A later click on a different player won the race while we were
+      // fetching — drop this play so the two don't sound together.
+      if (!holdsPlayback(token)) return
       // Drive `src` PURELY through the ref — never also through a React prop.
       // Binding it to state as well meant the `setUrl` inside `ensureUrl`
       // re-rendered and made React write `src` a SECOND time; that load landed
@@ -83,8 +127,14 @@ export function VariantAudioPlayer({
         ref={audioRef}
         preload="none"
         onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
-        onEnded={() => setPlaying(false)}
+        onPause={() => {
+          setPlaying(false)
+          if (audioRef.current) releasePlayback(audioRef.current)
+        }}
+        onEnded={() => {
+          setPlaying(false)
+          if (audioRef.current) releasePlayback(audioRef.current)
+        }}
       />
       <button
         type="button"
