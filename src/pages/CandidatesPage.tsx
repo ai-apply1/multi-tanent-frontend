@@ -11,6 +11,7 @@ import toast from "react-hot-toast";
 import {
   AlertTriangle,
   ArrowLeft,
+  Check,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -41,6 +42,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -1321,23 +1323,33 @@ function CandidateRow({
             ) : null}
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>Change status</DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-48">
-                {statuses.map((option) => (
-                  <DropdownMenuItem
-                    key={option._id}
-                    disabled={option.key === status?.key}
-                    onSelect={() => onChangeStatus(option.key)}
-                  >
-                    <span
-                      className="h-2 w-2 shrink-0 rounded-full"
-                      style={{
-                        backgroundColor:
-                          option.color ?? "var(--ink-muted)",
-                      }}
-                    />
-                    {option.label}
-                  </DropdownMenuItem>
-                ))}
+              {/* Capped + scrollable: a long custom pipeline must not tower
+                  past the parent menu — uncapped, Radix shifts it up to fit
+                  the viewport and it reads as a detached floating list. */}
+              <DropdownMenuSubContent className="max-h-72 w-52 overflow-y-auto">
+                <DropdownMenuLabel>Move to</DropdownMenuLabel>
+                {statuses.map((option) => {
+                  const isCurrent = option.key === status?.key;
+                  return (
+                    <DropdownMenuItem
+                      key={option._id}
+                      disabled={isCurrent}
+                      onSelect={() => onChangeStatus(option.key)}
+                    >
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-full"
+                        style={{
+                          backgroundColor:
+                            option.color ?? "var(--ink-muted)",
+                        }}
+                      />
+                      <span className="min-w-0 truncate">{option.label}</span>
+                      {isCurrent ? (
+                        <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-ink-muted" />
+                      ) : null}
+                    </DropdownMenuItem>
+                  );
+                })}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
             <DropdownMenuSeparator />
