@@ -121,14 +121,16 @@ export const DropdownMenuSubTrigger = React.forwardRef<
   <DropdownMenuPrimitive.SubTrigger
     ref={ref}
     className={cn(
-      "flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent data-[state=open]:bg-accent",
+      // Mirror DropdownMenuItem's metrics exactly — a sub-trigger sitting in
+      // the same list with different padding/hover reads as a broken row.
+      "flex cursor-pointer select-none items-center gap-2 rounded-md px-2.5 py-2 text-[13.5px] font-medium outline-none transition-colors focus:bg-surface-3 focus:text-ink data-[state=open]:bg-surface-3 data-[state=open]:text-ink [&_svg]:size-4",
       inset && "pl-8",
       className
     )}
     {...props}
   >
     {children}
-    <ChevronRight className="ml-auto h-4 w-4" />
+    <ChevronRight className="ml-auto h-4 w-4 text-ink-muted" />
   </DropdownMenuPrimitive.SubTrigger>
 ))
 DropdownMenuSubTrigger.displayName = DropdownMenuPrimitive.SubTrigger.displayName
@@ -136,12 +138,16 @@ DropdownMenuSubTrigger.displayName = DropdownMenuPrimitive.SubTrigger.displayNam
 export const DropdownMenuSubContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.SubContent>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubContent>
->(({ className, ...props }, ref) => (
+>(({ className, sideOffset = 6, collisionPadding = 8, ...props }, ref) => (
   <DropdownMenuPrimitive.Portal>
     <DropdownMenuPrimitive.SubContent
       ref={ref}
+      sideOffset={sideOffset}
+      collisionPadding={collisionPadding}
       className={cn(
-        "z-50 min-w-[8rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md",
+        // Same chrome as DropdownMenuContent — the submenu must read as part
+        // of the same menu, not a flatter second-class popover.
+        "z-50 min-w-[8rem] overflow-hidden rounded-xl border border-line bg-popover p-1 text-popover-foreground shadow-[0_12px_34px_rgba(13,11,11,0.16)]",
         "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
         className
       )}
