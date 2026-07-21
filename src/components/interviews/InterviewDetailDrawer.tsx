@@ -1190,7 +1190,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                       onSelect={handleReinvite}
                     >
                       <MailPlus className="h-3.5 w-3.5" strokeWidth={1.7} />
-                      Reinvite (this attempt)
+                      Reattempt interview
                     </DropdownMenuItem>
                   ) : null}
                   <DropdownMenuSeparator />
