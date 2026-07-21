@@ -49,9 +49,15 @@ export interface ButtonProps
 }
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, ...props }, ref) => {
+  ({ className, variant, size, asChild = false, type, ...props }, ref) => {
     const Comp = asChild ? Slot : "button"
-    return <Comp ref={ref} className={cn(buttonVariants({ variant, size, className }))} {...props} />
+    // A native <button> with no `type` defaults to `type="submit"`, so any
+    // action button dropped inside a <form> silently submits it. Default to
+    // "button" and make submit an explicit opt-in. `asChild` renders an
+    // arbitrary element (often an <a>), which has no submit semantics, so its
+    // type is left untouched.
+    const resolvedType = asChild ? type : (type ?? "button")
+    return <Comp ref={ref} type={resolvedType} className={cn(buttonVariants({ variant, size, className }))} {...props} />
   }
 )
 Button.displayName = "Button"

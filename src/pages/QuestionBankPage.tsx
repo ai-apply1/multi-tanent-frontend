@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   keepPreviousData,
   useMutation,
@@ -178,6 +178,18 @@ export function QuestionBankPage() {
   const total = data?.count ?? 0;
   const totalPages = data?.totalPage ?? 0;
 
+  // Deleting the last row on a non-first page leaves `page` pointing past the
+  // end: the backend returns an empty `data` for the out-of-range page while
+  // `count` still reports the survivors, which would strand the user on a
+  // false "No questions yet" screen with the pager hidden. Clamp `page` back
+  // into range so the next fetch lands on a real page. Gated on `!isFetching`
+  // so it reads the resolved response, not a transient keepPreviousData frame.
+  useEffect(() => {
+    if (!isFetching && total > 0 && rows.length === 0 && page > totalPages) {
+      setPage(Math.max(1, totalPages));
+    }
+  }, [isFetching, total, rows.length, page, totalPages]);
+
   return (
     <div className="mx-auto max-w-[1080px] px-6 py-6 lg:px-8 lg:py-8">
       {/* Page header */}
@@ -272,7 +284,7 @@ export function QuestionBankPage() {
                 Retry
               </button>
             </div>
-          ) : rows.length === 0 ? (
+          ) : total === 0 ? (
             <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
               <span className="flex h-[50px] w-[50px] items-center justify-center rounded-[14px] bg-accent text-primary">
                 <Library className="h-[26px] w-[26px]" strokeWidth={1.6} />
@@ -433,7 +445,7 @@ export function QuestionBankPage() {
         </TooltipProvider>
 
         {/* Footer / pagination */}
-        {rows.length > 0 ? (
+        {total > 0 ? (
           <div className="flex flex-col gap-3 border-t border-line px-[18px] py-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <div className="flex items-center gap-2">

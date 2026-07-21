@@ -59,7 +59,10 @@ import {
   sendCandidateInvite,
   updateCandidateStatus,
 } from "@/features/candidates/candidatesApi";
-import { invalidateCandidateData } from "@/features/candidates/candidatesCache";
+import {
+  invalidateCandidateData,
+  invalidateCandidateDataAndJobCounts,
+} from "@/features/candidates/candidatesCache";
 import { aiScoreState, type AiScoreState } from "@/features/candidates/aiScore";
 import {
   type CandidateListItem,
@@ -366,7 +369,9 @@ export function CandidatesPage() {
     mutationFn: (id: string) => deleteCandidate(id),
     onSuccess: (res) => {
       toast.success("Candidate deleted.");
-      invalidateCandidates();
+      // Delete moves the job's TOTAL candidate count, so also refresh the
+      // Jobs list's "Applicants" column (status/invite mutations don't).
+      invalidateCandidateDataAndJobCounts(queryClient);
       queryClient.removeQueries({ queryKey: ["candidate", res.candidateId] });
       if (drawerCandidateId === res.candidateId) closeDrawer();
       setSelectedIds((prev) => {
@@ -410,7 +415,7 @@ export function CandidatesPage() {
           `${failed} could not be deleted${reason ? `: ${reason}` : "."}`,
         );
       }
-      invalidateCandidates();
+      invalidateCandidateDataAndJobCounts(queryClient);
       setSelectedIds(new Set());
       setBulkDeleteOpen(false);
     },

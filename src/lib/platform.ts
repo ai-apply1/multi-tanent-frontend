@@ -20,7 +20,7 @@
  * intentional and survives for years.
  */
 export const PLATFORM_NAME: string =
-  (import.meta.env.VITE_PLATFORM_NAME ?? "").trim() || "Talent Portal"
+  (import.meta.env.VITE_PLATFORM_NAME ?? "").trim() || "";
 
 /**
  * The platform mark, in two variants because the dashboard has a light and a
@@ -35,7 +35,7 @@ export const PLATFORM_LOGO = {
   light: "/platform-logo-dark.svg",
   /** White ink, for the dark theme. */
   dark: "/platform-logo.svg",
-} as const
+} as const;
 
 /**
  * The browser-tab icon shown when no tenant resolves. Matches the static
@@ -43,4 +43,4 @@ export const PLATFORM_LOGO = {
  * when an org has no favicon of its own. A file in `public/` rather than an
  * inlined data URI so it can be replaced without a rebuild.
  */
-export const PLATFORM_FAVICON = "/favicon.ico"
+export const PLATFORM_FAVICON = "/favicon.ico";

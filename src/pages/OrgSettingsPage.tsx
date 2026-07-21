@@ -692,13 +692,19 @@ export function OrgSettingsPage() {
   const orgDirty = Object.keys(patch).length > 0;
   const isDirty = orgDirty || prefsIsDirty;
   const isSaving = saveMutation.isPending || prefsMutation.isPending;
-  const canSave =
+  // Two independent save paths share one bar. The org PATCH is org_admin-only
+  // and gated by org-field validation + in-flight logo/favicon uploads. The
+  // notification prefs are self-scoped — the backend lets EVERY dashboard role
+  // edit their own — so they must not inherit the org gates: an `hr` user (or
+  // an org field this browser can't validate) must still be able to save prefs.
+  const canSaveOrg =
     canWrite &&
-    isDirty &&
+    orgDirty &&
     !hasErrors &&
     !logoUploading &&
-    !faviconUploading &&
-    !isSaving;
+    !faviconUploading;
+  const canSavePrefs = prefsIsDirty;
+  const canSave = (canSaveOrg || canSavePrefs) && !isSaving;
 
   const reset = () => {
     if (!org) return;
@@ -724,9 +730,11 @@ export function OrgSettingsPage() {
     });
     if (!canSave || !org) return;
 
+    // Push each job on its own gate — using `canSaveOrg`, not raw `orgDirty`,
+    // keeps an invalid org PATCH from being sent when only prefs are savable.
     const jobs: Array<Promise<unknown>> = [];
-    if (orgDirty) jobs.push(saveMutation.mutateAsync(patch));
-    if (prefsIsDirty && prefs) jobs.push(prefsMutation.mutateAsync(prefs));
+    if (canSaveOrg) jobs.push(saveMutation.mutateAsync(patch));
+    if (canSavePrefs && prefs) jobs.push(prefsMutation.mutateAsync(prefs));
     if (jobs.length === 0) return;
 
     Promise.all(jobs)
@@ -757,9 +765,11 @@ export function OrgSettingsPage() {
           than as "nothing to save here".
           `|| isDirty` is the safety catch: the form spans several tabs, so
           edits made on General and then abandoned by switching to Domains must
-          not vanish behind a hidden Save bar. Unsaved work always keeps a way
-          out. */}
-      {canWrite && (SAVING_TABS.has(activeTab) || isDirty) ? (
+          not vanish behind a hidden Save bar. It also surfaces the bar for a
+          non-org_admin (`hr`) once their self-scoped notification prefs are
+          dirty — `canWrite` only gates the org PATCH half, not the prefs save.
+          Unsaved work always keeps a way out. */}
+      {(canWrite && SAVING_TABS.has(activeTab)) || isDirty ? (
         <div className="flex shrink-0 items-center gap-2">
           <Button
             type="button"
@@ -1126,7 +1136,10 @@ export function OrgSettingsPage() {
     <div className="mx-auto max-w-[1240px] px-6 py-6 lg:px-8 lg:py-8">
       {header}
 
-      {!canWrite ? (
+      {/* The notifications tab is self-scoped and writable by every role, so
+          the read-only notice would be false there — show it only on the
+          org-owned tabs a non-org_admin genuinely can't change. */}
+      {!canWrite && activeTab !== "notifications" ? (
         <p className="mb-4 rounded-lg border border-line bg-surface-3 px-3 py-2 text-[13px] text-ink-muted">
           You have read-only access to these settings. Ask an org admin in your
           organization to change them.

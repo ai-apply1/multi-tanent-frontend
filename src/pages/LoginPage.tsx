@@ -1,33 +1,44 @@
-import { useState } from "react"
-import { useForm } from "react-hook-form"
-import { yupResolver } from "@hookform/resolvers/yup"
-import { Link, Navigate, useLocation, useNavigate } from "react-router-dom"
-import * as yup from "yup"
-import toast from "react-hot-toast"
-import { AlertCircle, Eye, EyeOff, Loader2, Mail, Lock, Sparkles } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { useAuth } from "@/features/auth/AuthContext"
-import { useTenantBranding } from "@/features/tenant/TenantBrandingContext"
-import { errorMessage } from "@/lib/errors"
-import { ROUTES } from "@/routes"
-import { PLATFORM_NAME } from "@/lib/platform"
-import { OrgLogo } from "@/components/common/OrgLogo"
+import { useState } from "react";
+import { useForm } from "react-hook-form";
+import { yupResolver } from "@hookform/resolvers/yup";
+import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
+import * as yup from "yup";
+import toast from "react-hot-toast";
+import {
+  AlertCircle,
+  Eye,
+  EyeOff,
+  Loader2,
+  Mail,
+  Lock,
+  Sparkles,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { useAuth } from "@/features/auth/AuthContext";
+import { useTenantBranding } from "@/features/tenant/TenantBrandingContext";
+import { errorMessage } from "@/lib/errors";
+import { ROUTES } from "@/routes";
+import { PLATFORM_NAME } from "@/lib/platform";
+import { OrgLogo } from "@/components/common/OrgLogo";
 
 const schema = yup.object({
   identifier: yup
     .string()
     .required("Email or username is required")
     .min(3, "At least 3 characters"),
-  password: yup.string().required("Password is required").min(8, "At least 8 characters"),
-})
+  password: yup
+    .string()
+    .required("Password is required")
+    .min(8, "At least 8 characters"),
+});
 
 interface FormValues {
-  identifier: string
-  password: string
+  identifier: string;
+  password: string;
 }
 
 export function LoginPage() {
-  const { login, isAuthenticating, user } = useAuth()
+  const { login, isAuthenticating, user } = useAuth();
   /**
    * The PUBLIC, host-resolved branding, not `useOrganization()`.
    *
@@ -37,10 +48,10 @@ export function LoginPage() {
    * answered from the request's host, so an employer's own domain is branded
    * before anyone types a password.
    */
-  const organization = useTenantBranding()
-  const navigate = useNavigate()
-  const location = useLocation()
-  const [showPassword, setShowPassword] = useState(false)
+  const organization = useTenantBranding();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [showPassword, setShowPassword] = useState(false);
 
   const {
     register,
@@ -49,27 +60,34 @@ export function LoginPage() {
   } = useForm<FormValues>({
     resolver: yupResolver(schema),
     defaultValues: { identifier: "", password: "" },
-  })
+  });
 
   if (user) {
-    return <Navigate to={ROUTES.OVERVIEW} replace />
+    return <Navigate to={ROUTES.OVERVIEW} replace />;
   }
 
   const onSubmit = handleSubmit(async ({ identifier, password }) => {
     try {
-      await login(identifier, password)
-      const dest = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || ROUTES.OVERVIEW
-      navigate(dest, { replace: true })
+      await login(identifier, password);
+      const dest =
+        (location.state as { from?: { pathname?: string } } | null)?.from
+          ?.pathname || ROUTES.OVERVIEW;
+      navigate(dest, { replace: true });
     } catch (err) {
-      toast.error(errorMessage(err, "Login failed. Check your credentials and try again."))
+      toast.error(
+        errorMessage(
+          err,
+          "Login failed. Check your credentials and try again.",
+        ),
+      );
     }
-  })
+  });
 
   // Never a hardcoded org name: shipping one customer's name to every other
   // customer's login page is the white-label failure this all exists to stop.
   // `PLATFORM_NAME` only shows when no org resolved at all (localhost with no
   // `?tenant=`, or a domain we have no tenant for).
-  const orgName = organization?.name || PLATFORM_NAME
+  const orgName = organization?.name || PLATFORM_NAME;
 
   return (
     // `h-full overflow-y-auto`, not `min-h-screen`: the document itself no
@@ -80,19 +98,28 @@ export function LoginPage() {
       <div className="flex items-center justify-center px-6 py-10 lg:px-10">
         <div className="w-full max-w-[340px]">
           <div className="mb-10 flex items-center gap-2.5">
-            <OrgLogo
-              logoUrl={organization?.logoUrl}
-              logoDarkUrl={organization?.logoDarkUrl}
-              name={orgName}
-              size="lg"
-            />
+            {orgName && (
+              <OrgLogo
+                logoUrl={organization?.logoUrl}
+                logoDarkUrl={organization?.logoDarkUrl}
+                name={orgName}
+                size="lg"
+              />
+            )}
           </div>
 
-          <h1 className="mb-1.5 text-[30px] font-semibold tracking-tight text-[var(--ink)]">Welcome back</h1>
-          <p className="mb-7 text-[14.5px] text-[var(--ink-muted)]">Sign in to your recruiter dashboard.</p>
+          <h1 className="mb-1.5 text-[30px] font-semibold tracking-tight text-[var(--ink)]">
+            Welcome back
+          </h1>
+          <p className="mb-7 text-[14.5px] text-[var(--ink-muted)]">
+            Sign in to your recruiter dashboard.
+          </p>
 
           <form noValidate onSubmit={onSubmit}>
-            <label htmlFor="identifier" className="mb-1.5 block text-[13px] font-medium text-[var(--ink)]">
+            <label
+              htmlFor="identifier"
+              className="mb-1.5 block text-[13px] font-medium text-[var(--ink)]"
+            >
               Email or username
             </label>
             <div className="relative mb-4">
@@ -111,11 +138,16 @@ export function LoginPage() {
               />
             </div>
             {errors.identifier ? (
-              <p className="-mt-3 mb-3 text-xs text-[var(--danger)]">{errors.identifier.message}</p>
+              <p className="-mt-3 mb-3 text-xs text-[var(--danger)]">
+                {errors.identifier.message}
+              </p>
             ) : null}
 
             <div className="mb-1.5 flex items-center justify-between">
-              <label htmlFor="password" className="text-[13px] font-medium text-[var(--ink)]">
+              <label
+                htmlFor="password"
+                className="text-[13px] font-medium text-[var(--ink)]"
+              >
                 Password
               </label>
               <Link
@@ -145,7 +177,11 @@ export function LoginPage() {
                 onClick={() => setShowPassword((s) => !s)}
                 className="absolute right-2 top-2 flex h-[30px] w-[30px] items-center justify-center rounded-md text-[var(--ink-subtle)] transition hover:bg-[var(--surface-3)] hover:text-[var(--ink)]"
               >
-                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                {showPassword ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
               </button>
             </div>
             {errors.password ? (
@@ -214,25 +250,32 @@ export function LoginPage() {
             skip the phone tag.
           </h2>
           <p className="mt-4 text-[15.5px] leading-[1.6] text-white/80">
-            Candidates record short video answers on their own time. {orgName} transcribes, scores, and ranks them —
-            so recruiters only review the best.
+            Candidates record short video answers on their own time. {orgName}{" "}
+            transcribes, scores, and ranks them — so recruiters only review the
+            best.
           </p>
           <div className="mt-10 flex gap-9">
             <div>
               <div className="mono text-[30px] font-semibold">68%</div>
-              <div className="mt-0.5 text-[12.5px] text-white/70">less screening time</div>
+              <div className="mt-0.5 text-[12.5px] text-white/70">
+                less screening time
+              </div>
             </div>
             <div>
               <div className="mono text-[30px] font-semibold">12k+</div>
-              <div className="mt-0.5 text-[12.5px] text-white/70">interviews scored</div>
+              <div className="mt-0.5 text-[12.5px] text-white/70">
+                interviews scored
+              </div>
             </div>
             <div>
               <div className="mono text-[30px] font-semibold">4.9</div>
-              <div className="mt-0.5 text-[12.5px] text-white/70">recruiter rating</div>
+              <div className="mt-0.5 text-[12.5px] text-white/70">
+                recruiter rating
+              </div>
             </div>
           </div>
         </div>
       </div>
     </div>
-  )
+  );
 }
