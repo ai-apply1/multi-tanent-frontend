@@ -31,22 +31,6 @@ export const STATUS_COLORS: StatusColorPreset[] = [
 ]
 
 /**
- * The 9 builtin columns are PINNED at `stageOrder` 10, 20, 30 … 90 — the
- * server writes those numbers back unchanged on every reorder, so they
- * never drift. A custom column lives in a gap between two of them (75 to
- * sit after Shortlisted), which leaves 9 integer slots per gap.
- */
-export const BUILTIN_STAGE_ORDER_MAX = 90
-
-/**
- * The lowest position a custom column may take. `applied` is pinned at 10
- * and is where every candidate enters the funnel, so there is no stage
- * before it — the server rejects anything at or below 10 (`createStatus`)
- * and refuses a drag that puts a custom column first (`reorderStatuses`).
- */
-export const MIN_CUSTOM_STAGE_ORDER = 11
-
-/**
  * `key` must match the backend's slug rule verbatim — lowercase alnum,
  * optionally separated by `-` or `_`, and it is IMMUTABLE once created
  * (activities and funnel automations address columns by key). Validating
@@ -54,31 +38,33 @@ export const MIN_CUSTOM_STAGE_ORDER = 11
  */
 export const STATUS_KEY_PATTERN = /^[a-z0-9][a-z0-9_-]*$/
 
-/** Body of `POST /admin/statuses` — mirrors `CreateStatusDto`. */
+/**
+ * Body of `POST /admin/statuses` — mirrors `CreateStatusDto`. No
+ * `stageOrder`: the server appends the new column to the end of the board
+ * and it is dragged into place afterward.
+ */
 export interface CreateStatusPayload {
   key: string
   label: string
   color?: string
-  stageOrder: number
   isTerminal?: boolean
 }
 
 /**
  * Body of `PATCH /admin/statuses/:id` — mirrors `UpdateStatusDto`. Display
- * fields only: `key` and the builtin/protected flags are not editable and
- * are stripped server-side by the global `whitelist: true` pipe.
+ * fields only: `key`, the builtin/protected flags and `stageOrder` are not
+ * editable here (position is owned by drag-and-drop) and are stripped
+ * server-side by the global `whitelist: true` pipe.
  */
 export interface UpdateStatusPayload {
   label?: string
   color?: string
-  stageOrder?: number
 }
 
 /**
- * Gap between adjacent columns when a drag-and-drop reorder renumbers the
- * board. Matches the builtins' own 10/20/…/80 spacing, so a reordered
- * catalog stays readable and a later hand-typed position still has room to
- * slot between two neighbours.
+ * Stride used when a drag-and-drop reorder renumbers the board — the whole
+ * catalog becomes 10, 20, 30 … in the dropped order. Display-only; it
+ * bounds nothing.
  */
 export const STAGE_ORDER_STEP = 10
 

@@ -43,56 +43,20 @@ import { errorMessage } from "@/lib/errors";
 const FALLBACK_COLOR = "#64748B";
 
 /**
- * Client mirror of the server's `assignStageOrders`: built-ins hold their
- * position, custom columns are spread evenly through the gap between the
- * two built-ins they fall between (one between 20 and 30 → 25; two → 23
- * and 26).
+ * Client mirror of the server's `assignStageOrders`: renumber the whole
+ * list sequentially, `(index+1) * STAGE_ORDER_STEP`, so it reads 10, 20,
+ * 30 … in exactly the dropped order. Built-ins float with everything else;
+ * their number is display-only.
  *
- * It reads the anchors' numbers off the DATA rather than a hard-coded
- * table, which is what keeps it from drifting out of sync with the
- * backend: a built-in's `stageOrder` is pinned server-side, so whatever
- * the API last returned IS the canonical value.
- *
- * Only used for the optimistic paint. The mutation's response replaces
- * the whole list with the server's own numbering a moment later, so a
+ * Only used for the optimistic paint. The mutation's response replaces the
+ * whole list with the server's own numbering a moment later, so a
  * disagreement here would be visible for one frame, not persisted.
  */
 function assignStageOrders(ordered: CandidateStatus[]): CandidateStatus[] {
-  const anchors: number[] = [];
-  ordered.forEach((s, i) => {
-    if (s.isProtected) anchors.push(i);
-  });
-  // Caller has already refused a leading custom column; a board with no
-  // built-ins at all can't happen (they're undeletable).
-  if (anchors.length === 0 || anchors[0] !== 0) return ordered;
-
-  const out = [...ordered];
-  for (let a = 0; a < anchors.length; a += 1) {
-    const startIdx = anchors[a];
-    const startOrder = ordered[startIdx]!.stageOrder;
-    const endIdx = anchors[a + 1];
-    const count = (endIdx ?? ordered.length) - startIdx - 1;
-    if (count === 0) continue;
-
-    // Past the last built-in there is no upper bound to divide against,
-    // so just step. Otherwise split the gap into count+1 intervals so
-    // neither neighbour is landed on.
-    const step =
-      endIdx == null
-        ? STAGE_ORDER_STEP
-        : Math.floor((ordered[endIdx]!.stageOrder - startOrder) / (count + 1));
-    // Gap exhausted — the server will 409 with the two column names. Leave
-    // the numbers alone rather than paint a layout that won't survive.
-    if (step < 1) continue;
-
-    for (let i = 1; i <= count; i += 1) {
-      out[startIdx + i] = {
-        ...out[startIdx + i]!,
-        stageOrder: startOrder + i * step,
-      };
-    }
-  }
-  return out;
+  return ordered.map((s, i) => ({
+    ...s,
+    stageOrder: (i + 1) * STAGE_ORDER_STEP,
+  }));
 }
 
 /**
@@ -324,7 +288,6 @@ export function PipelinePage() {
           open
           onOpenChange={setDialogOpen}
           status={editTarget}
-          existing={ordered}
         />
       ) : null}
 
