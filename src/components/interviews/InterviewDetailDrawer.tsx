@@ -1153,17 +1153,6 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                     <Send className="h-3.5 w-3.5" strokeWidth={1.7} />
                     Resend invite
                   </DropdownMenuItem>
-                  <DropdownMenuItem
-                    disabled={!data?.email}
-                    onSelect={() => {
-                      if (data?.email) {
-                        window.location.href = `mailto:${data.email}`;
-                      }
-                    }}
-                  >
-                    <MailPlus className="h-3.5 w-3.5" strokeWidth={1.7} />
-                    Send email/SMS
-                  </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   {data?.scores ? (
                     <DropdownMenuItem
