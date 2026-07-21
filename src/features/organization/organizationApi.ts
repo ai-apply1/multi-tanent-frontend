@@ -5,8 +5,11 @@ import type {
   FaviconPresignResult,
   LogoPresignPayload,
   LogoPresignResult,
+  OrgAwsStorage,
   OrgEmailDomain,
   OrgProfile,
+  ProvisionStoragePayload,
+  StorageSetup,
   UpdateOrganizationPayload
 } from "@/features/organization/types"
 
@@ -155,6 +158,33 @@ export async function uploadFaviconToPresignedUrl(
 export async function verifyEmailDomain() {
   const { data } = await api.post<OrgEmailDomain>(
     "/admin/organization/email-domain/verify"
+  )
+  return data
+}
+
+/**
+ * The org's storage-setup details the "connect your AWS" guide fills its policy
+ * JSON with, including the org's STABLE bootstrap ExternalId (server-owned,
+ * minted on first read). Per-org, so it is keyed by the org in the cache.
+ */
+export async function getStorageSetup(): Promise<StorageSetup> {
+  const { data } = await api.get<StorageSetup>(
+    "/admin/organization/storage/setup"
+  )
+  return data
+}
+
+/**
+ * Connect the org's own AWS account: provision its S3 bucket + access role from
+ * the bootstrap role the admin created, then verify. Returns the lifecycle
+ * ({state, bucket, region, error}); `active` means storage is live.
+ */
+export async function provisionStorage(
+  payload: ProvisionStoragePayload
+): Promise<OrgAwsStorage> {
+  const { data } = await api.post<OrgAwsStorage>(
+    "/admin/organization/storage/provision",
+    payload
   )
   return data
 }

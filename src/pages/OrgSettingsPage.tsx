@@ -38,6 +38,7 @@ import { ApplyVideoCard } from "@/features/organization/components/ApplyVideoCar
 import { ThemeCard } from "@/features/organization/components/ThemeCard";
 import { LogoVariantNotice } from "@/features/organization/components/LogoVariantNotice";
 import { PortalDomainsCard } from "@/features/organization/components/PortalDomainsCard";
+import { AwsStorageCard } from "@/features/organization/components/AwsStorageCard";
 import {
   getNotificationPrefs,
   updateNotificationPrefs,
@@ -938,6 +939,9 @@ export function OrgSettingsPage() {
    */
   const domainsBody = (
     <div className="grid gap-5">
+      {/* First: storage is the one connection that BLOCKS everything (no
+          storage, no uploads), unlike domains which only affect branding. */}
+      <AwsStorageCard awsStorage={org.awsStorage} canWrite={canWrite} />
       {org.domains?.length ? (
         <PortalDomainsCard
           parentDomain={org.parentDomain}
@@ -946,11 +950,6 @@ export function OrgSettingsPage() {
       ) : null}
       {org.emailDomain ? (
         <EmailDomainCard emailDomain={org.emailDomain} canWrite={canWrite} />
-      ) : null}
-      {!org.domains?.length && !org.emailDomain ? (
-        <p className="text-[13px] text-ink-muted">
-          No domains are configured for your organization yet.
-        </p>
       ) : null}
     </div>
   );
