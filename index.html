@@ -17,6 +17,17 @@
          here: that is one customer's name shipped to every other customer's
          tab, which is the whole thing the branding work removes. -->
   <title>Loading</title>
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("admin-theme");
+        if (t !== "light" && t !== "dark") {
+          t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        }
+        if (t === "dark") document.documentElement.classList.add("dark");
+      } catch (e) {}
+    })();
+  </script>
 </head>
 
 <body>

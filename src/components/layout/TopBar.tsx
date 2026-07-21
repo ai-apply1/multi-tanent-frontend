@@ -32,6 +32,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Sheet, SheetClose, SheetContent } from "@/components/ui/sheet"
+import { Skeleton } from "@/components/ui/skeleton"
 import { useAuth } from "@/features/auth/AuthContext"
 import { useTheme } from "@/features/theme/ThemeContext"
 import { USER_ROLE_LABELS } from "@/features/users/types"
@@ -51,7 +52,7 @@ import type {
   NotificationEvent,
 } from "@/features/notifications/types"
 import { titleCase } from "@/lib/text"
-import { ROUTES, jobCandidates, jobDetail } from "@/routes"
+import { ROUTES, jobDetail } from "@/routes"
 
 /** Slow safety-net poll for the unread badge — the socket is the real-time
  *  path, this only heals a silently-dropped connection. */
@@ -64,13 +65,21 @@ const UNREAD_FALLBACK_MS = 5 * 60_000
 function linkFor(n: Notification): string | null {
   const meta = n.metaData ?? {}
   const jobId = typeof meta.jobId === "string" ? meta.jobId : null
+  const candidateId =
+    typeof meta.candidateId === "string" ? meta.candidateId : null
   switch (n.event) {
     case "job_created":
       return jobId ? jobDetail(jobId) : ROUTES.JOBS
     case "candidate_status_changed":
     case "interview_completed":
-      // Candidates live on a job's board; fall back to the global list.
-      return jobId ? jobCandidates(jobId) : ROUTES.CANDIDATES
+      // Deep-link straight to the candidate (the `?candidate=` param
+      // auto-opens their drawer); fall back to the job-filtered board, then
+      // the global list.
+      return candidateId
+        ? `${ROUTES.CANDIDATES}?candidate=${candidateId}`
+        : jobId
+          ? `${ROUTES.CANDIDATES}?job=${jobId}`
+          : ROUTES.CANDIDATES
     case "team_member_added":
       return ROUTES.TEAM
     default:
@@ -123,6 +132,28 @@ function relativeTime(iso: string): string {
   const days = Math.round(hours / 24)
   if (days < 30) return `${days} d ago`
   return new Date(iso).toLocaleDateString()
+}
+
+/** Loading placeholder for the notifications feed — six rows mirroring the
+ *  real row layout so the panel doesn't jump when the data lands. */
+function NotificationsSkeleton() {
+  return (
+    <>
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div
+          key={i}
+          className="flex gap-3 border-b border-line px-5 py-3.5 last:border-b-0"
+        >
+          <Skeleton className="h-8 w-8 flex-shrink-0 rounded-[9px]" />
+          <div className="min-w-0 flex-1">
+            <Skeleton className="h-3.5 w-40 max-w-full" />
+            <Skeleton className="mt-1.5 h-3 w-56 max-w-full" />
+            <Skeleton className="mt-1.5 h-2.5 w-16" />
+          </div>
+        </div>
+      ))}
+    </>
+  )
 }
 
 /**
@@ -339,9 +370,7 @@ export function TopBar() {
 
             <div className="scroll flex-1 overflow-auto">
               {listQuery.isLoading ? (
-                <div className="px-5 py-14 text-center text-[13px] text-ink-muted">
-                  Loading…
-                </div>
+                <NotificationsSkeleton />
               ) : rendered.length === 0 ? (
                 <div className="px-5 py-14 text-center">
                   <div className="text-[13px] text-ink-muted">You&apos;re all caught up.</div>

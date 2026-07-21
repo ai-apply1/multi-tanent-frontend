@@ -47,8 +47,6 @@ interface QuestionFormDialogProps {
   onOpenChange: (open: boolean) => void
   /** Pass an existing row to edit it; omit/null to create a new one. */
   question?: ScreeningQuestion | null
-  /** Tags already in use, offered as suggestions (see `TagsInput`). */
-  tagSuggestions?: string[]
 }
 
 /**
@@ -81,8 +79,7 @@ const DEFAULT_SUGGEST_COUNT = 3
 export function QuestionFormDialog({
   open,
   onOpenChange,
-  question,
-  tagSuggestions = []
+  question
 }: QuestionFormDialogProps) {
   const queryClient = useQueryClient()
 
@@ -626,7 +623,6 @@ export function QuestionFormDialog({
                 id="q-tags"
                 value={tags}
                 onChange={setTags}
-                suggestions={tagSuggestions}
                 placeholder="Type a tag and press Enter"
               />
             </div>
