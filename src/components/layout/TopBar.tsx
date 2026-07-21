@@ -1,18 +1,26 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import toast from "react-hot-toast"
 import {
   Bell,
   Briefcase,
   CheckCircle2,
+  Loader2,
   LogOut,
   Moon,
   Search,
   Sun,
+  Trash2,
   // User,
   Users,
   UserPlus,
+  X,
 } from "lucide-react"
 import { CommandPalette } from "@/components/layout/CommandPalette"
 import { MobileNavTrigger } from "@/components/layout/Sidebar"
@@ -29,15 +37,46 @@ import { useTheme } from "@/features/theme/ThemeContext"
 import { USER_ROLE_LABELS } from "@/features/users/types"
 import type { UserRole } from "@/features/auth/types"
 import {
+  dismissAllNotifications,
+  dismissNotification,
+  getUnreadCount,
   listNotifications,
   markAllNotificationsRead,
+  markNotificationRead,
+  NOTIFICATIONS_LIST_KEY,
+  NOTIFICATIONS_UNREAD_KEY,
 } from "@/features/notifications/notificationsApi"
 import type {
   Notification,
   NotificationEvent,
 } from "@/features/notifications/types"
 import { titleCase } from "@/lib/text"
-import { ROUTES } from "@/routes"
+import { ROUTES, jobCandidates, jobDetail } from "@/routes"
+
+/** Slow safety-net poll for the unread badge — the socket is the real-time
+ *  path, this only heals a silently-dropped connection. */
+const UNREAD_FALLBACK_MS = 5 * 60_000
+
+/**
+ * Best-effort deep link for a notification, from its `metaData`. Returns null
+ * when there's nowhere sensible to go (the row still marks read on click).
+ */
+function linkFor(n: Notification): string | null {
+  const meta = n.metaData ?? {}
+  const jobId = typeof meta.jobId === "string" ? meta.jobId : null
+  switch (n.event) {
+    case "job_created":
+      return jobId ? jobDetail(jobId) : ROUTES.JOBS
+    case "candidate_status_changed":
+    case "interview_completed":
+      // Candidates live on a job's board; fall back to the global list.
+      return jobId ? jobCandidates(jobId) : ROUTES.CANDIDATES
+    case "team_member_added":
+      return ROUTES.TEAM
+    default:
+      return null
+  }
+}
 
 function initialsFor(name: string) {
   return (
@@ -104,24 +143,64 @@ export function TopBar() {
   const [notifOpen, setNotifOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
 
-  // Poll every 60s while the tab is visible; a stale-for-30s window means
-  // dropdown opens after a notification fires don't wait a full poll cycle.
-  const notifsQuery = useQuery({
-    queryKey: ["notifications"],
-    queryFn: () => listNotifications({ limit: 25 }),
-    refetchInterval: 60_000,
+  const refreshNotifs = () => {
+    void queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_UNREAD_KEY })
+    void queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_LIST_KEY })
+  }
+
+  // The badge is always mounted and cheap (count only). The socket keeps it
+  // live; this slow interval + focus refetch is the safety net for a dropped
+  // connection, not the primary path.
+  const unreadQuery = useQuery({
+    queryKey: NOTIFICATIONS_UNREAD_KEY,
+    queryFn: getUnreadCount,
+    refetchInterval: UNREAD_FALLBACK_MS,
     refetchIntervalInBackground: false,
-    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+    staleTime: 60_000,
   })
-  const items: Notification[] = notifsQuery.data?.items ?? []
-  const unreadCount = notifsQuery.data?.unreadCount ?? 0
+  const unreadCount = unreadQuery.data?.unreadCount ?? 0
+
+  // The feed itself is heavier and paginated, so it's fetched only while the
+  // panel is open. "Load older" walks the `nextPage` cursor.
+  const listQuery = useInfiniteQuery({
+    queryKey: NOTIFICATIONS_LIST_KEY,
+    queryFn: ({ pageParam }) =>
+      listNotifications({ page: pageParam, limit: 25 }),
+    initialPageParam: 1,
+    getNextPageParam: (last) => last.nextPage ?? undefined,
+    enabled: notifOpen,
+    refetchOnWindowFocus: true,
+  })
+  const items: Notification[] = useMemo(
+    () => listQuery.data?.pages.flatMap((p) => p.items) ?? [],
+    [listQuery.data],
+  )
 
   const markAllRead = useMutation({
     mutationFn: markAllNotificationsRead,
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["notifications"] })
-    },
+    onSuccess: refreshNotifs,
   })
+  const markOne = useMutation({
+    mutationFn: (notificationId: string) =>
+      markNotificationRead(notificationId),
+    onSuccess: refreshNotifs,
+  })
+  const dismissOne = useMutation({
+    mutationFn: (notificationId: string) => dismissNotification(notificationId),
+    onSuccess: refreshNotifs,
+  })
+  const clearAll = useMutation({
+    mutationFn: dismissAllNotifications,
+    onSuccess: refreshNotifs,
+  })
+
+  const openNotification = (n: Notification) => {
+    if (!n.isRead) markOne.mutate(n.notificationId)
+    const link = linkFor(n)
+    setNotifOpen(false)
+    if (link) navigate(link)
+  }
 
   // Global ⌘K / Ctrl+K listener.
   useEffect(() => {
@@ -211,7 +290,9 @@ export function TopBar() {
           >
             <Bell className="h-[17px] w-[17px]" strokeWidth={1.7} />
             {unreadCount > 0 ? (
-              <span className="absolute right-[9px] top-[9px] h-[7px] w-[7px] rounded-full bg-[var(--danger)] ring-2 ring-surface" />
+              <span className="absolute -right-1 -top-1 flex h-[17px] min-w-[17px] items-center justify-center rounded-full bg-[var(--danger)] px-1 text-[10px] font-bold leading-none text-white ring-2 ring-surface">
+                {unreadCount > 9 ? "9+" : unreadCount}
+              </span>
             ) : null}
           </button>
 
@@ -233,6 +314,18 @@ export function TopBar() {
                     Mark all read
                   </button>
                 ) : null}
+                {items.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => clearAll.mutate()}
+                    disabled={clearAll.isPending}
+                    title="Clear all"
+                    className="inline-flex h-7 items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-ink-muted transition hover:bg-surface-3 hover:text-ink disabled:opacity-50"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" strokeWidth={1.7} />
+                    Clear
+                  </button>
+                ) : null}
                 <SheetClose
                   className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition hover:bg-surface-3 hover:text-ink"
                   aria-label="Close notifications"
@@ -245,7 +338,7 @@ export function TopBar() {
             </div>
 
             <div className="scroll flex-1 overflow-auto">
-              {notifsQuery.isLoading ? (
+              {listQuery.isLoading ? (
                 <div className="px-5 py-14 text-center text-[13px] text-ink-muted">
                   Loading…
                 </div>
@@ -255,33 +348,76 @@ export function TopBar() {
                   <div className="mt-1 text-[12px] text-ink-subtle">No new notifications</div>
                 </div>
               ) : (
-                rendered.map(({ n, Icon, tint }) => (
-                  <div
-                    key={n.id}
-                    className={
-                      "flex cursor-pointer gap-3 border-b border-line px-5 py-3.5 transition last:border-b-0 hover:bg-hover " +
-                      (!n.isRead ? "bg-[var(--accent-softer)]" : "")
-                    }
-                  >
-                    <span
+                <>
+                  {rendered.map(({ n, Icon, tint }) => (
+                    <div
+                      key={n.notificationId}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => openNotification(n)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault()
+                          openNotification(n)
+                        }
+                      }}
                       className={
-                        "flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[9px] " +
-                        tint
+                        "group flex cursor-pointer gap-3 border-b border-line px-5 py-3.5 transition last:border-b-0 hover:bg-hover " +
+                        (!n.isRead ? "bg-[var(--accent-softer)]" : "")
                       }
                     >
-                      <Icon className="h-4 w-4" strokeWidth={1.7} />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[13px] font-semibold leading-snug text-ink">{n.title}</div>
-                      {n.content ? (
-                        <div className="mt-0.5 text-[12.5px] leading-snug text-ink-2">{n.content}</div>
-                      ) : null}
-                      <div className="mt-1 text-[11.5px] text-ink-subtle">
-                        {relativeTime(n.createdAt)}
+                      <span
+                        className={
+                          "flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[9px] " +
+                          tint
+                        }
+                      >
+                        <Icon className="h-4 w-4" strokeWidth={1.7} />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start gap-2">
+                          <div className="min-w-0 flex-1 text-[13px] font-semibold leading-snug text-ink">
+                            {n.title}
+                          </div>
+                          {!n.isRead ? (
+                            <span className="mt-1 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--danger)]" />
+                          ) : null}
+                          <button
+                            type="button"
+                            aria-label="Dismiss"
+                            title="Dismiss"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              dismissOne.mutate(n.notificationId)
+                            }}
+                            className="-mr-1 -mt-0.5 inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-ink-subtle opacity-0 transition hover:bg-surface-3 hover:text-ink group-hover:opacity-100"
+                          >
+                            <X className="h-3.5 w-3.5" strokeWidth={1.8} />
+                          </button>
+                        </div>
+                        {n.content ? (
+                          <div className="mt-0.5 text-[12.5px] leading-snug text-ink-2">{n.content}</div>
+                        ) : null}
+                        <div className="mt-1 text-[11.5px] text-ink-subtle">
+                          {relativeTime(n.createdAt)}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))
+                  ))}
+                  {listQuery.hasNextPage ? (
+                    <button
+                      type="button"
+                      onClick={() => listQuery.fetchNextPage()}
+                      disabled={listQuery.isFetchingNextPage}
+                      className="flex w-full items-center justify-center gap-2 px-5 py-3.5 text-[12.5px] font-medium text-ink-muted transition hover:bg-surface-3 hover:text-ink disabled:opacity-50"
+                    >
+                      {listQuery.isFetchingNextPage ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : null}
+                      Load older
+                    </button>
+                  ) : null}
+                </>
               )}
             </div>
           </SheetContent>
