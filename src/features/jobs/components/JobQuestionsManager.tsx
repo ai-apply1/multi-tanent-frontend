@@ -28,6 +28,7 @@ import type {
   JobQuestionView,
 } from "@/features/jobs/types"
 import {
+  allAudioReady,
   askableCount,
   questionLabel,
   type ScreeningQuestion,
@@ -167,8 +168,22 @@ export function JobQuestionsManager({ job }: JobQuestionsManagerProps) {
   }
 
   const handleAdd = (picks: ScreeningQuestion[]) => {
+    // Backstop the dialog's own gate: a stale list (a clip that failed
+    // generation after the picker loaded) must not slip a silent question
+    // onto the job. Skip any pick that isn't fully voiced and say which.
+    const ready = picks.filter(allAudioReady)
+    const skipped = picks.length - ready.length
+    if (skipped > 0) {
+      toast.error(
+        `Skipped ${skipped} question${skipped === 1 ? "" : "s"} whose audio isn't ready yet.`,
+      )
+    }
+    if (ready.length === 0) {
+      setAddOpen(false)
+      return
+    }
     setDraft((prev) => {
-      const added: JobQuestionView[] = picks.map((pick) => ({
+      const added: JobQuestionView[] = ready.map((pick) => ({
         questionId: pick._id,
         orderIndex: 0, // re-derived from array position on save
         // Provisional: an equal share of the current pie, then everything is

@@ -1,4 +1,6 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Plus, Star, X } from "lucide-react"
+import toast from "react-hot-toast"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -7,13 +9,23 @@ import {
   DialogDescription,
   DialogTitle
 } from "@/components/ui/dialog"
+import { VariantAudioStatus } from "@/features/screening-questions/components/VariantAudioStatus"
+import { VariantAudioPlayer } from "@/features/screening-questions/components/VariantAudioPlayer"
 import {
-  askableCount,
+  generateQuestionAudio,
+  getScreeningQuestion
+} from "@/features/screening-questions/screeningQuestionsApi"
+import {
   DIFFICULTY_LABELS,
-  questionLabel,
+  generatingVariants,
+  variantAudioState,
   type DifficultyLevel,
   type ScreeningQuestion
 } from "@/features/screening-questions/types"
+import { errorMessage as apiError } from "@/lib/errors"
+
+/** How often to re-check while a clip is still being generated. */
+const AUDIO_POLL_MS = 2000
 
 interface QuestionPreviewDialogProps {
   open: boolean
@@ -36,10 +48,15 @@ const DIFFICULTY_PILL: Record<DifficultyLevel, string> = {
 }
 
 /**
- * Read-only preview of a bank question: the canonical wording plus every
- * still-askable synonym. Editing is intentionally elsewhere — the "+" and
- * "Generate synonyms" affordances defer to the parent's edit dialog rather
- * than duplicating its form here.
+ * Preview of a bank question: the canonical wording plus every still-askable
+ * synonym, each showing whether its voice clip is ready and offering a play
+ * button (when ready) or a regenerate (when missing / failed).
+ *
+ * The `question` prop is a snapshot from the list, which is stale the moment
+ * a clip finishes generating — so, exactly like the edit dialog, this fetches
+ * the live row and polls it while anything is still generating. Editing the
+ * wording itself stays deferred to the edit dialog (`onEdit`); only audio is
+ * actionable here.
  */
 export function QuestionPreviewDialog({
   open,
@@ -47,32 +64,57 @@ export function QuestionPreviewDialog({
   question,
   onEdit
 }: QuestionPreviewDialogProps) {
+  const queryClient = useQueryClient()
+
+  // Live audio state. Seeded from the prop so the body renders instantly, then
+  // polled only while a clip is mid-flight (an idle preview costs nothing).
+  const liveQuery = useQuery({
+    queryKey: ["screeningQuestion", question?._id],
+    queryFn: () => getScreeningQuestion(question!._id),
+    enabled: open && Boolean(question),
+    initialData: question ?? undefined,
+    refetchInterval: (q) => {
+      const data = q.state.data
+      return data && generatingVariants(data).length > 0 ? AUDIO_POLL_MS : false
+    }
+  })
+
+  const generateMutation = useMutation({
+    mutationFn: (variantIds?: string[]) =>
+      generateQuestionAudio(question!._id, variantIds),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(["screeningQuestion", updated._id], updated)
+      queryClient.invalidateQueries({ queryKey: ["screeningQuestions"] })
+      toast.success("Generating voice audio…")
+    },
+    onError: (err) =>
+      toast.error(apiError(err, "Could not start audio generation."))
+  })
+
   // Nothing to render without a question — but Radix still needs the Dialog
   // root mounted so the open/close transition stays owned by this component.
   if (!question) {
     return <Dialog open={open} onOpenChange={onOpenChange} />
   }
 
-  const canonical = questionLabel(question)
-  // variants[0] is the canonical wording; the rest (still askable) are the
-  // synonyms the design surfaces below. Retired wordings are hidden — they
-  // are neither served to candidates nor useful for a preview.
-  const synonyms = question.variants
-    .filter((v) => !v.retired)
-    .slice(1)
-    .map((v) => v.text)
-  const synonymCount = Math.max(0, askableCount(question) - 1)
+  // Prefer the live copy; fall back to the prop until the first fetch lands.
+  const live = liveQuery.data ?? question
+
+  // variants[0] (first still-askable) is the canonical wording; the rest are
+  // the synonyms. Retired wordings are hidden — neither served nor generated.
+  const askable = live.variants.filter((v) => !v.retired)
+  const canonical = askable[0]
+  const synonyms = askable.slice(1)
 
   const handleEdit = () => {
     onEdit(question)
   }
 
+  const generatePending = generateMutation.isPending
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        hideCloseButton
-        className="max-w-[540px] gap-0 p-0"
-      >
+      <DialogContent hideCloseButton className="max-w-[540px] gap-0 p-0">
         {/* Header — custom layout, not the default DialogHeader. Uses the
             Radix DialogTitle/Description elements to satisfy a11y while
             still matching the design's spacing/typography. */}
@@ -100,25 +142,39 @@ export function QuestionPreviewDialog({
         {/* Body */}
         <div className="scroll overflow-auto px-6 pb-5">
           {/* Canonical question card */}
-          <div className="mb-4 flex gap-3 rounded-xl border border-line bg-surface-2 p-4">
-            <span className="flex h-[30px] w-[30px] flex-shrink-0 items-center justify-center rounded-lg bg-accent text-primary">
-              <Star className="h-4 w-4" strokeWidth={1.7} />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-[14px] font-semibold leading-snug text-ink">
-                {canonical}
-              </p>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                <span
-                  className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold ${
-                    DIFFICULTY_PILL[question.difficultyLevel]
-                  }`}
-                >
-                  {DIFFICULTY_LABELS[question.difficultyLevel]}
-                </span>
+          {canonical ? (
+            <div className="mb-4 flex gap-3 rounded-xl border border-line bg-surface-2 p-4">
+              <span className="flex h-[30px] w-[30px] flex-shrink-0 items-center justify-center rounded-lg bg-accent text-primary">
+                <Star className="h-4 w-4" strokeWidth={1.7} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[14px] font-semibold leading-snug text-ink">
+                  {canonical.text}
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span
+                    className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold ${
+                      DIFFICULTY_PILL[live.difficultyLevel]
+                    }`}
+                  >
+                    {DIFFICULTY_LABELS[live.difficultyLevel]}
+                  </span>
+                  <VariantAudioStatus
+                    variant={canonical}
+                    retired={false}
+                    busy={generatePending}
+                    onRetry={() => generateMutation.mutate([canonical._id])}
+                  />
+                  {variantAudioState(canonical) === "ready" ? (
+                    <VariantAudioPlayer
+                      questionId={live._id}
+                      variantId={canonical._id}
+                    />
+                  ) : null}
+                </div>
               </div>
             </div>
-          </div>
+          ) : null}
 
           {/* Synonyms header */}
           <div className="mb-2.5 flex items-center gap-2">
@@ -135,24 +191,38 @@ export function QuestionPreviewDialog({
               Synonyms
             </span>
             <span className="mono text-[11.5px] text-ink-muted">
-              {synonymCount}
+              {synonyms.length}
             </span>
           </div>
 
           {/* Synonyms list / empty state */}
           {synonyms.length > 0 ? (
             <div className="grid gap-2">
-              {synonyms.map((text, i) => (
+              {synonyms.map((variant, i) => (
                 <div
-                  key={i}
+                  key={variant._id}
                   className="flex items-start gap-3 rounded-[10px] border border-line p-3"
                 >
                   <span className="flex h-[22px] w-[22px] flex-shrink-0 items-center justify-center rounded-full bg-surface-3 text-[11px] font-bold text-ink-2">
                     {i + 1}
                   </span>
                   <span className="flex-1 text-[13.5px] leading-snug text-ink-2">
-                    {text}
+                    {variant.text}
                   </span>
+                  <div className="flex flex-shrink-0 items-center gap-1.5">
+                    <VariantAudioStatus
+                      variant={variant}
+                      retired={false}
+                      busy={generatePending}
+                      onRetry={() => generateMutation.mutate([variant._id])}
+                    />
+                    {variantAudioState(variant) === "ready" ? (
+                      <VariantAudioPlayer
+                        questionId={live._id}
+                        variantId={variant._id}
+                      />
+                    ) : null}
+                  </div>
                 </div>
               ))}
             </div>
@@ -165,11 +235,7 @@ export function QuestionPreviewDialog({
 
         {/* Footer */}
         <div className="flex justify-end gap-2.5 border-t border-line px-6 py-4">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => onOpenChange(false)}
-          >
+          <Button variant="secondary" size="sm" onClick={() => onOpenChange(false)}>
             Close
           </Button>
           <Button size="sm" onClick={handleEdit}>

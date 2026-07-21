@@ -18,7 +18,9 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { listScreeningQuestions } from "@/features/screening-questions/screeningQuestionsApi"
 import {
+  allAudioReady,
   DIFFICULTY_LABELS,
+  generatingVariants,
   questionLabel,
   type DifficultyLevel,
   type ScreeningQuestion,
@@ -132,6 +134,11 @@ export function AddJobQuestionsDialog({
 
   const toggle = (question: ScreeningQuestion) => {
     if (attached.has(question._id)) return
+    // A candidate is served one wording at random, so a question with any
+    // wording lacking a voice clip could strand whoever draws it. Block it
+    // here the same way already-attached rows are blocked; the row also shows
+    // why (see the render).
+    if (!allAudioReady(question)) return
     setSelected((prev) =>
       prev.some((q) => q._id === question._id)
         ? prev.filter((q) => q._id !== question._id)
@@ -207,6 +214,11 @@ export function AddJobQuestionsDialog({
           </Select>
         </div>
 
+        <p className="px-6 pt-1 text-[11.5px] text-ink-muted">
+          Questions whose voice audio isn't generated yet can't be added —
+          generate it from the question bank first.
+        </p>
+
         <div className="grid max-h-[420px] min-h-0 flex-1 gap-2 overflow-auto px-6 py-2">
           {questionsQuery.isLoading ? (
             <QuestionPickerSkeleton />
@@ -228,21 +240,27 @@ export function AddJobQuestionsDialog({
             rows.map((question) => {
               const isAttached = attached.has(question._id)
               const isSelected = selectedSet.has(question._id)
+              // Gate on audio only for rows not already attached — an attached
+              // question keeps its own greyed treatment regardless.
+              const noAudio = !isAttached && !allAudioReady(question)
+              const generating =
+                noAudio && generatingVariants(question).length > 0
+              const disabled = isAttached || noAudio
               const chip = DIFFICULTY_CHIP[question.difficultyLevel]
               return (
                 <label
                   key={question._id}
                   className={cn(
                     "flex items-start gap-2.5 rounded-lg border border-line p-3",
-                    isAttached
+                    disabled
                       ? "cursor-default opacity-55"
                       : "cursor-pointer hover:border-primary/40",
-                    isSelected && !isAttached ? "bg-accent border-primary" : "",
+                    isSelected && !disabled ? "bg-accent border-primary" : "",
                   )}
                 >
                   <input
                     type="checkbox"
-                    disabled={isAttached}
+                    disabled={disabled}
                     checked={isAttached || isSelected}
                     onChange={() => toggle(question)}
                     className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--accent-solid,var(--accent))]"
@@ -273,6 +291,12 @@ export function AddJobQuestionsDialog({
                       {isAttached ? (
                         <span className="text-[11.5px] text-ink-subtle">
                           · already attached
+                        </span>
+                      ) : noAudio ? (
+                        <span className="text-[11.5px] font-medium text-[var(--warning)]">
+                          {generating
+                            ? "· audio still generating"
+                            : "· audio not generated"}
                         </span>
                       ) : null}
                     </div>
