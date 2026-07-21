@@ -35,10 +35,11 @@ export async function createStatusColumn(payload: CreateStatusPayload) {
 }
 
 /**
- * Edit a column's DISPLAY fields — label / color / stageOrder. Works on
- * protected builtins too: an org may rename "Pre-screened" to "CV review"
- * without breaking anything, because automations address columns by `key`
- * and `key` cannot be edited.
+ * Edit a column's DISPLAY fields — label / color. Works on protected
+ * builtins too: an org may rename "Pre-screened" to "CV review" without
+ * breaking anything, because automations address columns by `key` and
+ * `key` cannot be edited. Position is not editable here — drag-and-drop
+ * (`reorderStatusColumns`) owns it.
  */
 export async function updateStatusColumn(
   statusId: string,

@@ -87,6 +87,39 @@ export async function suggestQuestionVariants(payload: SuggestVariantsPayload) {
 }
 
 /**
+ * (Re)generate the spoken audio for a question's wordings.
+ *
+ * Pass `variantIds` for one wording (the per-row retry) or omit it for every
+ * un-retired wording that still needs audio ("Generate all"). Omitting is NOT
+ * "regenerate everything" — wordings that already have a clip are skipped, so
+ * pressing it twice costs nothing.
+ *
+ * The work is queued: the response is the question already stamped as
+ * generating, which callers should write straight into the query cache to
+ * re-arm their poll rather than waiting for a refetch.
+ */
+export async function generateQuestionAudio(id: string, variantIds?: string[]) {
+  const { data } = await api.post<ScreeningQuestion>(
+    `/admin/questions/${id}/audio/generate`,
+    variantIds?.length ? { variantIds } : {}
+  )
+  return data
+}
+
+/**
+ * A short-lived presigned URL for one wording's generated clip, for the bank
+ * play button. Fetched lazily (only when the operator presses play) so the
+ * list never mints URLs for clips nobody plays. 404 when the wording is
+ * retired or has no clip yet — the caller reads that as "nothing to play".
+ */
+export async function getQuestionVariantAudioUrl(id: string, variantId: string) {
+  const { data } = await api.get<{ url: string; expiresIn: number }>(
+    `/admin/questions/${id}/audio/${variantId}`
+  )
+  return data
+}
+
+/**
  * Hard-delete a bank row. 409 while ANY job still embeds the question — the
  * error message names the jobs, so callers must surface it rather than
  * replacing it with a generic failure line.

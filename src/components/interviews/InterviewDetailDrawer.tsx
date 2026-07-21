@@ -11,10 +11,8 @@ import {
   CheckCircle2,
   ClipboardCheck,
   Clock,
-  Download,
   ExternalLink,
   EyeOff,
-  FileArchive,
   FileText,
   History,
   Loader2,
@@ -67,8 +65,6 @@ import {
 } from "@/components/ui/tooltip";
 import {
   deleteInterview,
-  downloadInterviewAnswersAudio,
-  downloadInterviewVideo,
   getInterview,
   getInterviewAttempts,
   getInterviewScoringStatus,
@@ -116,16 +112,6 @@ function attemptOptionLabel(a: AdminInterviewAttempt): string {
     : `Attempt ${a.attemptNumber}`;
 }
 
-/** Sanitise a candidate name/email into a safe download filename stem. */
-function fileSafe(name: string | null | undefined): string {
-  const base = (name ?? "candidate")
-    .trim()
-    .replace(/\s+/g, "_")
-    .replace(/[^a-zA-Z0-9._-]/g, "")
-    .slice(0, 60);
-  return base || "candidate";
-}
-
 /** How often the lightweight scoring-status endpoint is polled. */
 const SCORING_POLL_MS = 4000;
 
@@ -135,17 +121,6 @@ function isScoringInFlight(s?: ScoringStatus | null): boolean {
 
 function isTranscoding(s?: string | null): boolean {
   return s === "pending" || s === "processing";
-}
-
-function downloadBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
 }
 
 function initialsFor(name?: string, email?: string) {
@@ -852,8 +827,6 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   // Local mutation flags
   const [retranscoding, setRetranscoding] = useState(false);
   const [rescoring, setRescoring] = useState(false);
-  const [downloadingAudio, setDownloadingAudio] = useState(false);
-  const [downloadingVideo, setDownloadingVideo] = useState(false);
   const [reinviting, setReinviting] = useState(false);
   const [invitingCand, setInvitingCand] = useState(false);
   const [statusPending, setStatusPending] = useState(false);
@@ -903,6 +876,15 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
     try {
       await reinviteInterview(activeSessionId);
       toast.success("Fresh invite email sent.");
+      // The new attempt (N+1) is prepared asynchronously (the question-prep
+      // worker) or lazily when the candidate opens the link, so its row may
+      // not exist the instant this POST returns. Refresh the attempts
+      // dropdown + the interviews list so it appears as soon as prep lands;
+      // if the worker is slow/down, reopening the drawer picks it up later.
+      await Promise.all([
+        attemptsQuery.refetch(),
+        queryClient.invalidateQueries({ queryKey: ["interviews"] }),
+      ]);
     } catch (err) {
       toast.error(errorMessage(err, "Could not resend invite."));
     } finally {
@@ -910,11 +892,10 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
     }
   };
 
-  // Candidate-scoped invite — the drawer's "Resend invite" empty-state action.
-  // Only pre-screened candidates can be manually invited (API returns 409
-  // otherwise), so the button is disabled with a tooltip in every other state.
-  const canSendCandidateInvite =
-    candidate?.currentStatusId.key === INVITABLE_STATUS_KEY;
+  // Candidate-scoped invite — the drawer's "Resend invite" action. Always
+  // available: the admin can send a fresh link from any status (the backend
+  // only refuses on a closed job / spent attempt cap, with a clear message).
+  const canSendCandidateInvite = Boolean(candidateId);
   const handleSendCandidateInvite = async () => {
     if (!candidateId || invitingCand) return;
     setInvitingCand(true);
@@ -1019,92 +1000,6 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   const handleOpenCv = () => {
     if (!candidateId) return;
     window.open(`/cv-view/${candidateId}`, "_blank", "noopener");
-  };
-
-  const handleExportJson = () => {
-    if (!data) return;
-    const payload = {
-      candidateName: data.candidateName,
-      email: data.email,
-      sessionId: data.sessionId,
-      jobTitle: data.jobTitle,
-      attemptNumber: data.attemptNumber,
-      status: data.status,
-      scoringStatus: data.scoringStatus,
-      startedAt: data.startedAt,
-      submittedAt: data.submittedAt,
-      scores: data.scores ?? null,
-      questions: questions.map((q, i) => ({
-        number: i + 1,
-        questionId: q.questionId,
-        asked: q.text,
-        answer: q.transcript,
-        skipped: q.skipped,
-        score: q.score,
-        feedback: q.feedback,
-      })),
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], {
-      type: "application/json",
-    });
-    downloadBlob(
-      blob,
-      `interview-${fileSafe(data.candidateName || data.email || activeSessionId)}.json`,
-    );
-    toast.success("Exported interview data.");
-  };
-
-  const handleDownloadAudios = async () => {
-    if (!activeSessionId || downloadingAudio) return;
-    setDownloadingAudio(true);
-    const toastId = toast.loading("Preparing audio download…");
-    try {
-      const blob = await downloadInterviewAnswersAudio(activeSessionId);
-      downloadBlob(
-        blob,
-        `interview-audio-${fileSafe(data?.candidateName || data?.email || activeSessionId)}.zip`,
-      );
-      toast.success("Audio download ready.", { id: toastId });
-    } catch (err) {
-      const status = axios.isAxiosError(err) ? err.response?.status : undefined;
-      const message =
-        status === 404
-          ? "No answer audio is available for this interview."
-          : "Could not download audio. Please try again.";
-      toast.error(message, { id: toastId });
-    } finally {
-      setDownloadingAudio(false);
-    }
-  };
-
-  const handleDownloadVideo = async () => {
-    if (!activeSessionId || downloadingVideo) return;
-    setDownloadingVideo(true);
-    const toastId = toast.loading("Preparing video download…");
-    try {
-      const blob = await downloadInterviewVideo(activeSessionId);
-      const ext = blob.type.includes("mp4")
-        ? "mp4"
-        : blob.type.includes("webm")
-          ? "webm"
-          : blob.type.includes("matroska")
-            ? "mkv"
-            : "mp4";
-      downloadBlob(
-        blob,
-        `interview-video-${fileSafe(data?.candidateName || data?.email || activeSessionId)}.${ext}`,
-      );
-      toast.success("Video download ready.", { id: toastId });
-    } catch (err) {
-      const status = axios.isAxiosError(err) ? err.response?.status : undefined;
-      const message =
-        status === 404
-          ? "No recording is available to download for this interview yet."
-          : "Could not download the video. Please try again.";
-      toast.error(message, { id: toastId });
-    } finally {
-      setDownloadingVideo(false);
-    }
   };
 
   // ── Tabs ──────────────────────────────────────────────────────────────
@@ -1257,17 +1152,6 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                     <Send className="h-3.5 w-3.5" strokeWidth={1.7} />
                     Resend invite
                   </DropdownMenuItem>
-                  <DropdownMenuItem
-                    disabled={!data?.email}
-                    onSelect={() => {
-                      if (data?.email) {
-                        window.location.href = `mailto:${data.email}`;
-                      }
-                    }}
-                  >
-                    <MailPlus className="h-3.5 w-3.5" strokeWidth={1.7} />
-                    Send email/SMS
-                  </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   {data?.scores ? (
                     <DropdownMenuItem
@@ -1305,31 +1189,8 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                       onSelect={handleReinvite}
                     >
                       <MailPlus className="h-3.5 w-3.5" strokeWidth={1.7} />
-                      Reinvite (this attempt)
+                      Reattempt interview
                     </DropdownMenuItem>
-                  ) : null}
-                  {data ? (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onSelect={handleExportJson}>
-                        <Download className="h-3.5 w-3.5" strokeWidth={1.7} />
-                        Export JSON
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        disabled={downloadingVideo}
-                        onSelect={handleDownloadVideo}
-                      >
-                        <Video className="h-3.5 w-3.5" strokeWidth={1.7} />
-                        Download video
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        disabled={downloadingAudio}
-                        onSelect={handleDownloadAudios}
-                      >
-                        <FileArchive className="h-3.5 w-3.5" strokeWidth={1.7} />
-                        Download answer audios
-                      </DropdownMenuItem>
-                    </>
                   ) : null}
                   <DropdownMenuSeparator />
                   {data ? (

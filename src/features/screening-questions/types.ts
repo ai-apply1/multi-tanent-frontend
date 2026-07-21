@@ -48,6 +48,82 @@ export interface QuestionVariant {
   _id: string
   text: string
   retired: boolean
+
+  /**
+   * S3 key of this wording's pre-generated spoken clip, or `""`. Not a URL —
+   * candidates reach the audio through the interview's own streaming
+   * endpoint, never a direct link, so the key is only useful as a presence
+   * signal here.
+   */
+  audioKey: string
+  /** True once the clip is confirmed in S3. Drives the retry button. */
+  isAudioGenerated: boolean
+  /** Why the last generation attempt failed, if it did. */
+  audioError: string
+  /** When generation was last queued; null once it settles either way. */
+  audioQueuedAt: string | null
+}
+
+/** What the bank UI shows for one wording's audio. */
+export type VariantAudioState = "ready" | "generating" | "failed" | "none"
+
+/**
+ * Resolve a wording's audio state for display.
+ *
+ * The order matters. `isAudioGenerated` wins outright — a wording with a clip
+ * is ready even if a previous attempt left an error behind. `audioQueuedAt`
+ * is checked next because it is the ONLY thing distinguishing "generating
+ * right now" from "never started" after a page reload; without it a fresh
+ * question and an in-flight one would look identical and the UI would offer
+ * a retry for work already underway.
+ */
+export const variantAudioState = (v: {
+  isAudioGenerated?: boolean
+  audioError?: string
+  audioQueuedAt?: string | null
+}): VariantAudioState => {
+  if (v.isAudioGenerated) return "ready"
+  if (v.audioQueuedAt) return "generating"
+  if (v.audioError) return "failed"
+  return "none"
+}
+
+/**
+ * Wordings whose audio is still in flight. Non-empty means keep polling.
+ *
+ * Retired wordings are excluded: the worker skips them, so their state never
+ * changes and including them would poll forever.
+ */
+export const generatingVariants = (q: {
+  variants: QuestionVariant[]
+}): QuestionVariant[] =>
+  q.variants.filter(
+    (v) => !v.retired && variantAudioState(v) === "generating"
+  )
+
+/**
+ * True when NOT ONE un-retired wording has audio — the case "Generate all"
+ * exists for. A question with some clips shows per-wording retries instead,
+ * so the bulk action never re-queues work that already succeeded.
+ */
+export const needsAllAudio = (q: { variants: QuestionVariant[] }): boolean => {
+  const askable = q.variants.filter((v) => !v.retired)
+  return askable.length > 0 && askable.every((v) => !v.isAudioGenerated)
+}
+
+/**
+ * True when EVERY askable wording has a ready clip — the job-attach gate.
+ *
+ * A candidate is served one wording at RANDOM, so a question is only safe to
+ * attach when none of them can be silent. This is stricter than "the base
+ * question has audio": a missing synonym would still strand whichever
+ * candidate happens to draw it. A wording still generating is not ready
+ * either, so it blocks too. Retired wordings are ignored — they are never
+ * served.
+ */
+export const allAudioReady = (q: { variants: QuestionVariant[] }): boolean => {
+  const askable = q.variants.filter((v) => !v.retired)
+  return askable.length > 0 && askable.every((v) => v.isAudioGenerated)
 }
 
 /**

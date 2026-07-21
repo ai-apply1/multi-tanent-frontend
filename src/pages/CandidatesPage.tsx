@@ -62,7 +62,6 @@ import {
 import { invalidateCandidateData } from "@/features/candidates/candidatesCache";
 import { aiScoreState, type AiScoreState } from "@/features/candidates/aiScore";
 import {
-  INVITABLE_STATUS_KEY,
   type CandidateListItem,
   type CandidateStatus,
 } from "@/features/candidates/types";
@@ -1154,9 +1153,9 @@ function CandidateRow({
   onDelete: () => void;
 }) {
   const status = row.currentStatusId;
-  // The §3.2 endpoint accepts ONLY `needs_review` — anything else 409s with
-  // INVALID_STATUS, so the action is gated rather than offered-then-refused.
-  const canInvite = status?.key === INVITABLE_STATUS_KEY;
+  // Always offered — the invite endpoint now accepts any status (it only
+  // refuses on a closed job / spent attempt cap, with a clear message).
+  const canInvite = true;
   const hasInterview = Boolean(row.latestInterviewId);
   const scoreState = aiScoreState(row.latestInterviewId);
 

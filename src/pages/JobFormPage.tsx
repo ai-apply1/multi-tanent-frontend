@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Markdown } from "@/components/Markdown";
 import { ChipInput } from "@/features/jobs/components/ChipInput";
 import {
   ANY_CITY_VALUE,
@@ -630,6 +631,9 @@ function BasicsStep({
   description: string;
   setDescription: (v: string) => void;
 }) {
+  const [showPreview, setShowPreview] = useState(false);
+  const hasDescription = description.trim().length > 0;
+
   return (
     <div>
       <StepHead
@@ -655,18 +659,64 @@ function BasicsStep({
           {titleError ? <p className={ERROR_CLASS}>{titleError}</p> : null}
         </div>
         <div>
-          <label htmlFor="job-description" className={LABEL_CLASS}>
-            Description
-          </label>
-          <textarea
-            id="job-description"
-            value={description}
-            maxLength={5000}
-            rows={6}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="What the role involves…"
-            className="w-full resize-y rounded-lg border border-[var(--field-border)] bg-surface p-3.5 text-[14px] text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)]"
-          />
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <label
+              htmlFor="job-description"
+              className="block text-[13px] font-semibold text-ink"
+            >
+              Description
+            </label>
+            {/* Write / Preview toggle — lets HR see the rendered markdown
+                (same react-markdown pipeline the candidate ultimately sees via
+                `Markdown`) before creating the job. */}
+            <div className="inline-flex rounded-md border border-[var(--field-border)] bg-surface p-0.5 text-[12px] font-medium">
+              <button
+                type="button"
+                onClick={() => setShowPreview(false)}
+                aria-pressed={!showPreview}
+                className={`rounded px-2.5 py-1 transition-colors ${
+                  !showPreview
+                    ? "bg-primary text-white"
+                    : "text-ink-muted hover:text-ink"
+                }`}
+              >
+                Write
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowPreview(true)}
+                aria-pressed={showPreview}
+                className={`rounded px-2.5 py-1 transition-colors ${
+                  showPreview
+                    ? "bg-primary text-white"
+                    : "text-ink-muted hover:text-ink"
+                }`}
+              >
+                Preview
+              </button>
+            </div>
+          </div>
+          {showPreview ? (
+            <div className="min-h-[168px] w-full rounded-lg border border-[var(--field-border)] bg-surface p-3.5 text-[14px] text-ink">
+              {hasDescription ? (
+                <Markdown content={description} />
+              ) : (
+                <p className="text-[14px] text-ink-subtle">
+                  Nothing to preview yet. Switch to Write and add a description.
+                </p>
+              )}
+            </div>
+          ) : (
+            <textarea
+              id="job-description"
+              value={description}
+              maxLength={5000}
+              rows={6}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="What the role involves…"
+              className="w-full resize-y rounded-lg border border-[var(--field-border)] bg-surface p-3.5 text-[14px] text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)]"
+            />
+          )}
           <p className={HELP_CLASS}>
             Markdown supported. Max 5000 characters. {description.length}/5000
           </p>

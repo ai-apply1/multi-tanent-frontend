@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   AlertTriangle,
   Loader2,
@@ -7,7 +7,8 @@ import {
   Plus,
   Sparkles,
   Trash2,
-  Undo2
+  Undo2,
+  Volume2
 } from "lucide-react"
 import toast from "react-hot-toast"
 import { Button } from "@/components/ui/button"
@@ -15,8 +16,11 @@ import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { ErrorBoundary } from "@/components/common/ErrorBoundary"
 import { CategoryPicker } from "@/features/question-categories/components/CategoryPicker"
 import { TagsInput } from "@/features/screening-questions/components/TagsInput"
+import { VariantAudioStatus } from "@/features/screening-questions/components/VariantAudioStatus"
 import {
   createScreeningQuestion,
+  generateQuestionAudio,
+  getScreeningQuestion,
   suggestQuestionVariants,
   updateScreeningQuestion
 } from "@/features/screening-questions/screeningQuestionsApi"
@@ -27,10 +31,16 @@ import {
   QUESTION_VARIANTS_MAX,
   VARIANT_SUGGEST_MAX,
   VARIANT_SUGGEST_MIN,
+  generatingVariants,
+  needsAllAudio,
   type DifficultyLevel,
+  type QuestionVariant,
   type ScreeningQuestion
 } from "@/features/screening-questions/types"
 import { errorMessage as apiError } from "@/lib/errors"
+
+/** How often to re-check while a clip is still being generated. */
+const AUDIO_POLL_MS = 2000
 
 interface QuestionFormDialogProps {
   open: boolean
@@ -174,6 +184,70 @@ export function QuestionFormDialog({
         )
       )
   })
+
+  /*
+   * Live AUDIO state for the saved question.
+   *
+   * A separate query rather than the `question` prop because generation
+   * happens in a worker: the prop is a snapshot from whenever the list last
+   * loaded, and the clips land seconds later. Polls only while something is
+   * actually generating, so an idle dialog costs one request.
+   *
+   * Create mode has nothing to poll — the row does not exist yet.
+   */
+  const audioQuery = useQuery({
+    queryKey: ["screeningQuestion", question?._id],
+    queryFn: () => getScreeningQuestion(question!._id),
+    enabled: open && Boolean(question),
+    initialData: question ?? undefined,
+    refetchInterval: (q) => {
+      const data = q.state.data
+      return data && generatingVariants(data).length > 0
+        ? AUDIO_POLL_MS
+        : false
+    }
+  })
+
+  /**
+   * Server-side wordings by `_id`, so each draft row can find its own audio
+   * state. Drafts with no `_id` (unsaved appends) simply miss, which is the
+   * correct answer — they have no clip.
+   */
+  const audioByVariantId = useMemo(() => {
+    const map = new Map<string, QuestionVariant>()
+    for (const v of audioQuery.data?.variants ?? []) map.set(v._id, v)
+    return map
+  }, [audioQuery.data])
+
+  const generateMutation = useMutation({
+    mutationFn: (variantIds?: string[]) =>
+      generateQuestionAudio(question!._id, variantIds),
+    onSuccess: (updated) => {
+      // The response already carries the "generating" stamps, so writing it
+      // straight into the cache re-arms the poll immediately instead of
+      // waiting a refetch to notice work started.
+      queryClient.setQueryData(["screeningQuestion", updated._id], updated)
+      queryClient.invalidateQueries({ queryKey: ["screeningQuestions"] })
+      toast.success("Generating voice audio…")
+    },
+    onError: (err) =>
+      toast.error(apiError(err, "Could not start audio generation."))
+  })
+
+  /** Which draft row is mid-request, so only that one shows a spinner. */
+  const [retryingId, setRetryingId] = useState<string | null>(null)
+  const retryAudio = (variantId: string) => {
+    setRetryingId(variantId)
+    generateMutation.mutate([variantId], {
+      onSettled: () => setRetryingId(null)
+    })
+  }
+
+  const showGenerateAll =
+    isEdit && audioQuery.data ? needsAllAudio(audioQuery.data) : false
+  const audioGenerating = audioQuery.data
+    ? generatingVariants(audioQuery.data).length
+    : 0
 
   const room = QUESTION_VARIANTS_MAX - variants.length
 
@@ -356,9 +430,19 @@ export function QuestionFormDialog({
                 >
                   Question
                 </label>
-                <span className="text-[12px] text-ink-subtle tabular-nums">
-                  {questionText.length}/{QUESTION_TEXT_MAX_LENGTH}
-                </span>
+                <div className="flex items-center gap-3">
+                  {isEdit && variants[0]?._id ? (
+                    <VariantAudioStatus
+                      variant={audioByVariantId.get(variants[0]._id)}
+                      retired={variants[0].retired}
+                      busy={retryingId === variants[0]._id}
+                      onRetry={() => retryAudio(variants[0]._id!)}
+                    />
+                  ) : null}
+                  <span className="text-[12px] text-ink-subtle tabular-nums">
+                    {questionText.length}/{QUESTION_TEXT_MAX_LENGTH}
+                  </span>
+                </div>
               </div>
               <textarea
                 id="q-canonical"
@@ -413,6 +497,16 @@ export function QuestionFormDialog({
                           className="scroll min-h-9 flex-1 resize-none rounded-md border-none bg-transparent px-0 py-1 text-[13px] leading-snug text-ink outline-none disabled:text-ink-muted"
                         />
                         <div className="flex items-center gap-1">
+                          {isEdit ? (
+                            <VariantAudioStatus
+                              variant={
+                                v._id ? audioByVariantId.get(v._id) : undefined
+                              }
+                              retired={v.retired}
+                              busy={retryingId === v._id}
+                              onRetry={() => v._id && retryAudio(v._id)}
+                            />
+                          ) : null}
                           {v._id ? (
                             <button
                               type="button"
@@ -690,7 +784,30 @@ export function QuestionFormDialog({
                 <span>{saveError}</span>
               </div>
             ) : null}
-            <div className="flex justify-end gap-2.5">
+            <div className="flex flex-wrap items-center justify-end gap-2.5">
+              {/* Only when NOTHING is generated — a question with some clips
+                  shows per-wording retries instead, so this never re-queues
+                  work that already succeeded. */}
+              {showGenerateAll ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="mr-auto"
+                  disabled={generateMutation.isPending || audioGenerating > 0}
+                  onClick={() => generateMutation.mutate(undefined)}
+                  title="Generate the voice clip for the question and every synonym."
+                >
+                  {generateMutation.isPending || audioGenerating > 0 ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Volume2 className="h-4 w-4" />
+                  )}
+                  {audioGenerating > 0
+                    ? "Generating audio…"
+                    : "Generate all audio"}
+                </Button>
+              ) : null}
               <Button
                 type="button"
                 variant="secondary"
