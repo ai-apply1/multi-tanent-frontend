@@ -73,6 +73,7 @@ import { ROUTES, jobDetail } from "@/routes";
 import { formatDate } from "@/lib/date";
 import { errorMessage } from "@/lib/errors";
 import { cn } from "@/lib/utils";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 
 /** Radix `Select` forbids an empty value — the "no filter" sentinel. */
 const ALL = "all";
@@ -308,12 +309,14 @@ export function CandidatesPage() {
     setPage(1);
   }, [routeJobId]);
 
+  const debouncedSearch = useDebouncedValue(search);
+
   const listParams = {
     page,
     limit: pageSize,
     ...(jobFilter !== ALL ? { jobId: jobFilter } : {}),
     ...(statusFilter !== ALL ? { statusKey: statusFilter } : {}),
-    ...(search.trim() ? { search: search.trim() } : {}),
+    ...(debouncedSearch.trim() ? { search: debouncedSearch.trim() } : {}),
   };
 
   const { data, isLoading, isError, isFetching, refetch } = useQuery({

@@ -1,17 +1,11 @@
 import { useState, type KeyboardEvent } from "react"
-import {
-  keepPreviousData,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import {
   AlertTriangle,
   Link as LinkIcon,
   Loader2,
   Mail,
   Send,
-  Trash2,
   X,
 } from "lucide-react"
 import toast from "react-hot-toast"
@@ -23,12 +17,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { CopyButton } from "@/components/common/CopyButton"
-import {
-  deleteJobInvite,
-  getJobShareLink,
-  listJobInvites,
-  sendJobInvites,
-} from "@/features/jobs/jobsApi"
+import { getJobShareLink, sendJobInvites } from "@/features/jobs/jobsApi"
 import { errorMessage as apiError } from "@/lib/errors"
 import { cn } from "@/lib/utils"
 
@@ -57,37 +46,19 @@ interface JobShareDialogProps {
  * Mirrors the jobjen design; QR-code affordance omitted for now.
  */
 export function JobShareDialog({ jobId, open, onOpenChange }: JobShareDialogProps) {
-  const queryClient = useQueryClient()
-
   const linkQuery = useQuery({
     queryKey: ["jobShareLink", jobId],
     queryFn: () => getJobShareLink(jobId),
     enabled: open,
   })
 
-  const invitesQuery = useQuery({
-    queryKey: ["jobInvites", jobId],
-    queryFn: () => listJobInvites(jobId),
-    enabled: open,
-    placeholderData: keepPreviousData,
-  })
-
   const sendMutation = useMutation({
     mutationFn: (emails: string[]) => sendJobInvites(jobId, emails),
     onSuccess: (res) => {
       toast.success(res.message)
-      void queryClient.invalidateQueries({ queryKey: ["jobInvites", jobId] })
       setEmails([])
     },
     onError: (err) => toast.error(apiError(err, "Could not send invites.")),
-  })
-
-  const deleteMutation = useMutation({
-    mutationFn: (inviteId: string) => deleteJobInvite(jobId, inviteId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["jobInvites", jobId] })
-    },
-    onError: (err) => toast.error(apiError(err, "Could not remove invite.")),
   })
 
   const [emails, setEmails] = useState<string[]>([])
@@ -265,35 +236,6 @@ export function JobShareDialog({ jobId, open, onOpenChange }: JobShareDialogProp
                 </>
               )}
             </Button>
-
-            {invitesQuery.data && invitesQuery.data.length > 0 ? (
-              <ul className="mt-4 flex flex-col gap-1.5 border-t border-line pt-3">
-                {invitesQuery.data.map((invite) => (
-                  <li
-                    key={invite.id}
-                    className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-surface-3"
-                  >
-                    <div className="min-w-0">
-                      <div className="truncate text-[12.5px] text-ink">
-                        {invite.email}
-                      </div>
-                      <div className="text-[11px] text-ink-muted">
-                        Sent {invite.sendCount}× ·{" "}
-                        {invite.used ? "Applied" : "Pending"}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      aria-label={`Remove invite for ${invite.email}`}
-                      onClick={() => deleteMutation.mutate(invite.id)}
-                      className="rounded-md p-1 text-ink-muted transition hover:bg-surface-2 hover:text-[var(--danger)]"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" strokeWidth={1.8} />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
           </section>
 
           {/* Share link */}

@@ -22,8 +22,7 @@ const badgeVariants = cva(
         destructive: "border-transparent bg-destructive/10 text-destructive",
         successSolid: "border-transparent bg-[var(--success)] text-white",
         destructiveSolid: "border-transparent bg-destructive text-white",
-        muted: "border-transparent bg-muted text-muted-foreground",
-        purple: "border-transparent bg-purple-100 text-purple-700"
+        muted: "border-transparent bg-muted text-muted-foreground"
       }
     },
     defaultVariants: { variant: "default" }

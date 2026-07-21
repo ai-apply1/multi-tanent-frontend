@@ -26,6 +26,7 @@ import {
   type ScreeningQuestion,
 } from "@/features/screening-questions/types"
 import { cn } from "@/lib/utils"
+import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 
 const ALL = "all"
 const FETCH_LIMIT = 100
@@ -96,6 +97,7 @@ export function AddJobQuestionsDialog({
   const [category, setCategory] = useState<string>(ALL)
   // Ordered picks — they're appended to the script in this order.
   const [selected, setSelected] = useState<ScreeningQuestion[]>([])
+  const debouncedSearch = useDebouncedValue(search)
 
   useEffect(() => {
     if (!open) return
@@ -108,13 +110,13 @@ export function AddJobQuestionsDialog({
   const questionsQuery = useQuery({
     queryKey: [
       "screeningQuestions",
-      { search, difficulty, category, limit: FETCH_LIMIT },
+      { search: debouncedSearch, difficulty, category, limit: FETCH_LIMIT },
     ],
     queryFn: () =>
       listScreeningQuestions({
         page: 1,
         limit: FETCH_LIMIT,
-        search: search.trim() || undefined,
+        search: debouncedSearch.trim() || undefined,
         difficultyLevel:
           difficulty !== ALL ? (difficulty as DifficultyLevel) : undefined,
         // The bank has no category field of its own; a category filter is
