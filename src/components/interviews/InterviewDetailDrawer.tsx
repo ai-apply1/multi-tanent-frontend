@@ -875,7 +875,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
     setReinviting(true);
     try {
       await reinviteInterview(activeSessionId);
-      toast.success("Fresh invite email sent.");
+      toast.success("New attempt created — invite email sent.");
       // The new attempt (N+1) is prepared asynchronously (the question-prep
       // worker) or lazily when the candidate opens the link, so its row may
       // not exist the instant this POST returns. Refresh the attempts
@@ -1134,20 +1134,17 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">
-                  {/* Resend invite — candidate-level, only offered while the
-                      status is still `needs_review` (the API 409s otherwise).
-                      Disabled with a note in every other state so the reason
-                      is visible without another click. */}
+                  {/* Resend invite — re-sends the link for the candidate's
+                      CURRENT attempt; it does NOT create a new one (that is
+                      "Reattempt interview" below). Available from any status;
+                      the backend only refuses on a closed job / spent attempt
+                      cap, with a clear message. */}
                   <DropdownMenuItem
                     disabled={
                       !candidateId || !canSendCandidateInvite || invitingCand
                     }
                     onSelect={handleSendCandidateInvite}
-                    title={
-                      canSendCandidateInvite
-                        ? undefined
-                        : "Only pre-screened candidates can be manually invited."
-                    }
+                    title="Re-send the interview link for the current attempt (no new attempt)"
                   >
                     <Send className="h-3.5 w-3.5" strokeWidth={1.7} />
                     Resend invite
@@ -1187,6 +1184,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                     <DropdownMenuItem
                       disabled={reinviting}
                       onSelect={handleReinvite}
+                      title="Create a NEW attempt (previous attempts are kept) and email a fresh link"
                     >
                       <MailPlus className="h-3.5 w-3.5" strokeWidth={1.7} />
                       Reattempt interview
