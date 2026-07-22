@@ -1010,12 +1010,9 @@ export function CandidatesPage() {
         title={`Invite ${inviteTarget?.fullName || "this candidate"} to interview?`}
         description={
           <>
-            The CV vetting engine scored{" "}
-            <strong>{inviteTarget?.fullName}</strong> between the auto-invite
-            and auto-reject thresholds, so it parked them at{" "}
-            <strong>Pre-screened</strong> for a human to decide. Inviting them
-            now mints their interview link, emails it, and moves them to{" "}
-            <strong>Invited</strong>.
+            This sends <strong>{inviteTarget?.fullName}</strong> an interview
+            invite it generates a secure interview link, emails it to them,
+            and moves them to <strong>Invited</strong>.
           </>
         }
         confirmLabel="Send invite"
@@ -1181,7 +1178,6 @@ function CandidateRow({
   // Always offered — the invite endpoint now accepts any status (it only
   // refuses on a closed job / spent attempt cap, with a clear message).
   const canInvite = true;
-  const hasInterview = Boolean(row.latestInterviewId);
   const scoreState = aiScoreState(row.latestInterviewId);
 
   return (
@@ -1300,27 +1296,22 @@ function CandidateRow({
       </span>
 
       {/* Actions — an explicit "View interview" button plus the kebab menu.
-          The whole row is still clickable, but the button surfaces the primary
-          action the way the admin-dashboard applicants table does. */}
+          Always shown: clicking anywhere on the row opens the same drawer
+          (it resolves for rows without an interview yet too), so the button
+          just makes that primary action visible on every row. */}
       <div
         onClick={(e) => e.stopPropagation()}
         className="flex items-center justify-self-end gap-1.5"
       >
-        {hasInterview ? (
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={onOpenInterview}
-            disabled={resolvingInterview}
-          >
-            {resolvingInterview ? (
-              <Loader2 className="animate-spin" />
-            ) : (
-              <Eye />
-            )}
-            View interview
-          </Button>
-        ) : null}
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={onOpenInterview}
+          disabled={resolvingInterview}
+        >
+          {resolvingInterview ? <Loader2 className="animate-spin" /> : <Eye />}
+          View interview
+        </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
