@@ -656,11 +656,9 @@ function BasicsStep({
           {titleError ? <p className={ERROR_CLASS}>{titleError}</p> : null}
         </div>
         <div>
-          <label htmlFor="job-description" className={LABEL_CLASS}>
-            Description
-          </label>
           <MarkdownEditor
             id="job-description"
+            label="Description"
             value={description}
             onChange={setDescription}
             maxLength={5000}
