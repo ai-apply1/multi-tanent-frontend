@@ -17,6 +17,8 @@ interface MarkdownEditorProps {
   id?: string;
   value: string;
   onChange: (value: string) => void;
+  /** Optional field label rendered inline with the Write/Preview toggle. */
+  label?: string;
   /** Backend caps the plain-text description at 5000 chars (422s beyond). */
   maxLength?: number;
   rows?: number;
@@ -39,6 +41,7 @@ export function MarkdownEditor({
   id,
   value,
   onChange,
+  label,
   maxLength = 5000,
   rows = 6,
   placeholder,
@@ -140,17 +143,27 @@ export function MarkdownEditor({
 
   return (
     <div>
-      {/* Write / Preview toggle — Preview reuses the same react-markdown
-          pipeline (`Markdown`) the candidate ultimately sees. */}
-      <div className="mb-1.5 flex justify-end">
-        <div className="inline-flex rounded-md border border-[var(--field-border)] bg-surface p-0.5 text-[12px] font-medium">
+      {/* Header row — the field label sits inline with the Write / Preview
+          toggle, both vertically centered. Preview reuses the same
+          react-markdown pipeline (`Markdown`) the candidate ultimately sees. */}
+      <div
+        className={`mb-2 flex items-center ${
+          label ? "justify-between" : "justify-end"
+        }`}
+      >
+        {label ? (
+          <label htmlFor={id} className="text-[13px] font-semibold text-ink">
+            {label}
+          </label>
+        ) : null}
+        <div className="inline-flex items-center gap-1 rounded-lg border border-[var(--field-border)] bg-surface-2 p-1 text-[12px] font-medium">
           <button
             type="button"
             onClick={() => setShowPreview(false)}
             aria-pressed={!showPreview}
-            className={`rounded px-2.5 py-1 transition-colors ${
+            className={`rounded-md px-3 py-1 transition-all ${
               !showPreview
-                ? "bg-primary text-white"
+                ? "bg-primary text-white shadow-sm"
                 : "text-ink-muted hover:text-ink"
             }`}
           >
@@ -160,9 +173,9 @@ export function MarkdownEditor({
             type="button"
             onClick={() => setShowPreview(true)}
             aria-pressed={showPreview}
-            className={`rounded px-2.5 py-1 transition-colors ${
+            className={`rounded-md px-3 py-1 transition-all ${
               showPreview
-                ? "bg-primary text-white"
+                ? "bg-primary text-white shadow-sm"
                 : "text-ink-muted hover:text-ink"
             }`}
           >
