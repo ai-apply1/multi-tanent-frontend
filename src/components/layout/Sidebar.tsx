@@ -55,12 +55,13 @@ export const navSections: NavSection[] = [
 ];
 
 /**
- * Children of the collapsible Settings dropdown. Deliberately just three
- * entries, NOT every Settings tab: "General" is the entry into the Settings
- * page (its remaining tabs, branding, domains, apply video, email..., are
- * reached from the in-page tab bar), then the Hiring Pipeline and Team, which
- * were top-level Workspace items before. Team stays org_admin-only, so it
- * carries `requiresRole` and is filtered out for everyone else.
+ * Children of the collapsible Settings dropdown. A curated subset, NOT every
+ * Settings tab: "General" is the entry into the Settings page and "Email
+ * templates" deep-links its email tab (the remaining tabs, branding, domains,
+ * apply video..., are reached from the in-page tab bar), then the Hiring
+ * Pipeline and Team, which were top-level Workspace items before. Team stays
+ * org_admin-only, so it carries `requiresRole` and is filtered out for everyone
+ * else.
  */
 const SETTINGS_CHILDREN: Array<{
   label: string;
@@ -68,6 +69,7 @@ const SETTINGS_CHILDREN: Array<{
   requiresRole?: UserRole;
 }> = [
   { label: "General", to: settingsTab("general") },
+  { label: "Email templates", to: settingsTab("emails") },
   { label: "Hiring Pipeline", to: ROUTES.PIPELINE },
   { label: "Manage Team", to: ROUTES.TEAM, requiresRole: "org_admin" },
 ];
@@ -151,6 +153,11 @@ function SettingsNav({
     return onSettings && id === currentTab;
   };
 
+  // Whether any dropdown child represents the current location. When none does
+  // — an in-page Settings tab we don't list here, like Domains or Branding —
+  // the parent header keeps the group highlight so a selection is never empty.
+  const someChildActive = children.some((c) => isChildActive(c.to));
+
   // Rail mode: the dropdown can't render in 68px, so the Settings icon expands
   // the sidebar and opens the list in one click rather than showing a flyout.
   if (collapsed) {
@@ -181,7 +188,11 @@ function SettingsNav({
         aria-expanded={open}
         className={cn(
           "relative mb-0.5 flex w-full items-center gap-3 rounded-[10px] px-2.5 py-2.5 text-[13.5px] font-medium transition-colors",
-          groupActive && !open
+          // Highlight the header when the group is active AND either the
+          // dropdown is closed (its children are hidden) or no child owns the
+          // current tab — so switching from General to Domains never leaves the
+          // whole Settings group looking unselected.
+          groupActive && (!open || !someChildActive)
             ? "bg-accent text-primary"
             : "text-ink-2 hover:bg-hover",
         )}
