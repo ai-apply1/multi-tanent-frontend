@@ -79,11 +79,21 @@
   --line-2: rgba(13, 11, 11, 0.15);
   --field-border: rgba(0, 0, 0, 0.15);
 
-  --accent-hover: #003399;
-  --accent-active: #002a7a;
+  /* Hover/active derived FROM primary, not a static blue: a hardcoded value
+     flashed the platform colour on every org's primary button (and stayed wrong
+     for any org with a custom brand). `applyTenantTheme` writes the identical
+     derivation per request. */
+  --accent-hover: color-mix(in srgb, var(--primary) 86%, #000);
+  --accent-active: color-mix(in srgb, var(--primary) 76%, #000);
   --accent-soft: #e6ecf8;
   --accent-softer: #f1f4fb;
   --accent-ring: color-mix(in srgb, var(--primary), transparent 66%);
+
+  /* Flat platform button: the gradient fill-end collapses onto primary until an
+     org supplies a secondary. `var(--primary)` resolves per scope, so this one
+     definition also covers `.dark`. `applyTenantTheme` overrides both. */
+  --brand-secondary: var(--primary);
+  --btn-fill-end: var(--primary);
 
   --success-soft: #e7f5ec;
   --warning-soft: #fbf1e1;
@@ -150,8 +160,9 @@
   --line-2: rgba(255, 255, 255, 0.14);
   --field-border: rgba(255, 255, 255, 0.14);
 
-  --accent-hover: #7a97ff;
-  --accent-active: #8ba7ff;
+  /* Same primary-derived hover/active as `:root` — see the note there. */
+  --accent-hover: color-mix(in srgb, var(--primary) 86%, #000);
+  --accent-active: color-mix(in srgb, var(--primary) 76%, #000);
   --accent-soft: #223056;
   --accent-softer: #1a2243;
 }

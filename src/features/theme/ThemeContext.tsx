@@ -71,11 +71,12 @@ function writeKey(key: string, value: string): void {
  * again — the org could switch to Light and no existing user would ever see it.
  *
  * So: saving a new mode in Settings flips every dashboard, and a viewer who
- * then toggles keeps their choice until the org changes its mind again. Note
- * the deliberate asymmetry with `applyTenantTheme`, which takes only the org's
- * `primary` and ignores its canvas colours. Mode is safe where those are not,
- * because it selects between this dashboard's OWN vetted light and dark
- * palettes rather than painting a tenant's arbitrary hex onto them.
+ * then toggles keeps their choice until the org changes its mind again. This
+ * mode is also the POLARITY that `applyTenantTheme` reads: it paints the org's
+ * full canvas palette only while the viewer's mode matches `theme.mode`, and
+ * otherwise falls back to the brand-accent subset over this dashboard's OWN
+ * vetted neutral palette — so a tenant's arbitrary hex never lands on a canvas
+ * built for the opposite polarity.
  */
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<Theme>(
