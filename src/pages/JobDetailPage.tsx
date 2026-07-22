@@ -334,12 +334,6 @@ export function JobDetailPage() {
         >
           Questions
         </TabButton>
-        <TabButton
-          active={false}
-          onClick={() => navigate(`${ROUTES.CANDIDATES}?job=${job._id}`)}
-        >
-          Candidates
-        </TabButton>
       </div>
 
       {tab === "overview" ? (
