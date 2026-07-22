@@ -93,7 +93,7 @@ const DEFAULT_PAGE_SIZE = 25;
  * means every column after it lands at a different x per row. `fr` units are a
  * fraction of the shared container width, so they line up across all rows.
  */
-const ROW_GRID = "grid-cols-[1.7fr_1.3fr_1.1fr_1.1fr_0.8fr_40px]";
+const ROW_GRID = "grid-cols-[1.7fr_1.3fr_1.1fr_1.1fr_0.8fr_200px]";
 
 /**
  * Stage badge tint. The org owns the hue (custom columns included), so the
@@ -1127,8 +1127,11 @@ function CandidatesTableSkeleton() {
           <Skeleton className="mx-auto h-5 w-9 rounded-full" />
           {/* Date */}
           <Skeleton className="h-3 w-16" />
-          {/* Kebab */}
-          <Skeleton className="h-8 w-8 justify-self-end rounded-full" />
+          {/* Actions — View button + kebab */}
+          <div className="flex items-center justify-self-end gap-1.5">
+            <Skeleton className="h-8 w-[132px] rounded-full" />
+            <Skeleton className="h-8 w-8 rounded-full" />
+          </div>
         </div>
       ))}
     </div>
@@ -1283,11 +1286,28 @@ function CandidateRow({
         {formatDate(row.createdAt)}
       </span>
 
-      {/* Kebab */}
-      <span
+      {/* Actions — an explicit "View interview" button plus the kebab menu.
+          The whole row is still clickable, but the button surfaces the primary
+          action the way the admin-dashboard applicants table does. */}
+      <div
         onClick={(e) => e.stopPropagation()}
-        className="justify-self-end"
+        className="flex items-center justify-self-end gap-1.5"
       >
+        {hasInterview ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={onOpenInterview}
+            disabled={resolvingInterview}
+          >
+            {resolvingInterview ? (
+              <Loader2 className="animate-spin" />
+            ) : (
+              <Eye />
+            )}
+            View interview
+          </Button>
+        ) : null}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -1303,12 +1323,6 @@ function CandidateRow({
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">
-            {hasInterview ? (
-              <DropdownMenuItem onSelect={onOpenInterview}>
-                <Eye className="h-4 w-4" />
-                View interview
-              </DropdownMenuItem>
-            ) : null}
             {row.cvKey ? (
               <DropdownMenuItem onSelect={onOpenCv}>
                 <FileText className="h-4 w-4" />
@@ -1362,7 +1376,7 @@ function CandidateRow({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      </span>
+      </div>
     </div>
   );
 }
