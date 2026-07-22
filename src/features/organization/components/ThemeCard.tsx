@@ -1,5 +1,12 @@
-import { useId } from "react"
-import { AlertTriangle, Check } from "lucide-react"
+import { useId, useState } from "react"
+import {
+  AlertTriangle,
+  ArrowLeftRight,
+  Check,
+  ChevronDown,
+  Pipette,
+  Sparkles,
+} from "lucide-react"
 import type {
   OrganizationTheme,
   ThemeAccentMode,
@@ -8,10 +15,13 @@ import type {
 import {
   AA_BODY_CONTRAST,
   contrastOf,
+  hexAlpha,
   isDarkSurface,
   isHexColor,
+  mixHex,
   readableInkOn,
   readableInkOnAll,
+  sameColor,
   toInputHex,
 } from "@/lib/color"
 
@@ -24,15 +34,31 @@ import {
  * silently drop edits when the parent reset. It reports changes up as a partial
  * patch and renders whatever it is handed back.
  *
+ * ── Shape of the editor ─────────────────────────────────────────────────
+ *
+ * Two columns on wide screens: controls on the left, a STICKY live preview on
+ * the right. The preview used to sit at the bottom of the card, a full screen
+ * away from the colour fields it reflected — the single biggest usability
+ * complaint with this form. Sticky means every keystroke is visible where the
+ * admin is already looking.
+ *
+ * The first control is a preset grid, because most admins don't want to build
+ * a palette — they want to pick one that looks right and maybe swap the
+ * primary. Every preset is a complete, contrast-checked look (mode + accent +
+ * five colours); status colours are deliberately left alone by presets since
+ * their defaults are tuned for readability on any of them.
+ *
  * ── Why the canvas colours are grouped away from the brand colours ──────
  *
  * `primary` / `secondary` are safe: pick anything, and the worst case is ugly.
  * `background` / `surface` / `foreground` are not — they are the page and the
  * text on it, and a customer who sets a white foreground on a white background
  * ships an apply page whose copy is invisible to candidates, with no error
- * anywhere. Hence the separate group, the contrast warnings, and the two canvas
- * presets: picking a readable triple by hand is the one genuinely hard part of
- * this form.
+ * anywhere. Hence the separate group, the readability checks beside the
+ * preview, and the mode presets: picking a readable triple by hand is the one
+ * genuinely hard part of this form. "Tint canvas" exists for the same reason —
+ * it derives an on-brand canvas from the primary without letting the admin
+ * anywhere near an unreadable pair.
  *
  * The warnings do NOT block saving. The backend does not enforce contrast
  * either (it is a documented, unenforced contract), and an org mid-edit with
@@ -43,6 +69,8 @@ import {
 const inputBase =
   "h-11 w-full rounded-lg border border-[var(--field-border)] bg-surface px-3.5 text-[14px] text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)] disabled:cursor-not-allowed disabled:bg-ink-faint disabled:text-ink-muted"
 const labelBase = "mb-1.5 block text-[13px] font-semibold text-ink"
+const sectionTitle = "block text-[13px] font-semibold text-ink"
+const sectionHint = "mt-0.5 block text-[12px] leading-relaxed text-ink-muted"
 
 /**
  * The schema defaults, mirrored, so "Reset to platform colours" writes the
@@ -67,6 +95,147 @@ type CanvasFields = Pick<
   OrganizationTheme,
   "background" | "surface" | "foreground"
 >
+
+/** Everything a preset decides. Status colours are deliberately not included. */
+type PresetTheme = Pick<
+  OrganizationTheme,
+  "mode" | "accent" | "primary" | "secondary" | "background" | "surface" | "foreground"
+>
+
+/**
+ * One-click looks. Each is a COMPLETE palette whose text/canvas pairs clear
+ * WCAG AA, so an admin who never opens the advanced fields still ships a
+ * readable page. The first entry is the platform default (`PLATFORM_THEME`
+ * minus status colours) so "what a new org gets" is always pickable by name.
+ *
+ * Solid presets store `secondary === primary` rather than leaving a stale
+ * gradient end behind: the field is unused while the accent is Solid, but a
+ * later switch to Gradient should start from something sane, not from a colour
+ * belonging to a look the org already abandoned.
+ */
+const PRESETS: Array<{ id: string; name: string; theme: PresetTheme }> = [
+  {
+    id: "violet",
+    name: "Violet",
+    theme: {
+      mode: "dark",
+      accent: "gradient",
+      primary: "#850cff",
+      secondary: "#ff00cc",
+      background: "#0b0713",
+      surface: "#14101f",
+      foreground: "#ffffff",
+    },
+  },
+  {
+    id: "midnight",
+    name: "Midnight",
+    theme: {
+      mode: "dark",
+      accent: "gradient",
+      primary: "#3b82f6",
+      secondary: "#06b6d4",
+      background: "#0b1220",
+      surface: "#111a2e",
+      foreground: "#e8edf5",
+    },
+  },
+  {
+    id: "emerald",
+    name: "Emerald",
+    theme: {
+      mode: "dark",
+      accent: "gradient",
+      primary: "#10b981",
+      secondary: "#2dd4bf",
+      background: "#071410",
+      surface: "#0e1f18",
+      foreground: "#ecfdf5",
+    },
+  },
+  {
+    id: "ember",
+    name: "Ember",
+    theme: {
+      mode: "dark",
+      accent: "gradient",
+      primary: "#f97316",
+      secondary: "#ef4444",
+      background: "#140b07",
+      surface: "#1f120c",
+      foreground: "#fff7ed",
+    },
+  },
+  {
+    id: "indigo",
+    name: "Indigo",
+    theme: {
+      mode: "dark",
+      accent: "solid",
+      primary: "#6366f1",
+      secondary: "#6366f1",
+      background: "#0f1115",
+      surface: "#171a21",
+      foreground: "#e5e7eb",
+    },
+  },
+  {
+    id: "ivory",
+    name: "Ivory",
+    theme: {
+      mode: "light",
+      accent: "solid",
+      primary: "#4f46e5",
+      secondary: "#4f46e5",
+      background: "#f8fafc",
+      surface: "#ffffff",
+      foreground: "#0f172a",
+    },
+  },
+  {
+    id: "breeze",
+    name: "Breeze",
+    theme: {
+      mode: "light",
+      accent: "gradient",
+      primary: "#0ea5e9",
+      secondary: "#6366f1",
+      background: "#f0f9ff",
+      surface: "#ffffff",
+      foreground: "#0f172a",
+    },
+  },
+  {
+    id: "rosewood",
+    name: "Rosewood",
+    theme: {
+      mode: "light",
+      accent: "gradient",
+      primary: "#e11d48",
+      secondary: "#fb7185",
+      background: "#fdf2f6",
+      surface: "#ffffff",
+      foreground: "#1c1917",
+    },
+  },
+]
+
+/**
+ * Compared with `sameColor`, never `===`: the server lower-cases hexes on
+ * write, so a freshly-saved org would otherwise stop matching the preset it
+ * just picked.
+ */
+const matchesPreset = (
+  value: OrganizationTheme,
+  preset: PresetTheme,
+): boolean =>
+  value.mode === preset.mode &&
+  value.accent === preset.accent &&
+  sameColor(value.primary, preset.primary) &&
+  sameColor(value.secondary, preset.secondary) &&
+  sameColor(value.background, preset.background) &&
+  sameColor(value.surface, preset.surface) &&
+  sameColor(value.foreground, preset.foreground)
 
 /**
  * The two modes, and the canvas each one applies.
@@ -100,6 +269,18 @@ const MODES: Array<{
     canvas: { background: "#0b1220", surface: "#111a2e", foreground: "#e8edf5" },
   },
 ]
+
+/**
+ * The neutral bases "Tint canvas" blends the primary into, one trio per
+ * polarity. Blend weights are small on purpose: the result should read as "our
+ * page, in our colour temperature", not as a primary-coloured page — and small
+ * weights are also what keeps the derived pair safely inside the polarity, so
+ * the untouched foreground stays readable on it.
+ */
+const TINT_BASES = {
+  dark: { background: "#08080d", surface: "#12121a", bgWeight: 0.12, surfaceWeight: 0.16 },
+  light: { background: "#fafafa", surface: "#ffffff", bgWeight: 0.06, surfaceWeight: 0.03 },
+} as const
 
 /**
  * Do the canvas colours still look like the mode they claim to be?
@@ -160,11 +341,23 @@ function ColorField({ label, hint, value, onChange, disabled }: ColorFieldProps)
           <input
             id={`${id}-swatch`}
             type="color"
+            title="Open the colour picker"
             aria-label={`${label} colour picker`}
             value={toInputHex(value)}
             onChange={(e) => onChange(e.target.value)}
             disabled={disabled}
             className="absolute -inset-2 h-[calc(100%+1rem)] w-[calc(100%+1rem)] cursor-pointer border-0 bg-transparent p-0 disabled:cursor-not-allowed"
+          />
+          {/*
+            The affordance the bare tile lacked: a swatch reads as a static
+            chip, and admins were typing hexes because nothing said "click me".
+            pointer-events-none so the click still lands on the input below;
+            ink picked against the CURRENT colour so it survives any swatch.
+          */}
+          <Pipette
+            aria-hidden
+            className="pointer-events-none absolute right-1 bottom-1 h-3 w-3 opacity-70"
+            style={{ color: valid ? readableInkOn(value) : "var(--ink-muted)" }}
           />
         </span>
         <input
@@ -191,24 +384,112 @@ function ColorField({ label, hint, value, onChange, disabled }: ColorFieldProps)
 }
 
 /**
- * A contrast warning, shown only when the pair is readable-adjacent enough to
- * have been a real attempt. Renders nothing when either colour is mid-edit.
+ * A miniature of the whole look — real canvas, real surface, real CTA fill —
+ * so presets are compared by eye, not by name. Buttons, not radios: a preset
+ * is an action (write seven fields) rather than a state, and the current
+ * palette may match none of them.
  */
-function ContrastWarning({
-  ratio,
-  label,
+function PresetSwatch({
+  name,
+  theme,
+  selected,
+  disabled,
+  onPick,
 }: {
-  ratio: number | null
-  label: string
+  name: string
+  theme: PresetTheme
+  selected: boolean
+  disabled: boolean
+  onPick: () => void
 }) {
-  if (ratio === null || ratio >= AA_BODY_CONTRAST) return null
+  const cta =
+    theme.accent === "solid"
+      ? theme.primary
+      : `linear-gradient(90deg, ${theme.primary}, ${theme.secondary})`
+
   return (
-    <div className="flex items-start gap-2 rounded-lg border border-[var(--warning)]/35 bg-[var(--warning-soft)] px-3 py-2.5">
-      <AlertTriangle className="mt-px h-4 w-4 shrink-0 text-[var(--warning)]" />
-      <p className="text-[12.5px] leading-relaxed text-ink-2">
-        {label} contrast is {ratio.toFixed(1)}:1, below the {AA_BODY_CONTRAST}:1
-        readable minimum. Candidates on this page may struggle to read the text.
-      </p>
+    <button
+      type="button"
+      disabled={disabled}
+      aria-pressed={selected}
+      onClick={onPick}
+      className={`rounded-xl border p-1.5 text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${
+        selected
+          ? "border-primary shadow-[0_0_0_3px_var(--accent-ring)]"
+          : "border-[var(--line-2)] hover:border-[var(--line)] hover:bg-hover"
+      }`}
+    >
+      <span
+        className="block overflow-hidden rounded-lg border border-line"
+        style={{ background: theme.background }}
+      >
+        <span
+          className="mx-2 mt-2 mb-2 block rounded-md p-2"
+          style={{ background: theme.surface }}
+        >
+          <span
+            className="block h-1.5 w-3/5 rounded-full"
+            style={{ background: theme.foreground, opacity: 0.85 }}
+          />
+          <span
+            className="mt-1 block h-1.5 w-2/5 rounded-full"
+            style={{ background: theme.foreground, opacity: 0.35 }}
+          />
+          <span
+            className="mt-2 block h-3.5 w-12 rounded-[5px]"
+            style={{ background: cta }}
+          />
+        </span>
+      </span>
+      <span className="mt-1.5 flex items-center justify-between px-1 pb-0.5">
+        <span
+          className={`text-[12px] font-semibold ${selected ? "text-primary" : "text-ink"}`}
+        >
+          {name}
+        </span>
+        {selected ? (
+          <Check className="h-3.5 w-3.5 text-primary" />
+        ) : (
+          <span className="text-[10.5px] font-medium text-ink-subtle">
+            {theme.mode === "dark" ? "Dark" : "Light"}
+          </span>
+        )}
+      </span>
+    </button>
+  )
+}
+
+/**
+ * One line of the readability check beside the preview: a pass tick or a
+ * warning with the actual ratio. Renders nothing while either colour is
+ * mid-edit — half a hex has no ratio worth reporting.
+ */
+function ReadabilityRow({
+  label,
+  ratio,
+  minimum,
+}: {
+  label: string
+  ratio: number | null
+  minimum: number
+}) {
+  if (ratio === null) return null
+  const pass = ratio >= minimum
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="flex items-center gap-1.5 text-[12px] text-ink-2">
+        {pass ? (
+          <Check className="h-3.5 w-3.5 shrink-0 text-[var(--success)]" />
+        ) : (
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-[var(--warning)]" />
+        )}
+        {label}
+      </span>
+      <span
+        className={`text-[11.5px] font-semibold ${pass ? "text-ink-muted" : "text-[var(--warning)]"}`}
+      >
+        {ratio.toFixed(1)}:1
+      </span>
     </div>
   )
 }
@@ -238,6 +519,20 @@ export function ThemeCard({
     (next: string): void =>
       onChange({ [key]: next } as Partial<OrganizationTheme>)
 
+  /*
+   * Open when the org has ALREADY customised a status colour — hiding edited
+   * values behind a closed fold would misread as "back to defaults". Initial
+   * render only (deliberately not synced): collapsing is the reader's choice
+   * afterwards, and a Reset mid-session shouldn't slam the fold shut under
+   * their cursor.
+   */
+  const [statusOpen, setStatusOpen] = useState(
+    () =>
+      !sameColor(value.success, PLATFORM_THEME.success) ||
+      !sameColor(value.warning, PLATFORM_THEME.warning) ||
+      !sameColor(value.danger, PLATFORM_THEME.danger),
+  )
+
   const onBackground = contrastOf(value.foreground, value.background)
   const onSurface = contrastOf(value.foreground, value.surface)
 
@@ -245,11 +540,6 @@ export function ThemeCard({
    * Which logo variant the portals will show — read from the STORED mode, the
    * same field `logoVariant.ts` reads, so this preview cannot disagree with
    * what candidates get.
-   *
-   * It used to measure this preview card's own surface luminance, which was
-   * subtly different from what the portal did (it measures the page canvas) and
-   * meant the preview could show one mark while the live site showed the other.
-   * One stored field ends that whole class of mismatch.
    */
   const darkPage = value.mode === "dark"
   const previewLogo = logoDarkUrl && darkPage ? logoDarkUrl : logoUrl
@@ -261,6 +551,31 @@ export function ThemeCard({
   const ctaBackground = solid
     ? value.primary
     : `linear-gradient(90deg, ${value.primary}, ${value.secondary})`
+  const ctaInk = solid
+    ? readableInkOn(value.primary)
+    : readableInkOnAll([value.primary, value.secondary])
+  /*
+   * The label ink is auto-picked, so unlike the canvas it cannot be FIXED by
+   * the admin — but it can still be squeezed: a pale primary and pale
+   * secondary leave no ink with real contrast on either end. Scored against
+   * the worse end, same rule the portals use. AA-Large is the bar (button
+   * labels are short, bold text, not paragraphs).
+   */
+  const ctaEnds = solid ? [value.primary] : [value.primary, value.secondary]
+  const ctaRatios = ctaEnds
+    .map((end) => contrastOf(ctaInk, end))
+    .filter((r): r is number => r !== null)
+  const ctaRatio = ctaRatios.length ? Math.min(...ctaRatios) : null
+
+  const activePreset = PRESETS.find((p) => matchesPreset(value, p.theme))
+
+  const tintCanvas = (): void => {
+    const base = TINT_BASES[value.mode]
+    onChange({
+      background: mixHex(base.background, value.primary, base.bgWeight),
+      surface: mixHex(base.surface, value.primary, base.surfaceWeight),
+    })
+  }
 
   return (
     <div className="rounded-2xl border border-line">
@@ -274,237 +589,342 @@ export function ThemeCard({
         </p>
       </div>
 
-      <div className="grid gap-5 p-4">
-        {/* ---- Accent mode ---- */}
-        <div>
-          <span className={labelBase}>Accent style</span>
-          <div className="flex flex-wrap gap-2">
-            {(
-              [
-                {
-                  id: "gradient" as ThemeAccentMode,
-                  label: "Gradient",
-                  hint: "Blends primary into secondary",
-                },
-                {
-                  id: "solid" as ThemeAccentMode,
-                  label: "Solid",
-                  hint: "Primary only, secondary unused",
-                },
-              ] as const
-            ).map((mode) => {
-              const selected = value.accent === mode.id
-              return (
-                <button
-                  key={mode.id}
-                  type="button"
+      <div className="grid gap-6 p-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-7 lg:p-5">
+        {/* ================= Controls ================= */}
+        <div className="grid min-w-0 content-start gap-6">
+          {/* ---- Presets ---- */}
+          <div>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div>
+                <span className={sectionTitle}>Quick themes</span>
+                <span className={sectionHint}>
+                  A complete, readable look in one click. Tweak anything below
+                  afterwards.
+                </span>
+              </div>
+              {activePreset ? null : (
+                <span className="shrink-0 rounded-full border border-[var(--line-2)] px-2.5 py-1 text-[11px] font-semibold text-ink-muted">
+                  Custom palette
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+              {PRESETS.map((preset) => (
+                <PresetSwatch
+                  key={preset.id}
+                  name={preset.name}
+                  theme={preset.theme}
+                  selected={activePreset?.id === preset.id}
                   disabled={!canWrite}
-                  aria-pressed={selected}
-                  onClick={() => onChange({ accent: mode.id })}
-                  className={`rounded-xl border px-3.5 py-2.5 text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                    selected
-                      ? "border-primary bg-accent"
-                      : "border-[var(--line-2)] hover:bg-hover"
-                  }`}
-                >
-                  <span
-                    className={`block text-[13px] font-semibold ${selected ? "text-primary" : "text-ink"}`}
-                  >
-                    {mode.label}
-                  </span>
-                  <span className="mt-0.5 block text-[11.5px] text-ink-muted">
-                    {mode.hint}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-        </div>
-
-        {/* ---- Brand ---- */}
-        <div className="grid gap-4 sm:grid-cols-2">
-          <ColorField
-            label="Primary"
-            hint="Buttons, links and the interview page accent."
-            value={value.primary}
-            onChange={set("primary")}
-            disabled={!canWrite}
-          />
-          <ColorField
-            label="Secondary"
-            hint={
-              solid
-                ? "Stored, but unused while the accent is Solid."
-                : "The far end of the gradient."
-            }
-            value={value.secondary}
-            onChange={set("secondary")}
-            disabled={!canWrite}
-          />
-        </div>
-
-        {/* ---- Canvas ---- */}
-        <div className="border-t border-line pt-5">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <span className="block text-[13px] font-semibold text-ink">
-                Light or dark
-              </span>
-              <span className="mt-0.5 block text-[12px] text-ink-muted">
-                How your candidate pages render, which logo they use, and the
-                default for this dashboard. Anyone here can still switch their
-                own view from the header.
-              </span>
+                  onPick={() => onChange(preset.theme)}
+                />
+              ))}
             </div>
-            {/*
-              Bound to the STORED mode, so one of the two is always lit — there
-              is no "Custom" state any more. Custom COLOURS are still fine and
-              common; they just no longer make the mode unanswerable, because
-              the mode is a field rather than a guess about the colours.
-            */}
-            <div className="flex flex-wrap items-center gap-2">
-              {MODES.map((m) => {
-                const selected = value.mode === m.id
-                return (
+          </div>
+
+          {/* ---- Brand accent ---- */}
+          <div className="border-t border-line pt-5">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <span className={sectionTitle}>Brand accent</span>
+                <span className={sectionHint}>
+                  Buttons, links and highlights on every candidate page.
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                {/* Compact segmented control: gradient vs flat fill. */}
+                <div className="inline-flex rounded-xl border border-[var(--line-2)] p-1">
+                  {(
+                    [
+                      { id: "gradient" as ThemeAccentMode, label: "Gradient" },
+                      { id: "solid" as ThemeAccentMode, label: "Solid" },
+                    ] as const
+                  ).map((mode) => {
+                    const selected = value.accent === mode.id
+                    return (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        disabled={!canWrite}
+                        aria-pressed={selected}
+                        onClick={() => onChange({ accent: mode.id })}
+                        className={`rounded-lg px-3 py-1.5 text-[12px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                          selected
+                            ? "bg-accent text-primary"
+                            : "text-ink-2 hover:text-ink"
+                        }`}
+                      >
+                        {mode.label}
+                      </button>
+                    )
+                  })}
+                </div>
+                {canWrite ? (
                   <button
-                    key={m.id}
                     type="button"
-                    disabled={!canWrite}
-                    title={m.hint}
-                    aria-pressed={selected}
-                    // Mode and canvas in ONE change: this pairing is what keeps
-                    // the two from contradicting each other.
-                    onClick={() => onChange({ mode: m.id, ...m.canvas })}
-                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                      selected
-                        ? "border-primary bg-accent text-primary"
-                        : "border-[var(--line-2)] text-ink-2 hover:bg-hover"
-                    }`}
+                    disabled={solid}
+                    title={
+                      solid
+                        ? "Nothing to swap while the accent is Solid"
+                        : "Swap primary and secondary"
+                    }
+                    aria-label="Swap primary and secondary colours"
+                    onClick={() =>
+                      onChange({
+                        primary: value.secondary,
+                        secondary: value.primary,
+                      })
+                    }
+                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--line-2)] text-ink-2 transition hover:bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-45"
                   >
-                    {/* A tick as well as the fill, so the selection is not
-                        signalled by colour alone. */}
-                    {selected ? <Check className="h-3.5 w-3.5" /> : null}
-                    {m.label}
+                    <ArrowLeftRight className="h-3.5 w-3.5" />
                   </button>
-                )
-              })}
+                ) : null}
+              </div>
             </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <ColorField
+                label="Primary"
+                hint="The colour candidates associate with you."
+                value={value.primary}
+                onChange={set("primary")}
+                disabled={!canWrite}
+              />
+              <ColorField
+                label="Secondary"
+                hint={
+                  solid
+                    ? "Stored, but unused while the accent is Solid."
+                    : "The far end of the gradient."
+                }
+                value={value.secondary}
+                onChange={set("secondary")}
+                disabled={!canWrite}
+              />
+            </div>
+
+            {/* The accent as candidates get it — a strip, not a description. */}
+            <div
+              aria-hidden
+              className="mt-3 h-2.5 rounded-full border border-line"
+              style={{ background: ctaBackground }}
+            />
           </div>
 
-          {modeMismatch ? (
-            <div className="mb-3 flex items-start gap-2 rounded-lg border border-[var(--warning)]/35 bg-[var(--warning-soft)] px-3 py-2.5">
-              <AlertTriangle className="mt-px h-4 w-4 shrink-0 text-[var(--warning)]" />
-              <p className="text-[12.5px] leading-relaxed text-ink-2">
-                This is set to {value.mode === "dark" ? "Dark" : "Light"} mode
-                but the page colour is{" "}
-                {value.mode === "dark" ? "light" : "dark"}. Candidates would get
-                the {value.mode === "dark" ? "light" : "dark"} version of your
-                logo on a {value.mode === "dark" ? "light" : "dark"} page. Pick
-                the other mode, or change the page colour to match.
-              </p>
+          {/* ---- Canvas ---- */}
+          <div className="border-t border-line pt-5">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <span className={sectionTitle}>Light or dark</span>
+                <span className={sectionHint}>
+                  How your candidate pages render, which logo they use, and the
+                  default for this dashboard. Anyone here can still switch their
+                  own view from the header.
+                </span>
+              </div>
+              {/*
+                Bound to the STORED mode, so one of the two is always lit — there
+                is no "Custom" state. Custom COLOURS are still fine and common;
+                they just no longer make the mode unanswerable, because the mode
+                is a field rather than a guess about the colours.
+              */}
+              <div className="flex flex-wrap items-center gap-2">
+                {MODES.map((m) => {
+                  const selected = value.mode === m.id
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      disabled={!canWrite}
+                      title={m.hint}
+                      aria-pressed={selected}
+                      // Mode and canvas in ONE change: this pairing is what keeps
+                      // the two from contradicting each other.
+                      onClick={() => onChange({ mode: m.id, ...m.canvas })}
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                        selected
+                          ? "border-primary bg-accent text-primary"
+                          : "border-[var(--line-2)] text-ink-2 hover:bg-hover"
+                      }`}
+                    >
+                      {/* A tick as well as the fill, so the selection is not
+                          signalled by colour alone. */}
+                      {selected ? <Check className="h-3.5 w-3.5" /> : null}
+                      {m.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            {modeMismatch ? (
+              <div className="mb-3 flex items-start gap-2 rounded-lg border border-[var(--warning)]/35 bg-[var(--warning-soft)] px-3 py-2.5">
+                <AlertTriangle className="mt-px h-4 w-4 shrink-0 text-[var(--warning)]" />
+                <p className="text-[12.5px] leading-relaxed text-ink-2">
+                  This is set to {value.mode === "dark" ? "Dark" : "Light"} mode
+                  but the page colour is{" "}
+                  {value.mode === "dark" ? "light" : "dark"}. Candidates would
+                  get the {value.mode === "dark" ? "light" : "dark"} version of
+                  your logo on a {value.mode === "dark" ? "light" : "dark"}{" "}
+                  page. Pick the other mode, or change the page colour to match.
+                </p>
+              </div>
+            ) : null}
+
+            <div className="grid gap-4 sm:grid-cols-3">
+              <ColorField
+                label="Background"
+                hint="The page behind everything."
+                value={value.background}
+                onChange={set("background")}
+                disabled={!canWrite}
+              />
+              <ColorField
+                label="Surface"
+                hint="Cards and panels on top."
+                value={value.surface}
+                onChange={set("surface")}
+                disabled={!canWrite}
+              />
+              <ColorField
+                label="Text"
+                hint="Must be readable on both."
+                value={value.foreground}
+                onChange={set("foreground")}
+                disabled={!canWrite}
+              />
+            </div>
+
+            {canWrite ? (
+              <button
+                type="button"
+                disabled={!isHexColor(value.primary)}
+                onClick={tintCanvas}
+                className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-[var(--line-2)] px-3 py-2 text-[12.5px] font-semibold text-ink-2 transition hover:bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Sparkles className="h-3.5 w-3.5 text-primary" />
+                Tint canvas with your brand colour
+              </button>
+            ) : null}
+
+            {/*
+              The consequence of the choice above, in words. The polarity is
+              what decides which logo a candidate sees, and that link is
+              invisible otherwise: the two settings live in different sections
+              (this one and the Branding uploads), so an admin picking "Dark"
+              has no way to know it just changed their logo.
+            */}
+            <p className="mt-3 text-[12px] leading-relaxed text-ink-muted">
+              {darkPage
+                ? "Your candidate pages are a dark theme. "
+                : "Your candidate pages are a light theme. "}
+              {logoDarkUrl
+                ? darkPage
+                  ? "Candidates see your dark-background logo."
+                  : "Candidates see your main logo; the dark-background one is kept for if you switch."
+                : darkPage
+                  ? "Candidates see your main logo. If it is dark ink, upload a light version under Logo for dark backgrounds."
+                  : "Candidates see your main logo."}
+            </p>
+          </div>
+
+          {/* ---- Status ---- */}
+          <div className="border-t border-line pt-5">
+            <button
+              type="button"
+              aria-expanded={statusOpen}
+              onClick={() => setStatusOpen((open) => !open)}
+              className="flex w-full items-center justify-between gap-3 text-left"
+            >
+              <div>
+                <span className={sectionTitle}>Status colours</span>
+                <span className={sectionHint}>
+                  Confirmations, warnings and errors on the candidate pages.
+                  Tuned for readability out of the box — open only if they clash
+                  with your brand.
+                </span>
+              </div>
+              <span className="flex shrink-0 items-center gap-2.5">
+                {/* The three current values at a glance, without opening. */}
+                <span aria-hidden className="flex items-center gap-1">
+                  {[value.success, value.warning, value.danger].map(
+                    (hex, index) => (
+                      <span
+                        key={index}
+                        className="h-3.5 w-3.5 rounded-full border border-line"
+                        style={{
+                          background: isHexColor(hex) ? hex : "transparent",
+                        }}
+                      />
+                    ),
+                  )}
+                </span>
+                <ChevronDown
+                  className={`h-4 w-4 text-ink-muted transition-transform ${statusOpen ? "rotate-180" : ""}`}
+                />
+              </span>
+            </button>
+
+            {statusOpen ? (
+              <div className="mt-4 grid gap-4 sm:grid-cols-3">
+                <ColorField
+                  label="Success"
+                  hint="Application received."
+                  value={value.success}
+                  onChange={set("success")}
+                  disabled={!canWrite}
+                />
+                <ColorField
+                  label="Warning"
+                  hint="Deadlines and cautions."
+                  value={value.warning}
+                  onChange={set("warning")}
+                  disabled={!canWrite}
+                />
+                <ColorField
+                  label="Danger"
+                  hint="Failed uploads and errors."
+                  value={value.danger}
+                  onChange={set("danger")}
+                  disabled={!canWrite}
+                />
+              </div>
+            ) : null}
+          </div>
+
+          {canWrite ? (
+            <div className="flex justify-end border-t border-line pt-4">
+              <button
+                type="button"
+                onClick={() => onChange(PLATFORM_THEME)}
+                className="text-[12.5px] font-semibold text-ink-muted transition hover:text-ink"
+              >
+                Reset to platform colours
+              </button>
             </div>
           ) : null}
-
-          <div className="grid gap-4 sm:grid-cols-3">
-            <ColorField
-              label="Background"
-              hint="The page behind everything."
-              value={value.background}
-              onChange={set("background")}
-              disabled={!canWrite}
-            />
-            <ColorField
-              label="Surface"
-              hint="Cards and panels on top."
-              value={value.surface}
-              onChange={set("surface")}
-              disabled={!canWrite}
-            />
-            <ColorField
-              label="Text"
-              hint="Must be readable on both."
-              value={value.foreground}
-              onChange={set("foreground")}
-              disabled={!canWrite}
-            />
-          </div>
-
-          {/*
-            The consequence of the choice above, in words. The polarity is
-            what decides which logo a candidate sees, and that link is
-            invisible otherwise: the two settings live in different sections
-            (this one and the Branding uploads), so an admin picking "Dark"
-            has no way to know it just changed their logo.
-          */}
-          <p className="mt-3 text-[12px] leading-relaxed text-ink-muted">
-            {darkPage
-              ? "Your candidate pages are a dark theme. "
-              : "Your candidate pages are a light theme. "}
-            {logoDarkUrl
-              ? darkPage
-                ? "Candidates see your dark-background logo."
-                : "Candidates see your main logo; the dark-background one is kept for if you switch."
-              : darkPage
-                ? "Candidates see your main logo. If it is dark ink, upload a light version under Logo for dark backgrounds."
-                : "Candidates see your main logo."}
-          </p>
-
-          <div className="mt-3 grid gap-2">
-            <ContrastWarning ratio={onBackground} label="Text on background" />
-            <ContrastWarning ratio={onSurface} label="Text on surface" />
-          </div>
         </div>
 
-        {/* ---- Status ---- */}
-        <div className="border-t border-line pt-5">
-          <span className="block text-[13px] font-semibold text-ink">
-            Status colours
-          </span>
-          <span className="mt-0.5 mb-3 block text-[12px] text-ink-muted">
-            Confirmations, warnings and errors on the candidate pages. The
-            defaults are tuned for readability, change them only if they clash.
-          </span>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <ColorField
-              label="Success"
-              hint="Application received."
-              value={value.success}
-              onChange={set("success")}
-              disabled={!canWrite}
-            />
-            <ColorField
-              label="Warning"
-              hint="Deadlines and cautions."
-              value={value.warning}
-              onChange={set("warning")}
-              disabled={!canWrite}
-            />
-            <ColorField
-              label="Danger"
-              hint="Failed uploads and errors."
-              value={value.danger}
-              onChange={set("danger")}
-              disabled={!canWrite}
-            />
-          </div>
-        </div>
-
-        {/* ---- Preview ---- */}
-        <div className="border-t border-line pt-5">
-          <span className="block text-[13px] font-semibold text-ink">
-            Preview
-          </span>
-          <span className="mt-0.5 mb-3 block text-[12px] text-ink-muted">
-            Roughly what a candidate sees on your apply page. Live, so it moves
-            as you pick, but nothing is saved until you hit Save changes.
+        {/* ================= Preview ================= */}
+        {/*
+          Sticky beside the controls (below the 60px top bar), so the admin
+          never edits a colour they cannot see land. On small screens it drops
+          under the controls in normal flow.
+        */}
+        <div className="min-w-0 lg:sticky lg:top-[76px] lg:self-start">
+          <span className={sectionTitle}>Live preview</span>
+          <span className={`${sectionHint} mb-3`}>
+            Roughly what a candidate sees on your apply page. Nothing is saved
+            until you hit Save changes.
           </span>
 
           <div
-            className="rounded-xl border border-line p-5"
+            className="mt-3 rounded-xl border border-line p-4"
             style={{ background: value.background }}
           >
             <div
-              className="rounded-xl p-5"
+              className="rounded-xl p-4"
               style={{ background: value.surface, color: value.foreground }}
             >
               <div className="flex items-center gap-2.5">
@@ -528,32 +948,43 @@ export function ThemeCard({
                 <span className="text-[13px] font-semibold">{orgName}</span>
               </div>
 
-              <p className="mt-4 text-[17px] font-semibold leading-snug">
+              <p className="mt-4 text-[16px] font-semibold leading-snug">
                 Senior Product Designer
               </p>
-              <p className="mt-1 text-[13px] leading-relaxed opacity-70">
+              <p className="mt-1 text-[12.5px] leading-relaxed opacity-70">
                 Remote · Full time. Tell us about your work and record a short
-                introduction. It takes about ten minutes.
+                introduction.
               </p>
 
-              <div className="mt-4 flex flex-wrap items-center gap-2">
+              {/*
+                A form field, because the apply page is mostly form: field
+                chrome is derived from the foreground exactly the way the
+                portal derives it, so a washed-out text colour shows up here
+                as washed-out field borders too.
+              */}
+              <div
+                className="mt-4 rounded-lg px-3 py-2.5 text-[12.5px]"
+                style={{
+                  border: `1px solid ${hexAlpha(value.foreground, 0.16)}`,
+                  background: hexAlpha(value.foreground, 0.04),
+                }}
+              >
+                <span style={{ color: hexAlpha(value.foreground, 0.45) }}>
+                  you@company.com
+                </span>
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center gap-2">
                 <span
                   className="rounded-lg px-3.5 py-2 text-[13px] font-semibold"
-                  style={{
-                    background: ctaBackground,
-                    // Both stops when it is a gradient: ink chosen for the
-                    // start alone disappears over the far end.
-                    color: solid
-                      ? readableInkOn(value.primary)
-                      : readableInkOnAll([value.primary, value.secondary]),
-                  }}
+                  style={{ background: ctaBackground, color: ctaInk }}
                 >
                   Apply now
                 </span>
                 <span
                   className="rounded-lg px-3.5 py-2 text-[13px] font-semibold"
                   style={{
-                    border: `1px solid ${value.foreground}33`,
+                    border: `1px solid ${hexAlpha(value.foreground, 0.2)}`,
                     color: value.foreground,
                   }}
                 >
@@ -572,7 +1003,10 @@ export function ThemeCard({
                   <span
                     key={chip.label}
                     className="rounded-full px-2.5 py-1 text-[11.5px] font-semibold"
-                    style={{ background: chip.hex, color: readableInkOn(chip.hex) }}
+                    style={{
+                      background: chip.hex,
+                      color: readableInkOn(chip.hex),
+                    }}
                   >
                     {chip.label}
                   </span>
@@ -580,19 +1014,48 @@ export function ThemeCard({
               </div>
             </div>
           </div>
-        </div>
 
-        {canWrite ? (
-          <div className="flex justify-end border-t border-line pt-4">
-            <button
-              type="button"
-              onClick={() => onChange(PLATFORM_THEME)}
-              className="text-[12.5px] font-semibold text-ink-muted transition hover:text-ink"
-            >
-              Reset to platform colours
-            </button>
+          {/*
+            The safety net, where the admin is already looking. These are the
+            same checks the old inline warnings ran, but visible BEFORE things
+            break — a passing tick teaches what the bar is, where a warning
+            that only ever appears after the fact reads as a scold.
+          */}
+          <div className="mt-3 rounded-xl border border-line p-3">
+            <span className="mb-2 block text-[11.5px] font-semibold tracking-wide text-ink-muted uppercase">
+              Readability
+            </span>
+            <div className="grid gap-1.5">
+              <ReadabilityRow
+                label="Text on the page"
+                ratio={onBackground}
+                minimum={AA_BODY_CONTRAST}
+              />
+              <ReadabilityRow
+                label="Text on cards"
+                ratio={onSurface}
+                minimum={AA_BODY_CONTRAST}
+              />
+              {/*
+                3:1 (AA Large), not 4.5: button labels are short bold text.
+                The ink is auto-picked so a failure here means "no ink works
+                on this fill" — the fix is a deeper brand colour, and saying
+                so beats a bare ratio.
+              */}
+              <ReadabilityRow
+                label="Button label (picked automatically)"
+                ratio={ctaRatio}
+                minimum={3}
+              />
+              {ctaRatio !== null && ctaRatio < 3 ? (
+                <p className="text-[11.5px] leading-relaxed text-ink-muted">
+                  Your brand colours are too pale for any label to sit on them
+                  clearly — try a deeper primary or secondary.
+                </p>
+              ) : null}
+            </div>
           </div>
-        ) : null}
+        </div>
       </div>
     </div>
   )

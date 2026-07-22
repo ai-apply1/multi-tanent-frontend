@@ -136,6 +136,37 @@ export const readableInkOnAll = (hexes: string[]): string => {
 }
 
 /**
+ * Blend `tint` into `base` by `weight` (0..1), per sRGB channel, returning
+ * `#rrggbb`.
+ *
+ * A UI derivation for the settings page ("tint the canvas with the brand
+ * colour"), not a rendering primitive — the portals do their blending in CSS
+ * `color-mix`. It lives here so the hex parsing stays in one module.
+ * Unparseable input returns `base` unchanged, the same leave-it-alone rule as
+ * `parseHex`.
+ */
+export const mixHex = (base: string, tint: string, weight: number): string => {
+  const a = parseHex(base)
+  const b = parseHex(tint)
+  if (!a || !b) return base
+  const w = Math.min(1, Math.max(0, weight))
+  const mix = (x: number, y: number) => Math.round(x + (y - x) * w)
+  const pair = (n: number) => n.toString(16).padStart(2, "0")
+  return `#${pair(mix(a.r, b.r))}${pair(mix(a.g, b.g))}${pair(mix(a.b, b.b))}`
+}
+
+/**
+ * `rgba()` from a hex plus an alpha, for inline preview styles that need a
+ * translucent tint of a USER-PICKED colour. Appending a hex alpha pair to the
+ * raw string would silently corrupt 3-digit hexes; going through `parseHex`
+ * handles every accepted form. Unparseable input yields full transparency.
+ */
+export const hexAlpha = (hex: string, alpha: number): string => {
+  const rgb = parseHex(hex)
+  return rgb ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})` : "transparent"
+}
+
+/**
  * WCAG AA for body text. 3.0 (AA Large) is deliberately NOT the bar here: the
  * portals set this colour on paragraph copy, not headlines.
  */
