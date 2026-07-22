@@ -470,7 +470,7 @@ export function TeamPage() {
         }
         description={
           activationTarget?.isActive
-            ? "They lose access immediately and can't sign in. Their account and everything they've done stays put — you can reactivate them at any time."
+            ? "They lose access immediately and can't sign in. Their account and everything they've done stays put, you can reactivate them at any time."
             : "They get their access back and can sign in with their existing password."
         }
         confirmLabel={activationTarget?.isActive ? "Deactivate" : "Reactivate"}

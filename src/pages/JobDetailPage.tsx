@@ -334,12 +334,6 @@ export function JobDetailPage() {
         >
           Questions
         </TabButton>
-        <TabButton
-          active={false}
-          onClick={() => navigate(`${ROUTES.CANDIDATES}?job=${job._id}`)}
-        >
-          Candidates
-        </TabButton>
       </div>
 
       {tab === "overview" ? (
@@ -645,7 +639,7 @@ function MetaCell({ label, children }: { label: string; children: ReactNode }) {
 }
 
 function Dash() {
-  return <span className="text-ink-subtle">—</span>;
+  return <span className="text-ink-subtle">-</span>;
 }
 
 // ── Funnel ───────────────────────────────────────────────────────────
@@ -663,7 +657,7 @@ type JobKpi = {
 
 /** A count, or a dash while the board is still loading. Never a placeholder 0. */
 function countLabel(count: number | null): string {
-  return count === null ? "—" : String(count);
+  return count === null ? "-" : String(count);
 }
 
 /**

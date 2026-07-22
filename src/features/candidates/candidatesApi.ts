@@ -3,6 +3,7 @@ import api, { apiUrl } from "@/lib/api"
 import type {
   BulkConfirmResult,
   BulkConfirmRow,
+  BulkEmailResult,
   BulkExtractRow,
   BulkPresignFile,
   CandidateDetail,
@@ -12,6 +13,7 @@ import type {
   ListCandidatesParams,
   PaginatedCandidates,
   PresignedCvUpload,
+  SendCandidateEmailPayload,
 } from "@/features/candidates/types"
 
 // ---------------------------------------------------------------------
@@ -196,6 +198,23 @@ export async function sendCandidateInvite(candidateId: string) {
   const { data } = await api.post<InviteResult>(
     `/admin/candidates/${candidateId}/invite`,
     {}
+  )
+  return data
+}
+
+/**
+ * Send a chosen email template (subject + body edited in the compose dialog)
+ * to one or more candidates. INVITE / FOLLOWUP re-mint each candidate's
+ * interview link; SHORTLIST / REJECTION carry only name/org/job tokens.
+ *
+ * PER-CANDIDATE, never all-or-nothing: a recipient whose job closed or whose
+ * attempts are spent lands in `skipped` while the rest still send, so callers
+ * must surface both `sent` and `skipped`. Does NOT change candidate status.
+ */
+export async function sendCandidateEmail(payload: SendCandidateEmailPayload) {
+  const { data } = await api.post<BulkEmailResult>(
+    "/admin/candidates/send-email",
+    payload
   )
   return data
 }

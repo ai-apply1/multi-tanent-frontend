@@ -456,8 +456,8 @@ export function OverviewPage() {
             </span>
             <h3 className="text-[16px] font-semibold">No metrics yet</h3>
             <p className="max-w-[340px] text-[13.5px] text-ink-muted">
-              Add a live metric — for example the number of applicants at
-              pre-screened — to start building your pipeline funnel.
+              Add a live metric, for example the number of applicants at
+              pre-screened, to start building your pipeline funnel.
             </p>
             <div className="flex flex-wrap items-center justify-center gap-2">
               <Button size="sm" onClick={() => setCreateOpen(true)}>
@@ -621,7 +621,7 @@ export function OverviewPage() {
               </div>
               {awaiting.length === 0 ? (
                 <div className="py-8 text-center text-[13px] text-ink-muted">
-                  All caught up — no interviews waiting.
+                  All caught up, no interviews waiting.
                 </div>
               ) : (
                 <div className="scroll max-h-[360px] overflow-y-auto">

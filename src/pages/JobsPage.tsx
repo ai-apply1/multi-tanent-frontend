@@ -61,8 +61,7 @@ const JOB_STATUSES: JobStatus[] = ["draft", "open", "closed", "archived"];
 
 /** Column ratios mirror the DevExcel spec — kept in one const so header and
  * rows can never drift out of alignment. */
-const COLS =
-  "grid-cols-[2.2fr_0.8fr_1.2fr_0.7fr_0.7fr_0.7fr_0.9fr_40px]";
+const COLS = "grid-cols-[2.2fr_0.8fr_1.2fr_0.7fr_0.7fr_0.7fr_0.9fr_40px]";
 
 export function JobsPage() {
   const queryClient = useQueryClient();
@@ -222,9 +221,9 @@ export function JobsPage() {
             <span>Title</span>
             <span>Status</span>
             <span>Classification</span>
-            <span className="text-right">Applicants</span>
-            <span className="text-right">Questions</span>
-            <span className="text-right">Threshold</span>
+            <span className="text-center">Applicants</span>
+            <span className="text-center">Questions</span>
+            <span className="text-center">Threshold</span>
             <span>Created</span>
             <span />
           </div>
@@ -269,12 +268,15 @@ export function JobsPage() {
               >
                 <div className="flex min-w-0 items-center gap-3">
                   <span className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-lg bg-accent text-primary">
-                    <Briefcase className="h-[17px] w-[17px]" strokeWidth={1.7} />
+                    <Briefcase
+                      className="h-[17px] w-[17px]"
+                      strokeWidth={1.7}
+                    />
                   </span>
                   <Link
                     to={jobDetail(row._id)}
                     onClick={(e) => e.stopPropagation()}
-                    className="truncate font-semibold text-ink hover:underline"
+                    className="truncate font-semibold text-ink"
                   >
                     {row.title}
                   </Link>
@@ -288,16 +290,16 @@ export function JobsPage() {
                 <div
                   className={
                     row.applicantCount > 0
-                      ? "mono text-right font-semibold text-ink"
-                      : "mono text-right text-ink-subtle"
+                      ? "mono text-center font-semibold text-ink"
+                      : "mono text-center text-ink-subtle"
                   }
                 >
                   {row.applicantCount}
                 </div>
-                <div className="mono text-right font-semibold text-ink">
+                <div className="mono text-center font-semibold text-ink">
                   {row.questionCount}
                 </div>
-                <div className="mono text-right font-semibold text-ink">
+                <div className="mono text-center font-semibold text-ink">
                   {row.rejectionThreshold}
                 </div>
                 <div className="text-[12.5px] text-ink-muted">
@@ -441,7 +443,9 @@ export function JobsPage() {
         loadingLabel="Deleting…"
         destructive
         loading={deleteMutation.isPending}
-        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget._id)}
+        onConfirm={() =>
+          deleteTarget && deleteMutation.mutate(deleteTarget._id)
+        }
       />
     </div>
   );
@@ -530,7 +534,7 @@ function JobClassification({ job }: { job: JobListItem }) {
   ].filter((c): c is string => Boolean(c));
 
   if (chips.length === 0) {
-    return <span className="text-ink-subtle">—</span>;
+    return <span className="text-ink-subtle">-</span>;
   }
   return (
     <div className="flex flex-wrap items-center gap-1.5">

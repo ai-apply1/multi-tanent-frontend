@@ -285,7 +285,7 @@ function KanbanColumnLane({
 
       {windowed ? (
         <p className="shrink-0 border-t border-line px-3 py-2 text-[11px] text-ink-muted">
-          Showing {cards.length} of {count} — use the table view to see the rest.
+          Showing {cards.length} of {count}, use the table view to see the rest.
         </p>
       ) : null}
     </div>

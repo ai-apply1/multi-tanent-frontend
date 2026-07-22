@@ -397,3 +397,32 @@ export interface InviteResult {
   attemptNumber: number
   expiresAt: string
 }
+
+/**
+ * Candidate email-template purposes that a manual bulk send may use. Mirrors
+ * the backend's BULK_EMAIL_PURPOSES (job-share is excluded — it targets a job,
+ * not a candidate).
+ */
+export type BulkEmailPurpose = "invite" | "followup" | "shortlist" | "rejection"
+
+export interface SendCandidateEmailPayload {
+  candidateIds: string[]
+  purpose: BulkEmailPurpose
+  subject: string
+  body: string
+}
+
+/** One recipient that was not emailed, with a short reason to surface. */
+export interface BulkEmailSkip {
+  candidateId: string
+  name: string
+  reason: string
+}
+
+export interface BulkEmailResult {
+  /** Distinct recipients requested. */
+  total: number
+  /** How many were sent (a dev dry-run still counts as sent). */
+  sent: number
+  skipped: BulkEmailSkip[]
+}

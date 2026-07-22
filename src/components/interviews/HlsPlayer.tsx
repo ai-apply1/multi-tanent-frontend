@@ -220,7 +220,7 @@ function HlsSurface({
       });
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (!hls) return;
-        // eslint-disable-next-line no-console
+         
         console.warn("[interview-hls] hls error", {
           type: data.type,
           details: data.details,
@@ -321,7 +321,7 @@ function HlsSurface({
       setIsMuted(v.muted || v.volume === 0);
     };
     const onError = () => {
-      // eslint-disable-next-line no-console
+       
       console.warn("[interview-hls] native video error", v.error);
     };
 
@@ -1026,7 +1026,7 @@ function HlsSurface({
           <span className="ml-1 select-none font-mono text-[11px] tabular-nums text-white/80">
             {formatTime(currentTime)}
             <span className="mx-1 text-white/40">/</span>
-            {duration ? formatTime(duration) : "—:—"}
+            {duration ? formatTime(duration) : "0:00"}
           </span>
 
           <div className="flex-1" />

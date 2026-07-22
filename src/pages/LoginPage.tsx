@@ -245,13 +245,11 @@ export function LoginPage() {
             AI-powered hiring
           </span>
           <h2 className="mt-5 text-[40px] font-semibold leading-[1.08] tracking-tight">
-            Screen every candidate,
-            <br />
-            skip the phone tag.
+            Screen every candidate
           </h2>
           <p className="mt-4 text-[15.5px] leading-[1.6] text-white/80">
             Candidates record short video answers on their own time. {orgName}{" "}
-            transcribes, scores, and ranks them — so recruiters only review the
+            transcribes, scores, and ranks them, so recruiters only review the
             best.
           </p>
           <div className="mt-10 flex gap-9">

@@ -21,6 +21,7 @@ import {
   Inbox,
   Loader2,
   Loader,
+  Mail,
   MoreVertical,
   RefreshCw,
   Search,
@@ -52,6 +53,7 @@ import {
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { InterviewDetailDrawer } from "@/components/interviews/InterviewDetailDrawer";
+import { BulkEmailDialog } from "@/features/candidates/components/BulkEmailDialog";
 import {
   deleteCandidate,
   exportCandidatesCsv,
@@ -93,7 +95,7 @@ const DEFAULT_PAGE_SIZE = 25;
  * means every column after it lands at a different x per row. `fr` units are a
  * fraction of the shared container width, so they line up across all rows.
  */
-const ROW_GRID = "grid-cols-[1.7fr_1.3fr_1.1fr_1.1fr_0.8fr_40px]";
+const ROW_GRID = "grid-cols-[1.7fr_1.3fr_1.1fr_1.1fr_0.8fr_200px]";
 
 /**
  * Stage badge tint. The org owns the hue (custom columns included), so the
@@ -140,7 +142,7 @@ function isProcessing(row: CandidateListItem): boolean {
 /** Two initials, uppercased. Empty string collapses to a single dash. */
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "—";
+  if (parts.length === 0) return "-";
   return parts
     .slice(0, 2)
     .map((p) => p[0]?.toUpperCase() ?? "")
@@ -187,6 +189,14 @@ export function CandidatesPage() {
   const [inviteTarget, setInviteTarget] = useState<CandidateListItem | null>(
     null,
   );
+  // Drives the compose-email dialog for BOTH a multi-select send (fromSelection)
+  // and a single row. `ids` snapshots the recipients so the dialog keeps them
+  // through its close animation.
+  const [emailState, setEmailState] = useState<{
+    ids: string[];
+    label: string;
+    fromSelection: boolean;
+  } | null>(null);
   const [exporting, setExporting] = useState(false);
 
   // The candidate whose interview the drawer shows, read straight from the URL
@@ -453,7 +463,7 @@ export function CandidatesPage() {
     mutationFn: (id: string) => sendCandidateInvite(id),
     onSuccess: (res) => {
       toast.success(
-        `Invite sent — attempt ${res.attemptNumber}, link expires ${formatDate(
+        `Invite sent, attempt ${res.attemptNumber}, link expires ${formatDate(
           res.expiresAt,
         )}.`,
       );
@@ -562,7 +572,7 @@ export function CandidatesPage() {
     ? `Candidates · ${selectedJob.title}`
     : "Candidates";
   const subtitle = routeJobId
-    ? "Applicants for this job — CVs, pre-screen verdicts, interview results and funnel stage."
+    ? "Applicants for this job, CVs, pre-screen verdicts, interview results and funnel stage."
     : "Every applicant across your jobs CVs, pre-screen verdicts, interview results, and where each one sits in the funnel.";
   const cardTitle = selectedJob ? "Applicants" : "All candidates";
   const cardSubline =
@@ -753,6 +763,20 @@ export function CandidatesPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() =>
+                      setEmailState({
+                        ids: Array.from(selectedIds),
+                        label: `${selectedCount} candidate${selectedCount === 1 ? "" : "s"}`,
+                        fromSelection: true,
+                      })
+                    }
+                  >
+                    <Mail className="h-4 w-4" strokeWidth={1.7} />
+                    Send email
+                  </Button>
+                  <Button
                     variant="danger"
                     size="sm"
                     disabled={bulkDeleteMutation.isPending}
@@ -781,7 +805,7 @@ export function CandidatesPage() {
                   <strong className="font-semibold text-ink">
                     {processingCount} CV{processingCount === 1 ? " is" : "s are"} still being read.
                   </strong>{" "}
-                  Their status updates once the AI finishes — this table won&apos;t update on
+                  Their status updates once the AI finishes. This table won&apos;t update on
                   its own, so hit Refresh in a moment to see the result.
                 </p>
                 <Button
@@ -871,6 +895,13 @@ export function CandidatesPage() {
                     onOpenCv={() => void handleOpenCv(row._id)}
                     onOpenInterview={() => openDrawer(row._id)}
                     onInvite={() => setInviteTarget(row)}
+                    onSendEmail={() =>
+                      setEmailState({
+                        ids: [row._id],
+                        label: row.fullName || "this candidate",
+                        fromSelection: false,
+                      })
+                    }
                     onChangeStatus={(statusKey) =>
                       statusMutation.mutate({ id: row._id, statusKey })
                     }
@@ -998,12 +1029,9 @@ export function CandidatesPage() {
         title={`Invite ${inviteTarget?.fullName || "this candidate"} to interview?`}
         description={
           <>
-            The CV vetting engine scored{" "}
-            <strong>{inviteTarget?.fullName}</strong> between the auto-invite and
-            auto-reject thresholds, so it parked them at{" "}
-            <strong>Pre-screened</strong> for a human to decide. Inviting them now
-            mints their interview link, emails it, and moves them to{" "}
-            <strong>Invited</strong>.
+            This sends <strong>{inviteTarget?.fullName}</strong> an interview
+            invite. It generates a secure interview link, emails it to them, and
+            moves them to <strong>Invited</strong>.
           </>
         }
         confirmLabel="Send invite"
@@ -1011,6 +1039,20 @@ export function CandidatesPage() {
         loading={inviteMutation.isPending}
         onConfirm={() => {
           if (inviteTarget) inviteMutation.mutate(inviteTarget._id);
+        }}
+      />
+
+      <BulkEmailDialog
+        open={emailState !== null}
+        onOpenChange={(open) => {
+          if (!open) setEmailState(null);
+        }}
+        candidateIds={emailState?.ids ?? []}
+        recipientLabel={emailState?.label ?? ""}
+        onSent={() => {
+          // A send launched from the multi-select bar clears the selection;
+          // a single-row send leaves any selection untouched.
+          if (emailState?.fromSelection) setSelectedIds(new Set());
         }}
       />
 
@@ -1127,8 +1169,11 @@ function CandidatesTableSkeleton() {
           <Skeleton className="mx-auto h-5 w-9 rounded-full" />
           {/* Date */}
           <Skeleton className="h-3 w-16" />
-          {/* Kebab */}
-          <Skeleton className="h-8 w-8 justify-self-end rounded-full" />
+          {/* Actions — View button + kebab */}
+          <div className="flex items-center justify-self-end gap-1.5">
+            <Skeleton className="h-8 w-[132px] rounded-full" />
+            <Skeleton className="h-8 w-8 rounded-full" />
+          </div>
         </div>
       ))}
     </div>
@@ -1146,6 +1191,7 @@ function CandidateRow({
   onOpenCv,
   onOpenInterview,
   onInvite,
+  onSendEmail,
   onChangeStatus,
   onDelete,
 }: {
@@ -1159,6 +1205,7 @@ function CandidateRow({
   onOpenCv: () => void;
   onOpenInterview: () => void;
   onInvite: () => void;
+  onSendEmail: () => void;
   onChangeStatus: (statusKey: string) => void;
   onDelete: () => void;
 }) {
@@ -1166,19 +1213,19 @@ function CandidateRow({
   // Always offered — the invite endpoint now accepts any status (it only
   // refuses on a closed job / spent attempt cap, with a clear message).
   const canInvite = true;
-  const hasInterview = Boolean(row.latestInterviewId);
   const scoreState = aiScoreState(row.latestInterviewId);
 
   return (
     <div
       onClick={onOpenInterview}
       className={cn(
-        // `items-start`, not `items-center`: a status cell can stack a
-        // "Reading CV…" / "CV couldn't be read" line under its badge, and
-        // centering pushed the badge above the other columns on those rows.
-        // Top-aligning keeps the badge level with the name and scores; the
-        // extra line just hangs below, like the email under the name.
-        "grid cursor-pointer items-start gap-3 border-b border-line px-5 py-3.5 text-[13.5px] transition-colors last:border-b-0 hover:bg-hover",
+        // `items-center` so every cell sits vertically centered against the
+        // 34px avatar, single-line cells (Role, Status, AI score, Date) would
+        // otherwise top-align and read as "floating up" next to the name block.
+        // On the rare rows that stack a "Reading CV…" / "CV couldn't be read"
+        // line under the status pill, the whole status cell just centers as one
+        // taller block, which stays visually balanced with the rest.
+        "grid cursor-pointer items-center gap-3 border-b border-line px-5 py-3.5 text-[13.5px] transition-colors last:border-b-0 hover:bg-hover",
         ROW_GRID,
         selected && "bg-[var(--accent-softer)]",
       )}
@@ -1206,7 +1253,7 @@ function CandidateRow({
             className="block truncate font-bold text-ink"
             title={row.fullName}
           >
-            {row.fullName || "—"}
+            {row.fullName || "-"}
           </span>
           <span
             className="block truncate text-[11.5px] text-ink-subtle"
@@ -1269,7 +1316,7 @@ function CandidateRow({
             ) : null}
           </span>
         ) : (
-          <span className="text-ink-muted">—</span>
+          <span className="text-ink-muted">-</span>
         )}
       </span>
 
@@ -1283,11 +1330,23 @@ function CandidateRow({
         {formatDate(row.createdAt)}
       </span>
 
-      {/* Kebab */}
-      <span
+      {/* Actions, an explicit "View interview" button plus the kebab menu.
+          Always shown: clicking anywhere on the row opens the same drawer
+          (it resolves for rows without an interview yet too), so the button
+          just makes that primary action visible on every row. */}
+      <div
         onClick={(e) => e.stopPropagation()}
-        className="justify-self-end"
+        className="flex items-center justify-self-end gap-1.5"
       >
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={onOpenInterview}
+          disabled={resolvingInterview}
+        >
+          {resolvingInterview ? <Loader2 className="animate-spin" /> : <Eye />}
+          View interview
+        </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -1303,12 +1362,6 @@ function CandidateRow({
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">
-            {hasInterview ? (
-              <DropdownMenuItem onSelect={onOpenInterview}>
-                <Eye className="h-4 w-4" />
-                View interview
-              </DropdownMenuItem>
-            ) : null}
             {row.cvKey ? (
               <DropdownMenuItem onSelect={onOpenCv}>
                 <FileText className="h-4 w-4" />
@@ -1318,9 +1371,13 @@ function CandidateRow({
             {canInvite ? (
               <DropdownMenuItem onSelect={onInvite}>
                 <Send className="h-4 w-4" />
-                Send invite
+                Send Interview invite
               </DropdownMenuItem>
             ) : null}
+            <DropdownMenuItem onSelect={onSendEmail}>
+              <Mail className="h-4 w-4" />
+              Send email
+            </DropdownMenuItem>
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>Change status</DropdownMenuSubTrigger>
               {/* Capped + scrollable: a long custom pipeline must not tower
@@ -1362,7 +1419,7 @@ function CandidateRow({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      </span>
+      </div>
     </div>
   );
 }

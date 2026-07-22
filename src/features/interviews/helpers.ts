@@ -35,12 +35,12 @@ export const recommendationLabels: Record<string, string> = {
 }
 
 export function formatRecommendation(rec?: string | null) {
-  if (!rec) return "—"
+  if (!rec) return "-"
   return recommendationLabels[rec] ?? rec.replace(/_/g, " ")
 }
 
 export function formatRole(role?: string | null) {
-  if (!role) return "—"
+  if (!role) return "-"
   return role
     .replace(/[_-]+/g, " ")
     .split(" ")
@@ -51,7 +51,7 @@ export function formatRole(role?: string | null) {
 
 /** Years of experience, trimmed to at most one decimal ("3", "3.5"). */
 export function formatYears(years?: number | null) {
-  if (years == null || Number.isNaN(years)) return "—"
+  if (years == null || Number.isNaN(years)) return "-"
   const rounded = Math.round(years * 10) / 10
   return `${rounded}`
 }
@@ -62,16 +62,16 @@ export function formatSessionIdTail(id?: string | null, length = 8) {
 }
 
 export function formatScore(score?: number | null, opts?: { suffix?: string }) {
-  if (score == null || Number.isNaN(score)) return "—"
+  if (score == null || Number.isNaN(score)) return "-"
   const rounded = Math.round(score * 10) / 10
   return `${rounded}${opts?.suffix ?? ""}`
 }
 
 export function durationBetween(start?: string | null, end?: string | null) {
-  if (!start || !end) return "—"
+  if (!start || !end) return "-"
   const a = new Date(start).getTime()
   const b = new Date(end).getTime()
-  if (Number.isNaN(a) || Number.isNaN(b) || b < a) return "—"
+  if (Number.isNaN(a) || Number.isNaN(b) || b < a) return "-"
   const ms = b - a
   const totalMinutes = Math.floor(ms / 60_000)
   if (totalMinutes < 60) return `${totalMinutes}m`
