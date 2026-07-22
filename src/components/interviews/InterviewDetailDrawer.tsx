@@ -1002,15 +1002,6 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
     window.open(`/cv-view/${candidateId}`, "_blank", "noopener");
   };
 
-  // ── Tabs ──────────────────────────────────────────────────────────────
-
-  const [tab, setTab] = useState<
-    "evaluation" | "responses" | "transcript" | "activity"
-  >("evaluation");
-  useEffect(() => {
-    setTab("evaluation");
-  }, [activeSessionId]);
-
   if (!sessionId && !candidateIdProp) return null;
 
   const recording = data?.recording;
@@ -1022,6 +1013,12 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
       ? Math.round(data.scores.overall * 10)
       : null;
   const answeredCount = questions.filter((q) => !q.skipped).length;
+
+  // Pipeline stage component is disabled for now — the reject / shortlist /
+  // hire stepper at the bottom of the drawer is hidden. It's kept fully wired
+  // (component + handlers + queries) so it can be switched back on by flipping
+  // this flag to `true`; see the guarded render at the end of the detail body.
+  const SHOW_PIPELINE = false;
 
   return (
     <>
@@ -1401,155 +1398,144 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                   </div>
                 ) : null}
 
-                {/* Segmented tabs */}
-                <div className="mb-4 flex gap-1 rounded-xl border border-line bg-surface p-1.5">
-                  {(
-                    [
-                      ["evaluation", "Evaluation"],
-                      ["responses", "Responses"],
-                      ["transcript", "Transcript"],
-                      ["activity", "Activity"],
-                    ] as const
-                  ).map(([id, label]) => (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => setTab(id)}
-                      className={cn(
-                        "flex-1 rounded-lg px-1.5 py-2 text-[12.5px] font-semibold transition-colors",
-                        tab === id
-                          ? "bg-[var(--accent-soft)] text-primary"
-                          : "text-ink-muted hover:text-ink",
-                      )}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Per-tab body — the tab bar itself always renders (above),
-                    so each tab owns its own empty state instead of one big
-                    "Interview not started" card obscuring the navigation. */}
-                {tab === "evaluation" ? (
-                  done && data.scores ? (
-                    <>
-                      <EvaluationTab data={data} />
-                      {/* Per-question breakdown lives on the Evaluation tab as
-                          the deep-dive block, since the design expects it
-                          near the score. */}
-                      {questions.length > 0 ? (
-                        <div className="mt-4">
+                {/* All details in one scroll — the interview's evaluation,
+                    responses, transcript and activity are stacked as labeled
+                    sections instead of tabs, so a reviewer sees the whole
+                    picture at once (mirrors the admin-dashboard drawer). */}
+                <div className="grid gap-6">
+                  {/* Evaluation */}
+                  <section>
+                    <SectionHeading
+                      icon={<Sparkles className="h-4 w-4" strokeWidth={1.8} />}
+                      title="Evaluation"
+                    />
+                    {done && data.scores ? (
+                      <div className="grid gap-4">
+                        <EvaluationTab data={data} />
+                        {/* Per-question breakdown — the deep-dive block that
+                            belongs next to the score. */}
+                        {questions.length > 0 ? (
                           <QuestionBreakdownList
                             questions={questions}
                             scoredByQuestionId={scoredByQuestionId}
                             hlsReady={hlsReady}
                             onJump={jumpToRecording}
                           />
-                        </div>
-                      ) : null}
-                    </>
-                  ) : done ? (
-                    // Interview submitted but not scored yet — subtler than
-                    // the "no interview" empty since data is coming.
-                    <TabScoringInProgress
-                      status={scoringStatus}
-                      scoringError={scoringError}
-                    />
-                  ) : (
-                    <TabEmpty
-                      icon={<ClipboardCheck className="h-6 w-6" strokeWidth={1.6} />}
-                      title="No AI evaluation yet"
-                      sub="The candidate hasn't recorded their interview. Their AI score and highlights will appear here once it's scored."
-                      action={
-                        candidateId ? (
-                          <ResendInviteButton
-                            canSend={canSendCandidateInvite}
-                            pending={invitingCand}
-                            onClick={handleSendCandidateInvite}
+                        ) : null}
+                      </div>
+                    ) : done ? (
+                      // Interview submitted but not scored yet — subtler than
+                      // the "no interview" empty since data is coming.
+                      <TabScoringInProgress
+                        status={scoringStatus}
+                        scoringError={scoringError}
+                      />
+                    ) : (
+                      <TabEmpty
+                        icon={
+                          <ClipboardCheck className="h-6 w-6" strokeWidth={1.6} />
+                        }
+                        title="No AI evaluation yet"
+                        sub="The candidate hasn't recorded their interview. Their AI score and highlights will appear here once it's scored."
+                        action={
+                          candidateId ? (
+                            <ResendInviteButton
+                              canSend={canSendCandidateInvite}
+                              pending={invitingCand}
+                              onClick={handleSendCandidateInvite}
+                            />
+                          ) : null
+                        }
+                      />
+                    )}
+                  </section>
+
+                  {/* Responses + Transcript only exist once the interview has
+                      actually been recorded — before that they'd just be empty
+                      cards, so they're omitted rather than stacked as blanks. */}
+                  {done ? (
+                    <>
+                      {/* Responses */}
+                      <section>
+                        <SectionHeading
+                          icon={<Video className="h-4 w-4" strokeWidth={1.8} />}
+                          title="Responses"
+                        />
+                        <ResponsesTab
+                          videoSectionRef={videoSectionRef}
+                          hlsUrl={data.webcamHlsUrl}
+                          rawUrl={data.webcamVideoUrl}
+                          hlsStatus={hlsStatus}
+                          hlsProgress={recording?.hlsProgress ?? 0}
+                          hlsError={recording?.hlsError ?? ""}
+                          durationSec={durationSec}
+                          chapters={chapters}
+                          playerApiRef={playerApiRef}
+                          questions={questions}
+                          candidateName={data.candidateName}
+                          retranscoding={retranscoding}
+                          onRetranscode={handleRetranscode}
+                          hlsReady={hlsReady}
+                          onJump={jumpToRecording}
+                        />
+                      </section>
+
+                      {/* Transcript */}
+                      <section>
+                        <SectionHeading
+                          icon={<FileText className="h-4 w-4" strokeWidth={1.8} />}
+                          title="Transcript"
+                        />
+                        {questions.length > 0 ? (
+                          <TranscriptTab questions={questions} />
+                        ) : (
+                          <TabScoringInProgress
+                            status={scoringStatus}
+                            scoringError={scoringError}
+                            messageOverride="Transcript pending — it's generated after the recording is transcribed."
                           />
-                        ) : null
+                        )}
+                      </section>
+                    </>
+                  ) : null}
+
+                  {/* Activity — always shown; it can render partial data
+                      (invited/created events) even before the interview is
+                      done, and falls back to its own empty state otherwise. */}
+                  <section>
+                    <SectionHeading
+                      icon={<Activity className="h-4 w-4" strokeWidth={1.8} />}
+                      title="Activity"
+                    />
+                    <ActivityTab
+                      createdAt={data.createdAt}
+                      startedAt={data.startedAt}
+                      submittedAt={data.submittedAt}
+                      scoringStatus={scoringStatus}
+                      overall={data.scores?.overall}
+                      questionCount={questions.length}
+                      answeredCount={answeredCount}
+                      emptyFallback={
+                        <TabEmpty
+                          icon={<Activity className="h-6 w-6" strokeWidth={1.6} />}
+                          title="No activity yet"
+                          sub="Status changes, invites, and messages will appear here as they happen."
+                        />
                       }
                     />
-                  )
-                ) : null}
+                  </section>
 
-                {tab === "responses" ? (
-                  done ? (
-                    <ResponsesTab
-                      videoSectionRef={videoSectionRef}
-                      hlsUrl={data.webcamHlsUrl}
-                      rawUrl={data.webcamVideoUrl}
-                      hlsStatus={hlsStatus}
-                      hlsProgress={recording?.hlsProgress ?? 0}
-                      hlsError={recording?.hlsError ?? ""}
-                      durationSec={durationSec}
-                      chapters={chapters}
-                      playerApiRef={playerApiRef}
-                      questions={questions}
-                      candidateName={data.candidateName}
-                      retranscoding={retranscoding}
-                      onRetranscode={handleRetranscode}
-                      hlsReady={hlsReady}
-                      onJump={jumpToRecording}
+                  {/* Pipeline stage component — disabled for now; flip
+                      SHOW_PIPELINE (top of the component) to bring it back. */}
+                  {SHOW_PIPELINE ? (
+                    <PipelineCard
+                      candidate={candidate}
+                      statuses={statuses}
+                      overall100={overallScore100}
+                      onStatusChange={handleStatusChange}
+                      pending={statusPending}
                     />
-                  ) : (
-                    <TabEmpty
-                      icon={<Video className="h-6 w-6" strokeWidth={1.6} />}
-                      title="No responses recorded"
-                      sub="Video answers show up here as chapters once the candidate finishes their interview."
-                    />
-                  )
-                ) : null}
-
-                {tab === "transcript" ? (
-                  done && questions.length > 0 ? (
-                    <TranscriptTab questions={questions} />
-                  ) : done ? (
-                    <TabScoringInProgress
-                      status={scoringStatus}
-                      scoringError={scoringError}
-                      messageOverride="Transcript pending — it's generated after the recording is transcribed."
-                    />
-                  ) : (
-                    <TabEmpty
-                      icon={<FileText className="h-6 w-6" strokeWidth={1.6} />}
-                      title="No transcript yet"
-                      sub="The transcript is generated automatically after the interview is scored."
-                    />
-                  )
-                ) : null}
-
-                {tab === "activity" ? (
-                  // Activity CAN render partial data (invited/created events)
-                  // before the interview is done, so this tab always tries the
-                  // real timeline first and falls back only when it's empty.
-                  <ActivityTab
-                    createdAt={data.createdAt}
-                    startedAt={data.startedAt}
-                    submittedAt={data.submittedAt}
-                    scoringStatus={scoringStatus}
-                    overall={data.scores?.overall}
-                    questionCount={questions.length}
-                    answeredCount={answeredCount}
-                    emptyFallback={
-                      <TabEmpty
-                        icon={<Activity className="h-6 w-6" strokeWidth={1.6} />}
-                        title="No activity yet"
-                        sub="Status changes, invites, and messages will appear here as they happen."
-                      />
-                    }
-                  />
-                ) : null}
-
-                {/* Pipeline card — always rendered below tabs */}
-                <div className="mt-4">
-                  <PipelineCard
-                    candidate={candidate}
-                    statuses={statuses}
-                    overall100={overallScore100}
-                    onStatusChange={handleStatusChange}
-                    pending={statusPending}
-                  />
+                  ) : null}
                 </div>
               </>
             )}
@@ -1592,6 +1578,30 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
         onConfirm={() => deleteCandidateMutation.mutate()}
       />
     </>
+  );
+}
+
+// ── Section heading ────────────────────────────────────────────────────
+
+/**
+ * Labels each stacked block in the single-scroll detail view. Replaces the
+ * old segmented tab bar: instead of switching between Evaluation / Responses /
+ * Transcript / Activity, every section is rendered under its own heading.
+ */
+function SectionHeading({
+  icon,
+  title,
+}: {
+  icon: React.ReactNode;
+  title: string;
+}) {
+  return (
+    <div className="mb-3 flex items-center gap-2">
+      <span className="flex h-6 w-6 items-center justify-center rounded-md bg-surface-3 text-ink-subtle">
+        {icon}
+      </span>
+      <h3 className="text-[14px] font-bold text-ink">{title}</h3>
+    </div>
   );
 }
 
