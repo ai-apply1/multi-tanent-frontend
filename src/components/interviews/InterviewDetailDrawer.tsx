@@ -29,7 +29,6 @@ import {
   Star,
   Trash2,
   User,
-  Video,
   X,
 } from "lucide-react";
 import { errorMessage } from "@/lib/errors";
@@ -42,6 +41,12 @@ import {
 } from "@/components/interviews/HlsPlayer";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
@@ -732,34 +737,6 @@ function ProfileCard({ profile }: { profile: CandidateProfile | null }) {
   );
 }
 
-/** One labelled contact field (Email / Phone / City) in the no-interview view. */
-function ContactField({
-  label,
-  value,
-  capitalize,
-}: {
-  label: string;
-  value: string | null | undefined;
-  capitalize?: boolean;
-}) {
-  return (
-    <div className="min-w-0">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-subtle">
-        {label}
-      </div>
-      <div
-        className={cn(
-          "truncate text-[13px]",
-          value ? "text-ink-2" : "text-ink-muted",
-          capitalize && "capitalize",
-        )}
-      >
-        {value || "Not provided"}
-      </div>
-    </div>
-  );
-}
-
 // ── Main drawer ────────────────────────────────────────────────────────
 
 export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp, onOpenChange }: Props) {
@@ -1074,7 +1051,10 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
           hideCloseButton
           className={cn(
             "flex flex-col p-0 border-0",
-            "w-[600px] max-w-[94%] sm:max-w-[600px]",
+            // Wider than the old 600px so the Evaluation tab can put the
+            // video and the AI evaluation side by side; caps at 94% on narrow
+            // screens, where the two columns stack.
+            "w-[860px] max-w-[94%] sm:max-w-[860px]",
             "bg-surface-2 border-l border-line",
             "shadow-[-18px_0_50px_rgba(13,11,11,0.16)]",
             // Sheet's default animation classes handle the slide; keeping
@@ -1118,8 +1098,24 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12.5px] text-ink-muted">
                   {data?.jobTitle ? <span>{data.jobTitle}</span> : null}
-                  {data?.jobTitle && data?.email ? <span>·</span> : null}
-                  {data?.email ? <span>{data.email}</span> : null}
+                  {data?.jobTitle && (data?.email || candidate?.email) ? (
+                    <span>·</span>
+                  ) : null}
+                  {data?.email || candidate?.email ? (
+                    <span>{data?.email || candidate?.email}</span>
+                  ) : null}
+                  {candidate?.phone ? (
+                    <>
+                      <span>·</span>
+                      <span>{candidate.phone}</span>
+                    </>
+                  ) : null}
+                  {candidate?.city ? (
+                    <>
+                      <span>·</span>
+                      <span className="capitalize">{candidate.city}</span>
+                    </>
+                  ) : null}
                   {activeSessionId ? (
                     <>
                       <span>·</span>
@@ -1307,27 +1303,15 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
               // `/interviews/null`, which 404s). The Open CV / Reject / Shortlist
               // actions in the header still work.
               <div className="space-y-4">
-                {/* Contact — the header already carries the name + avatar, so
-                    this is just the reachable details. */}
-                {candidate ? (
-                  <div className="grid grid-cols-1 gap-x-6 gap-y-3 rounded-2xl border border-line bg-surface p-[18px] sm:grid-cols-3">
-                    <ContactField label="Email" value={candidate.email} />
-                    <ContactField label="Phone" value={candidate.phone} />
-                    <ContactField
-                      label="City"
-                      value={candidate.city}
-                      capitalize
-                    />
-                  </div>
-                ) : null}
-
+                {/* Contact + identity live in the header now, so this state is
+                    just the parsed-CV profile and a note. */}
                 <ProfileCard profile={profile} />
 
                 <div className="flex items-center gap-3 rounded-2xl border border-dashed border-line bg-surface px-5 py-4 text-[13px] text-ink-muted">
                   <MicOff className="h-5 w-5 shrink-0 text-ink-subtle" />
                   <p>
                     No interview yet. Once this candidate completes one, the
-                    score, responses and transcript appear here.
+                    score, video and evaluation appear here.
                   </p>
                 </div>
               </div>
@@ -1352,142 +1336,36 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
               </div>
             ) : (
               <>
-                {/* AI Score card (only when interview is done) */}
-                {done && data.scores ? (
-                  <div className="mb-4">
-                    <AiScoreCard
-                      overall={data.scores.overall}
-                      recommendation={resolveVerdict(data.scores)}
-                      narrative={
-                        data.scores.summary ||
-                        data.scores.qualitative?.strengths?.[0] ||
-                        ""
-                      }
-                      answeredCount={answeredCount || questions.length}
-                    />
-                  </div>
-                ) : null}
-
-                {/* Scoring in-flight / failed banners */}
-                {done && !data.scores ? (
-                  <div className="mb-4 rounded-2xl border border-dashed border-line bg-surface p-4 text-sm text-ink-muted">
-                    {scoringRunning ? (
-                      <p className="inline-flex items-center gap-2">
-                        <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-                        {scoringStatus === "queued"
-                          ? "Scoring is queued, results will appear here as soon as the pipeline runs."
-                          : "Scoring in progress, results will appear here automatically."}
-                      </p>
-                    ) : scoringStatus === "failed" ||
-                      scoringStatus === "needs_review" ? (
-                      <div className="space-y-3">
-                        <div
-                          className={cn(
-                            "flex items-start gap-2 rounded-lg px-3 py-2 text-xs",
-                            scoringStatus === "needs_review"
-                              ? "text-[color:var(--warning)]"
-                              : "text-[color:var(--danger)]",
-                          )}
-                          style={{
-                            background:
-                              scoringStatus === "needs_review"
-                                ? "var(--warning-soft)"
-                                : "var(--danger-soft)",
-                          }}
-                        >
-                          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                          <span>
-                            {scoringStatus === "needs_review"
-                              ? "Needs human review, we couldn't reliably transcribe one or more answers"
-                              : "The last scoring run failed"}
-                            {scoringError ? `: ${scoringError}` : "."}
-                          </span>
-                        </div>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={handleRescore}
-                          disabled={rescoring}
-                        >
-                          {rescoring ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <RefreshCw className="h-3.5 w-3.5" />
-                          )}
-                          Retry scoring
-                        </Button>
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        <p>
-                          No scoring has run for this interview yet. Run the AI
-                          scoring pipeline to grade it.
-                        </p>
-                        <Button
-                          size="sm"
-                          onClick={handleRescore}
-                          disabled={rescoring}
-                        >
-                          {rescoring ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <RefreshCw className="h-3.5 w-3.5" />
-                          )}
-                          Run scoring
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                ) : null}
-
-                {/* Profile — parsed CV. Sits ABOVE the tabs so the reviewer
-                    sees who the candidate is before diving into the AI
-                    evaluation surface. */}
+                {/* Profile — parsed CV. Header is above this, this is above the
+                    tabs: identity → profile → the evaluation/activity surface. */}
                 {profile ? (
                   <div className="mb-4">
                     <ProfileCard profile={profile} />
                   </div>
                 ) : null}
 
-                {/* All details in one scroll — the interview's evaluation,
-                    responses, transcript and activity are stacked as labeled
-                    sections instead of tabs, so a reviewer sees the whole
-                    picture at once (mirrors the admin-dashboard drawer). */}
-                <div className="grid gap-6">
-                  {/* Evaluation */}
-                  <section>
-                    <SectionHeading
-                      icon={<Sparkles className="h-4 w-4" strokeWidth={1.8} />}
-                      title="Evaluation"
-                    />
-                    {done && data.scores ? (
-                      <div className="grid gap-4">
-                        <EvaluationTab data={data} />
-                        {/* Per-question breakdown — the deep-dive block that
-                            belongs next to the score. */}
-                        {questions.length > 0 ? (
-                          <QuestionBreakdownList
-                            questions={questions}
-                            scoredByQuestionId={scoredByQuestionId}
-                            hlsReady={hlsReady}
-                            onJump={jumpToRecording}
-                          />
-                        ) : null}
-                      </div>
-                    ) : done ? (
-                      // Interview submitted but not scored yet — subtler than
-                      // the "no interview" empty since data is coming.
-                      <TabScoringInProgress
-                        status={scoringStatus}
-                        scoringError={scoringError}
-                      />
-                    ) : (
+                <Tabs defaultValue="evaluation" className="w-full">
+                  <TabsList className="mb-4 grid w-full grid-cols-2">
+                    <TabsTrigger value="evaluation">
+                      <Sparkles className="h-3.5 w-3.5" strokeWidth={1.8} />
+                      Evaluation
+                    </TabsTrigger>
+                    <TabsTrigger value="activity">
+                      <Activity className="h-3.5 w-3.5" strokeWidth={1.8} />
+                      Activity
+                    </TabsTrigger>
+                  </TabsList>
+
+                  {/* ── Evaluation: overall score, then video + evaluation side
+                      by side, then the per-question breakdown. ── */}
+                  <TabsContent value="evaluation" className="mt-0">
+                    {!done ? (
                       <TabEmpty
                         icon={
                           <ClipboardCheck className="h-6 w-6" strokeWidth={1.6} />
                         }
                         title="No AI evaluation yet"
-                        sub="The candidate hasn't recorded their interview. Their AI score and highlights will appear here once it's scored."
+                        sub="The candidate hasn't recorded their interview. Their AI score, video and evaluation will appear here once it's scored."
                         action={
                           candidateId ? (
                             <ResendInviteButton
@@ -1498,66 +1376,134 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                           ) : null
                         }
                       />
-                    )}
-                  </section>
-
-                  {/* Responses + Transcript only exist once the interview has
-                      actually been recorded — before that they'd just be empty
-                      cards, so they're omitted rather than stacked as blanks. */}
-                  {done ? (
-                    <>
-                      {/* Responses */}
-                      <section>
-                        <SectionHeading
-                          icon={<Video className="h-4 w-4" strokeWidth={1.8} />}
-                          title="Responses"
-                        />
-                        <ResponsesTab
-                          videoSectionRef={videoSectionRef}
-                          hlsUrl={data.webcamHlsUrl}
-                          rawUrl={data.webcamVideoUrl}
-                          hlsStatus={hlsStatus}
-                          hlsProgress={recording?.hlsProgress ?? 0}
-                          hlsError={recording?.hlsError ?? ""}
-                          durationSec={durationSec}
-                          chapters={chapters}
-                          playerApiRef={playerApiRef}
-                          questions={questions}
-                          candidateName={data.candidateName}
-                          retranscoding={retranscoding}
-                          onRetranscode={handleRetranscode}
-                          hlsReady={hlsReady}
-                          onJump={jumpToRecording}
-                        />
-                      </section>
-
-                      {/* Transcript */}
-                      <section>
-                        <SectionHeading
-                          icon={<FileText className="h-4 w-4" strokeWidth={1.8} />}
-                          title="Transcript"
-                        />
-                        {questions.length > 0 ? (
-                          <TranscriptTab questions={questions} />
-                        ) : (
-                          <TabScoringInProgress
-                            status={scoringStatus}
-                            scoringError={scoringError}
-                            messageOverride="Transcript pending, it's generated after the recording is transcribed."
+                    ) : (
+                      <div className="grid gap-4">
+                        {/* Overall score — full width above the split. */}
+                        {data.scores ? (
+                          <AiScoreCard
+                            overall={data.scores.overall}
+                            recommendation={resolveVerdict(data.scores)}
+                            narrative={
+                              data.scores.summary ||
+                              data.scores.qualitative?.strengths?.[0] ||
+                              ""
+                            }
+                            answeredCount={answeredCount || questions.length}
                           />
-                        )}
-                      </section>
-                    </>
-                  ) : null}
+                        ) : null}
 
-                  {/* Activity — always shown; it can render partial data
-                      (invited/created events) even before the interview is
-                      done, and falls back to its own empty state otherwise. */}
-                  <section>
-                    <SectionHeading
-                      icon={<Activity className="h-4 w-4" strokeWidth={1.8} />}
-                      title="Activity"
-                    />
+                        {/* Video + evaluation, side by side (they stack when the
+                            drawer is narrowed on small screens). */}
+                        <div className="grid gap-4 lg:grid-cols-2">
+                          <ResponsesTab
+                            videoSectionRef={videoSectionRef}
+                            hlsUrl={data.webcamHlsUrl}
+                            rawUrl={data.webcamVideoUrl}
+                            hlsStatus={hlsStatus}
+                            hlsProgress={recording?.hlsProgress ?? 0}
+                            hlsError={recording?.hlsError ?? ""}
+                            durationSec={durationSec}
+                            chapters={chapters}
+                            playerApiRef={playerApiRef}
+                            questions={questions}
+                            candidateName={data.candidateName}
+                            retranscoding={retranscoding}
+                            onRetranscode={handleRetranscode}
+                            hlsReady={hlsReady}
+                            onJump={jumpToRecording}
+                          />
+
+                          {data.scores ? (
+                            <EvaluationTab data={data} stack />
+                          ) : (
+                            /* Recorded but not scored yet — the actionable
+                               scoring banner takes the evaluation column. */
+                            <div className="rounded-2xl border border-dashed border-line bg-surface p-4 text-sm text-ink-muted">
+                              {scoringRunning ? (
+                                <p className="inline-flex items-center gap-2">
+                                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                                  {scoringStatus === "queued"
+                                    ? "Scoring is queued, results will appear here as soon as the pipeline runs."
+                                    : "Scoring in progress, results will appear here automatically."}
+                                </p>
+                              ) : scoringStatus === "failed" ||
+                                scoringStatus === "needs_review" ? (
+                                <div className="space-y-3">
+                                  <div
+                                    className={cn(
+                                      "flex items-start gap-2 rounded-lg px-3 py-2 text-xs",
+                                      scoringStatus === "needs_review"
+                                        ? "text-[color:var(--warning)]"
+                                        : "text-[color:var(--danger)]",
+                                    )}
+                                    style={{
+                                      background:
+                                        scoringStatus === "needs_review"
+                                          ? "var(--warning-soft)"
+                                          : "var(--danger-soft)",
+                                    }}
+                                  >
+                                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                                    <span>
+                                      {scoringStatus === "needs_review"
+                                        ? "Needs human review, we couldn't reliably transcribe one or more answers"
+                                        : "The last scoring run failed"}
+                                      {scoringError ? `: ${scoringError}` : "."}
+                                    </span>
+                                  </div>
+                                  <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={handleRescore}
+                                    disabled={rescoring}
+                                  >
+                                    {rescoring ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <RefreshCw className="h-3.5 w-3.5" />
+                                    )}
+                                    Retry scoring
+                                  </Button>
+                                </div>
+                              ) : (
+                                <div className="space-y-3">
+                                  <p>
+                                    No scoring has run for this interview yet.
+                                    Run the AI scoring pipeline to grade it.
+                                  </p>
+                                  <Button
+                                    size="sm"
+                                    onClick={handleRescore}
+                                    disabled={rescoring}
+                                  >
+                                    {rescoring ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <RefreshCw className="h-3.5 w-3.5" />
+                                    )}
+                                    Run scoring
+                                  </Button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Per-question breakdown — full width below the split. */}
+                        {data.scores && questions.length > 0 ? (
+                          <QuestionBreakdownList
+                            questions={questions}
+                            scoredByQuestionId={scoredByQuestionId}
+                            hlsReady={hlsReady}
+                            onJump={jumpToRecording}
+                          />
+                        ) : null}
+                      </div>
+                    )}
+                  </TabsContent>
+
+                  {/* ── Activity: the event timeline. ── */}
+                  <TabsContent value="activity" className="mt-0">
                     <ActivityTab
                       createdAt={data.createdAt}
                       startedAt={data.startedAt}
@@ -1574,11 +1520,13 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                         />
                       }
                     />
-                  </section>
+                  </TabsContent>
+                </Tabs>
 
-                  {/* Pipeline stage component — disabled for now; flip
-                      SHOW_PIPELINE (top of the component) to bring it back. */}
-                  {SHOW_PIPELINE ? (
+                {/* Pipeline stage component — disabled for now; flip
+                    SHOW_PIPELINE (top of the component) to bring it back. */}
+                {SHOW_PIPELINE ? (
+                  <div className="mt-4">
                     <PipelineCard
                       candidate={candidate}
                       statuses={statuses}
@@ -1589,8 +1537,8 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                       onStatusChange={handleStatusChange}
                       pending={statusPending}
                     />
-                  ) : null}
-                </div>
+                  </div>
+                ) : null}
               </>
             )}
           </div>
@@ -1644,30 +1592,6 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   );
 }
 
-// ── Section heading ────────────────────────────────────────────────────
-
-/**
- * Labels each stacked block in the single-scroll detail view. Replaces the
- * old segmented tab bar: instead of switching between Evaluation / Responses /
- * Transcript / Activity, every section is rendered under its own heading.
- */
-function SectionHeading({
-  icon,
-  title,
-}: {
-  icon: React.ReactNode;
-  title: string;
-}) {
-  return (
-    <div className="mb-3 flex items-center gap-2">
-      <span className="flex h-6 w-6 items-center justify-center rounded-md bg-surface-3 text-ink-subtle">
-        {icon}
-      </span>
-      <h3 className="text-[14px] font-bold text-ink">{title}</h3>
-    </div>
-  );
-}
-
 // ── Per-tab empty states ──────────────────────────────────────────────
 
 /**
@@ -1696,46 +1620,6 @@ function TabEmpty({
         {sub}
       </p>
       {action ? <div className="mt-3.5 inline-flex">{action}</div> : null}
-    </div>
-  );
-}
-
-/**
- * The subtler "we're waiting on the scoring pipeline" empty. Only rendered
- * once the interview has been submitted — the reviewer isn't blocked by the
- * candidate any more, just by the worker queue.
- */
-function TabScoringInProgress({
-  status,
-  scoringError,
-  messageOverride,
-}: {
-  status: ScoringStatus;
-  scoringError: string;
-  messageOverride?: string;
-}) {
-  const isRunning = status === "queued" || status === "processing";
-  const message =
-    messageOverride ??
-    (isRunning
-      ? status === "queued"
-        ? "Scoring is queued, results will appear here as soon as the pipeline runs."
-        : "Scoring in progress…"
-      : status === "failed"
-        ? `The last scoring run failed${scoringError ? `: ${scoringError}` : "."}`
-        : status === "needs_review"
-          ? `Needs human review${scoringError ? `: ${scoringError}` : "."}`
-          : "Not scored yet.");
-  return (
-    <div className="rounded-2xl border border-dashed border-line bg-surface p-6 text-center text-[13px] text-ink-muted">
-      <p className="inline-flex items-center gap-2">
-        {isRunning ? (
-          <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-        ) : (
-          <Clock className="h-4 w-4 shrink-0" strokeWidth={1.7} />
-        )}
-        {message}
-      </p>
     </div>
   );
 }
@@ -1787,8 +1671,16 @@ function ResendInviteButton({
 
 function EvaluationTab({
   data,
+  stack = false,
 }: {
   data: NonNullable<ReturnType<typeof useInterviewDataType>>;
+  /**
+   * Force the Highlights / Areas-to-probe cards to stack vertically. Set when
+   * this renders inside the narrow evaluation column of the side-by-side
+   * layout, where the media-query `sm:grid-cols-2` (viewport-based) would
+   * otherwise squeeze them into two cramped columns.
+   */
+  stack?: boolean;
 }) {
   const qualitative = data.scores?.qualitative;
   const highlights = qualitative?.strengths ?? [];
@@ -1811,7 +1703,7 @@ function EvaluationTab({
 
   return (
     <div className="grid gap-4">
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className={cn("grid gap-4", !stack && "sm:grid-cols-2")}>
         <div className="rounded-2xl border border-line bg-surface p-[18px]">
           <div className="mb-3.5 flex items-center gap-2">
             <span
@@ -2086,62 +1978,10 @@ function ResponsesTab({
   );
 }
 
-// ── Transcript tab ─────────────────────────────────────────────────────
-
+// The candidate-skipped sentinel — still referenced by the per-question
+// breakdown (`AnswerRow`) even though the standalone transcript section was
+// removed from the drawer.
 const SKIPPED_TRANSCRIPT_MARKER = "[Skipped by candidate]";
-
-function TranscriptTab({
-  questions,
-}: {
-  questions: AdminInterviewQuestionItem[];
-}) {
-  if (!questions.length) {
-    return (
-      <div className="rounded-2xl border border-line bg-surface p-6 text-center text-sm text-ink-muted">
-        No transcript available yet.
-      </div>
-    );
-  }
-  // Flatten into alternating speaker paragraphs; the first row is the
-  // active line for visual anchoring.
-  const rows: Array<{ speaker: "interviewer" | "candidate"; text: string }> = [];
-  for (const q of questions) {
-    rows.push({ speaker: "interviewer", text: q.text });
-    const skipped =
-      q.skipped || q.transcript.trim() === SKIPPED_TRANSCRIPT_MARKER;
-    rows.push({
-      speaker: "candidate",
-      text: skipped
-        ? "[Skipped]"
-        : q.transcript.trim() || "[No transcript yet]",
-    });
-  }
-  return (
-    <div className="rounded-2xl border border-line bg-surface p-5">
-      <div className="mb-3 text-[14px] font-semibold">Transcript</div>
-      <div className="grid gap-1">
-        {rows.map((r, i) => {
-          const active = i === 0;
-          return (
-            <div
-              key={i}
-              className={cn(
-                "rounded-lg p-3 text-[13.5px] leading-[1.55]",
-                active && "border-l-2 border-primary bg-[var(--accent-soft)]",
-                r.speaker === "candidate" ? "text-ink-2" : "text-ink",
-              )}
-            >
-              <span className="mr-1 font-semibold">
-                {r.speaker === "interviewer" ? "Interviewer:" : "Candidate:"}
-              </span>
-              {r.text}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
 // ── Activity tab ───────────────────────────────────────────────────────
 
