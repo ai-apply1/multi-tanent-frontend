@@ -1378,126 +1378,122 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                       />
                     ) : (
                       <div className="grid gap-4">
-                        {/* Overall score — full width above the split. */}
+                        {/* 1. Video (full width) + its question chapters. */}
+                        <ResponsesTab
+                          videoSectionRef={videoSectionRef}
+                          hlsUrl={data.webcamHlsUrl}
+                          rawUrl={data.webcamVideoUrl}
+                          hlsStatus={hlsStatus}
+                          hlsProgress={recording?.hlsProgress ?? 0}
+                          hlsError={recording?.hlsError ?? ""}
+                          durationSec={durationSec}
+                          chapters={chapters}
+                          playerApiRef={playerApiRef}
+                          questions={questions}
+                          candidateName={data.candidateName}
+                          retranscoding={retranscoding}
+                          onRetranscode={handleRetranscode}
+                          hlsReady={hlsReady}
+                          onJump={jumpToRecording}
+                        />
+
+                        {/* 2. All evaluations, below the video: overall score,
+                            highlights / areas / score breakdown, then the
+                            per-question deep dive. When the recording isn't
+                            scored yet, the actionable scoring banner takes
+                            this slot. */}
                         {data.scores ? (
-                          <AiScoreCard
-                            overall={data.scores.overall}
-                            recommendation={resolveVerdict(data.scores)}
-                            narrative={
-                              data.scores.summary ||
-                              data.scores.qualitative?.strengths?.[0] ||
-                              ""
-                            }
-                            answeredCount={answeredCount || questions.length}
-                          />
-                        ) : null}
-
-                        {/* Video + evaluation, side by side (they stack when the
-                            drawer is narrowed on small screens). */}
-                        <div className="grid gap-4 lg:grid-cols-2">
-                          <ResponsesTab
-                            videoSectionRef={videoSectionRef}
-                            hlsUrl={data.webcamHlsUrl}
-                            rawUrl={data.webcamVideoUrl}
-                            hlsStatus={hlsStatus}
-                            hlsProgress={recording?.hlsProgress ?? 0}
-                            hlsError={recording?.hlsError ?? ""}
-                            durationSec={durationSec}
-                            chapters={chapters}
-                            playerApiRef={playerApiRef}
-                            questions={questions}
-                            candidateName={data.candidateName}
-                            retranscoding={retranscoding}
-                            onRetranscode={handleRetranscode}
-                            hlsReady={hlsReady}
-                            onJump={jumpToRecording}
-                          />
-
-                          {data.scores ? (
-                            <EvaluationTab data={data} stack />
-                          ) : (
-                            /* Recorded but not scored yet — the actionable
-                               scoring banner takes the evaluation column. */
-                            <div className="rounded-2xl border border-dashed border-line bg-surface p-4 text-sm text-ink-muted">
-                              {scoringRunning ? (
-                                <p className="inline-flex items-center gap-2">
-                                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-                                  {scoringStatus === "queued"
-                                    ? "Scoring is queued, results will appear here as soon as the pipeline runs."
-                                    : "Scoring in progress, results will appear here automatically."}
-                                </p>
-                              ) : scoringStatus === "failed" ||
-                                scoringStatus === "needs_review" ? (
-                                <div className="space-y-3">
-                                  <div
-                                    className={cn(
-                                      "flex items-start gap-2 rounded-lg px-3 py-2 text-xs",
+                          <>
+                            <AiScoreCard
+                              overall={data.scores.overall}
+                              recommendation={resolveVerdict(data.scores)}
+                              narrative={
+                                data.scores.summary ||
+                                data.scores.qualitative?.strengths?.[0] ||
+                                ""
+                              }
+                              answeredCount={answeredCount || questions.length}
+                            />
+                            <EvaluationTab data={data} />
+                            {questions.length > 0 ? (
+                              <QuestionBreakdownList
+                                questions={questions}
+                                scoredByQuestionId={scoredByQuestionId}
+                                hlsReady={hlsReady}
+                                onJump={jumpToRecording}
+                              />
+                            ) : null}
+                          </>
+                        ) : (
+                          <div className="rounded-2xl border border-dashed border-line bg-surface p-4 text-sm text-ink-muted">
+                            {scoringRunning ? (
+                              <p className="inline-flex items-center gap-2">
+                                <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                                {scoringStatus === "queued"
+                                  ? "Scoring is queued, results will appear here as soon as the pipeline runs."
+                                  : "Scoring in progress, results will appear here automatically."}
+                              </p>
+                            ) : scoringStatus === "failed" ||
+                              scoringStatus === "needs_review" ? (
+                              <div className="space-y-3">
+                                <div
+                                  className={cn(
+                                    "flex items-start gap-2 rounded-lg px-3 py-2 text-xs",
+                                    scoringStatus === "needs_review"
+                                      ? "text-[color:var(--warning)]"
+                                      : "text-[color:var(--danger)]",
+                                  )}
+                                  style={{
+                                    background:
                                       scoringStatus === "needs_review"
-                                        ? "text-[color:var(--warning)]"
-                                        : "text-[color:var(--danger)]",
-                                    )}
-                                    style={{
-                                      background:
-                                        scoringStatus === "needs_review"
-                                          ? "var(--warning-soft)"
-                                          : "var(--danger-soft)",
-                                    }}
-                                  >
-                                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                                    <span>
-                                      {scoringStatus === "needs_review"
-                                        ? "Needs human review, we couldn't reliably transcribe one or more answers"
-                                        : "The last scoring run failed"}
-                                      {scoringError ? `: ${scoringError}` : "."}
-                                    </span>
-                                  </div>
-                                  <Button
-                                    variant="secondary"
-                                    size="sm"
-                                    onClick={handleRescore}
-                                    disabled={rescoring}
-                                  >
-                                    {rescoring ? (
-                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    ) : (
-                                      <RefreshCw className="h-3.5 w-3.5" />
-                                    )}
-                                    Retry scoring
-                                  </Button>
+                                        ? "var(--warning-soft)"
+                                        : "var(--danger-soft)",
+                                  }}
+                                >
+                                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                                  <span>
+                                    {scoringStatus === "needs_review"
+                                      ? "Needs human review, we couldn't reliably transcribe one or more answers"
+                                      : "The last scoring run failed"}
+                                    {scoringError ? `: ${scoringError}` : "."}
+                                  </span>
                                 </div>
-                              ) : (
-                                <div className="space-y-3">
-                                  <p>
-                                    No scoring has run for this interview yet.
-                                    Run the AI scoring pipeline to grade it.
-                                  </p>
-                                  <Button
-                                    size="sm"
-                                    onClick={handleRescore}
-                                    disabled={rescoring}
-                                  >
-                                    {rescoring ? (
-                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    ) : (
-                                      <RefreshCw className="h-3.5 w-3.5" />
-                                    )}
-                                    Run scoring
-                                  </Button>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Per-question breakdown — full width below the split. */}
-                        {data.scores && questions.length > 0 ? (
-                          <QuestionBreakdownList
-                            questions={questions}
-                            scoredByQuestionId={scoredByQuestionId}
-                            hlsReady={hlsReady}
-                            onJump={jumpToRecording}
-                          />
-                        ) : null}
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={handleRescore}
+                                  disabled={rescoring}
+                                >
+                                  {rescoring ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <RefreshCw className="h-3.5 w-3.5" />
+                                  )}
+                                  Retry scoring
+                                </Button>
+                              </div>
+                            ) : (
+                              <div className="space-y-3">
+                                <p>
+                                  No scoring has run for this interview yet. Run
+                                  the AI scoring pipeline to grade it.
+                                </p>
+                                <Button
+                                  size="sm"
+                                  onClick={handleRescore}
+                                  disabled={rescoring}
+                                >
+                                  {rescoring ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <RefreshCw className="h-3.5 w-3.5" />
+                                  )}
+                                  Run scoring
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
                   </TabsContent>
@@ -1671,16 +1667,8 @@ function ResendInviteButton({
 
 function EvaluationTab({
   data,
-  stack = false,
 }: {
   data: NonNullable<ReturnType<typeof useInterviewDataType>>;
-  /**
-   * Force the Highlights / Areas-to-probe cards to stack vertically. Set when
-   * this renders inside the narrow evaluation column of the side-by-side
-   * layout, where the media-query `sm:grid-cols-2` (viewport-based) would
-   * otherwise squeeze them into two cramped columns.
-   */
-  stack?: boolean;
 }) {
   const qualitative = data.scores?.qualitative;
   const highlights = qualitative?.strengths ?? [];
@@ -1703,7 +1691,7 @@ function EvaluationTab({
 
   return (
     <div className="grid gap-4">
-      <div className={cn("grid gap-4", !stack && "sm:grid-cols-2")}>
+      <div className="grid gap-4 sm:grid-cols-2">
         <div className="rounded-2xl border border-line bg-surface p-[18px]">
           <div className="mb-3.5 flex items-center gap-2">
             <span
@@ -1827,7 +1815,22 @@ function ResponsesTab({
   hlsReady: boolean;
   onJump: (sec: number) => void;
 }) {
-  const activeIdx = 0;
+  // Live playback position, fed by the player's `onTimeUpdate`. Drives which
+  // question chapter is highlighted.
+  const [currentSec, setCurrentSec] = useState(0);
+  // The question playing right now: the LAST one whose ask-time has passed
+  // (a +0.25s lead flips it exactly as the question begins, matching the
+  // video's caption overlay). Falls back to the first question before any
+  // ask-time is reached. This is the fix for the highlight that used to be
+  // pinned to `0` and never moved when you clicked a chapter or let it play.
+  const activeIdx = (() => {
+    let idx = -1;
+    for (let i = 0; i < questions.length; i++) {
+      const at = questions[i].askedAtSec;
+      if (typeof at === "number" && currentSec + 0.25 >= at) idx = i;
+    }
+    return idx === -1 ? 0 : idx;
+  })();
   return (
     <div className="grid gap-4">
       <section
@@ -1843,6 +1846,7 @@ function ResponsesTab({
                 durationSec={durationSec}
                 chapters={chapters}
                 apiRef={playerApiRef}
+                onTimeUpdate={setCurrentSec}
               />
             </div>
           ) : hlsStatus === "failed" ? (
@@ -1927,9 +1931,13 @@ function ResponsesTab({
                 disabled={
                   typeof q.askedAtSec !== "number" || !hlsReady
                 }
-                onClick={() =>
-                  typeof q.askedAtSec === "number" && onJump(q.askedAtSec)
-                }
+                onClick={() => {
+                  if (typeof q.askedAtSec !== "number") return;
+                  // Highlight immediately, then let the player's time updates
+                  // keep it in sync as playback continues from here.
+                  setCurrentSec(q.askedAtSec);
+                  onJump(q.askedAtSec);
+                }}
                 className={cn(
                   "flex items-center gap-3 rounded-[10px] border px-3.5 py-3 text-left transition-colors",
                   isActive

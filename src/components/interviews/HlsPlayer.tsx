@@ -89,6 +89,12 @@ interface HlsPlayerProps {
    * instead of `forwardRef` to keep the component a hoisted declaration.
    */
   apiRef?: MutableRefObject<VideoPlayerHandle | null>;
+  /**
+   * Fired on every playback time change (and after a seek). The drawer uses it
+   * to highlight the question chapter that's currently playing — without it the
+   * chapter list can't know where playback is and its highlight goes stale.
+   */
+  onTimeUpdate?: (sec: number) => void;
 }
 
 export function HlsPlayer({
@@ -96,6 +102,7 @@ export function HlsPlayer({
   durationSec,
   chapters,
   apiRef,
+  onTimeUpdate,
 }: HlsPlayerProps) {
   if (!manifestUrl) {
     return <Placeholder />;
@@ -107,6 +114,7 @@ export function HlsPlayer({
         knownDurationSec={durationSec}
         chapters={chapters}
         apiRef={apiRef}
+        onTimeUpdate={onTimeUpdate}
       />
     </div>
   );
@@ -134,6 +142,7 @@ interface HlsSurfaceProps {
   knownDurationSec?: number;
   chapters?: VideoChapter[];
   apiRef?: MutableRefObject<VideoPlayerHandle | null>;
+  onTimeUpdate?: (sec: number) => void;
 }
 
 function formatTime(sec: number): string {
@@ -153,10 +162,19 @@ function HlsSurface({
   knownDurationSec,
   chapters,
   apiRef,
+  onTimeUpdate,
 }: HlsSurfaceProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hideControlsTimer = useRef<number | null>(null);
+
+  // Held in a ref so the runtime-event effect (which binds `timeupdate` once,
+  // keyed on `manifestUrl`) always calls the LATEST callback without re-binding
+  // every listener on each parent render.
+  const onTimeUpdateRef = useRef(onTimeUpdate);
+  useEffect(() => {
+    onTimeUpdateRef.current = onTimeUpdate;
+  }, [onTimeUpdate]);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -309,6 +327,7 @@ function HlsSurface({
     const onTime = () => {
       if (!Number.isFinite(v.currentTime) || v.currentTime >= 1e7) return;
       setCurrentTime(v.currentTime);
+      onTimeUpdateRef.current?.(v.currentTime);
     };
 
     const onPlay = () => setIsPlaying(true);
