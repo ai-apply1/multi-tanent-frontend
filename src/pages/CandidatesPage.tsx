@@ -275,7 +275,8 @@ export function CandidatesPage() {
     [jobsQuery.data],
   );
 
-  const selectedJob = jobFilter === ALL ? null : (jobsById.get(jobFilter) ?? null);
+  const selectedJob =
+    jobFilter === ALL ? null : (jobsById.get(jobFilter) ?? null);
   // `selectedJob` is null for THREE different reasons — no job filter, a job
   // outside the options list's cap, or a list that simply hasn't arrived yet —
   // and anything that puts the selection into words has to tell them apart.
@@ -362,7 +363,9 @@ export function CandidatesPage() {
 
   useEffect(() => {
     if (!detailQuery.isError) return;
-    toast.error(errorMessage(detailQuery.error, "Could not open the interview."));
+    toast.error(
+      errorMessage(detailQuery.error, "Could not open the interview."),
+    );
     closeDrawer();
   }, [detailQuery.isError, detailQuery.error, closeDrawer]);
 
@@ -398,7 +401,9 @@ export function CandidatesPage() {
    */
   const bulkDeleteMutation = useMutation({
     mutationFn: async (ids: string[]) => {
-      const outcomes = await Promise.allSettled(ids.map((id) => deleteCandidate(id)));
+      const outcomes = await Promise.allSettled(
+        ids.map((id) => deleteCandidate(id)),
+      );
       const deleted = outcomes.filter((o) => o.status === "fulfilled").length;
       const failed = outcomes.length - deleted;
       const firstFailure = outcomes.find((o) => o.status === "rejected");
@@ -407,13 +412,18 @@ export function CandidatesPage() {
         failed,
         reason:
           firstFailure && firstFailure.status === "rejected"
-            ? errorMessage(firstFailure.reason, "Some candidates could not be deleted.")
+            ? errorMessage(
+                firstFailure.reason,
+                "Some candidates could not be deleted.",
+              )
             : null,
       };
     },
     onSuccess: ({ deleted, failed, reason }) => {
       if (deleted > 0) {
-        toast.success(`Deleted ${deleted} candidate${deleted === 1 ? "" : "s"}.`);
+        toast.success(
+          `Deleted ${deleted} candidate${deleted === 1 ? "" : "s"}.`,
+        );
       }
       if (failed > 0) {
         toast.error(
@@ -425,7 +435,9 @@ export function CandidatesPage() {
       setBulkDeleteOpen(false);
     },
     onError: (err: unknown) => {
-      toast.error(errorMessage(err, "Could not delete the selected candidates."));
+      toast.error(
+        errorMessage(err, "Could not delete the selected candidates."),
+      );
     },
   });
 
@@ -458,7 +470,9 @@ export function CandidatesPage() {
         )}.`,
       );
       invalidateCandidates();
-      queryClient.invalidateQueries({ queryKey: ["candidate", res.candidateId] });
+      queryClient.invalidateQueries({
+        queryKey: ["candidate", res.candidateId],
+      });
       setInviteTarget(null);
     },
     onError: (err: unknown) => {
@@ -654,7 +668,9 @@ export function CandidatesPage() {
         {/* Toolbar */}
         <div className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-4">
           <div className="min-w-0">
-            <div className="text-[14px] font-semibold text-ink">{cardTitle}</div>
+            <div className="text-[14px] font-semibold text-ink">
+              {cardTitle}
+            </div>
             <div className="text-[12px] text-ink-muted">{cardSubline}</div>
           </div>
           <div className="flex-1" />
@@ -724,8 +740,7 @@ export function CandidatesPage() {
                     <span
                       className="h-2 w-2 shrink-0 rounded-full"
                       style={{
-                        backgroundColor:
-                          status.color ?? "var(--ink-muted)",
+                        backgroundColor: status.color ?? "var(--ink-muted)",
                       }}
                     />
                     {status.label}
@@ -737,210 +752,207 @@ export function CandidatesPage() {
         </div>
 
         {selectedCount > 0 ? (
-              <div className="flex flex-col gap-2 border-b border-line bg-[var(--accent-softer)] px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-center gap-3 text-[13px]">
-                  <span className="font-semibold text-ink">
-                    {selectedCount} selected
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedIds(new Set())}
-                    className="inline-flex items-center gap-1 text-[12px] text-ink-muted hover:text-ink"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                    Clear
-                  </button>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    disabled={bulkDeleteMutation.isPending}
-                    onClick={() => setBulkDeleteOpen(true)}
-                  >
-                    {bulkDeleteMutation.isPending ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-4 w-4" strokeWidth={1.7} />
-                    )}
-                    Delete
-                  </Button>
-                </div>
-              </div>
-            ) : null}
+          <div className="flex flex-col gap-2 border-b border-line bg-[var(--accent-softer)] px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3 text-[13px]">
+              <span className="font-semibold text-ink">
+                {selectedCount} selected
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedIds(new Set())}
+                className="inline-flex items-center gap-1 text-[12px] text-ink-muted hover:text-ink"
+              >
+                <X className="h-3.5 w-3.5" />
+                Clear
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="danger"
+                size="sm"
+                disabled={bulkDeleteMutation.isPending}
+                onClick={() => setBulkDeleteOpen(true)}
+              >
+                {bulkDeleteMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" strokeWidth={1.7} />
+                )}
+                Delete
+              </Button>
+            </div>
+          </div>
+        ) : null}
 
-            {/* Shown only while the worker is actually mid-flight. The table
+        {/* Shown only while the worker is actually mid-flight. The table
                 does NOT poll, so these rows will change on the server with
                 nothing here to notice — say so plainly rather than let the
                 operator conclude the pipeline is stuck. It disappears by
                 itself once the last row lands. */}
-            {processingCount > 0 ? (
-              <div className="flex items-center gap-2 border-b border-line bg-[var(--warning-soft)] px-5 py-2.5">
-                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--warning)]" />
-                <p className="text-[12.5px] text-ink-2">
-                  <strong className="font-semibold text-ink">
-                    {processingCount} CV{processingCount === 1 ? " is" : "s are"} still being read.
-                  </strong>{" "}
-                  Their status updates once the AI finishes — this table won&apos;t update on
-                  its own, so hit Refresh in a moment to see the result.
-                </p>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="ml-auto h-7 shrink-0"
-                  onClick={() => refetch()}
-                  disabled={isFetching}
-                >
-                  <RefreshCw className={cn("h-3 w-3", isFetching && "animate-spin")} />
-                  Refresh
-                </Button>
-              </div>
-            ) : null}
-
-            {/* Grid header */}
-            <div
-              className={cn(
-                "grid items-center gap-3 border-b border-line bg-surface-3 px-5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-muted",
-                ROW_GRID,
-              )}
+        {processingCount > 0 ? (
+          <div className="flex items-center gap-2 border-b border-line bg-[var(--warning-soft)] px-5 py-2.5">
+            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--warning)]" />
+            <p className="text-[12.5px] text-ink-2">
+              <strong className="font-semibold text-ink">
+                {processingCount} CV{processingCount === 1 ? " is" : "s are"}{" "}
+                still being read.
+              </strong>{" "}
+              Their status updates once the AI finishes — this table won&apos;t
+              update on its own, so hit Refresh in a moment to see the result.
+            </p>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="ml-auto h-7 shrink-0"
+              onClick={() => refetch()}
+              disabled={isFetching}
             >
-              <span className="flex items-center gap-2.5">
-                <Checkbox
-                  checked={headerChecked}
-                  onCheckedChange={(c) => toggleAll(Boolean(c))}
-                  aria-label="Select all on this page"
-                />
-                Candidate
+              <RefreshCw
+                className={cn("h-3 w-3", isFetching && "animate-spin")}
+              />
+              Refresh
+            </Button>
+          </div>
+        ) : null}
+
+        {/* Grid header */}
+        <div
+          className={cn(
+            "grid items-center gap-3 border-b border-line bg-surface-3 px-5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-muted",
+            ROW_GRID,
+          )}
+        >
+          <span className="flex items-center gap-2.5">
+            <Checkbox
+              checked={headerChecked}
+              onCheckedChange={(c) => toggleAll(Boolean(c))}
+              aria-label="Select all on this page"
+            />
+            Candidate
+          </span>
+          <span>Role</span>
+          <span>Status</span>
+          <span className="text-center">AI score</span>
+          <span>Date</span>
+          <span />
+        </div>
+
+        {isLoading ? (
+          <CandidatesTableSkeleton />
+        ) : isError ? (
+          <div className="flex flex-col items-center gap-2 px-6 py-16 text-center text-[13px] text-[var(--danger)]">
+            Could not load candidates.
+            <button
+              onClick={() => refetch()}
+              className="text-primary underline"
+            >
+              Retry
+            </button>
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
+            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-primary">
+              <Inbox className="h-6 w-6" strokeWidth={1.7} />
+            </span>
+            <h3 className="text-[16px] font-semibold text-ink">
+              {search.trim() || statusFilter !== ALL || jobFilter !== ALL
+                ? "No candidates match"
+                : "No candidates yet"}
+            </h3>
+            <p className="max-w-[340px] text-[13.5px] text-ink-muted">
+              {search.trim() || statusFilter !== ALL || jobFilter !== ALL
+                ? "Adjust your search or filters to see applicants."
+                : "Open a job and upload CVs from its Candidates tab to add some."}
+            </p>
+          </div>
+        ) : (
+          <div>
+            {rows.map((row) => (
+              <CandidateRow
+                key={row._id}
+                row={row}
+                selected={selectedIds.has(row._id)}
+                jobTitle={jobsById.get(row.jobId)?.title ?? null}
+                statuses={statuses}
+                resolvingInterview={
+                  drawerCandidateId === row._id && detailQuery.isLoading
+                }
+                statusPending={
+                  statusMutation.isPending &&
+                  statusMutation.variables?.id === row._id
+                }
+                onToggle={(c) => toggleOne(row._id, c)}
+                onOpenCv={() => void handleOpenCv(row._id)}
+                onOpenInterview={() => openDrawer(row._id)}
+                onInvite={() => setInviteTarget(row)}
+                onChangeStatus={(statusKey) =>
+                  statusMutation.mutate({ id: row._id, statusKey })
+                }
+                onDelete={() => setDeleteTarget(row)}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Pagination footer */}
+        <div className="flex flex-col gap-3 border-t border-line px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-[12px] text-ink-muted">Rows per page</span>
+              <Select
+                value={String(pageSize)}
+                onValueChange={(v) => {
+                  setPageSize(Number(v));
+                  resetPage();
+                }}
+              >
+                <SelectTrigger className="h-8 w-[72px] rounded-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PAGE_SIZE_OPTIONS.map((n) => (
+                    <SelectItem key={n} value={String(n)}>
+                      {n}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-2 text-[12px] text-ink-muted">
+              <span className="mono">
+                Page {page} of {Math.max(totalPages, 1)}
               </span>
-              <span>Role</span>
-              <span>Status</span>
-              <span className="text-center">AI score</span>
-              <span>Date</span>
-              <span />
-            </div>
-
-            {isLoading ? (
-              <CandidatesTableSkeleton />
-            ) : isError ? (
-              <div className="flex flex-col items-center gap-2 px-6 py-16 text-center text-[13px] text-[var(--danger)]">
-                Could not load candidates.
-                <button
-                  onClick={() => refetch()}
-                  className="text-primary underline"
-                >
-                  Retry
-                </button>
-              </div>
-            ) : rows.length === 0 ? (
-              <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
-                <span className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-primary">
-                  <Inbox className="h-6 w-6" strokeWidth={1.7} />
-                </span>
-                <h3 className="text-[16px] font-semibold text-ink">
-                  {search.trim() ||
-                  statusFilter !== ALL ||
-                  jobFilter !== ALL
-                    ? "No candidates match"
-                    : "No candidates yet"}
-                </h3>
-                <p className="max-w-[340px] text-[13.5px] text-ink-muted">
-                  {search.trim() ||
-                  statusFilter !== ALL ||
-                  jobFilter !== ALL
-                    ? "Adjust your search or filters to see applicants."
-                    : "Open a job and upload CVs from its Candidates tab to add some."}
-                </p>
-              </div>
-            ) : (
-              <div>
-                {rows.map((row) => (
-                  <CandidateRow
-                    key={row._id}
-                    row={row}
-                    selected={selectedIds.has(row._id)}
-                    jobTitle={jobsById.get(row.jobId)?.title ?? null}
-                    statuses={statuses}
-                    resolvingInterview={
-                      drawerCandidateId === row._id && detailQuery.isLoading
-                    }
-                    statusPending={
-                      statusMutation.isPending &&
-                      statusMutation.variables?.id === row._id
-                    }
-                    onToggle={(c) => toggleOne(row._id, c)}
-                    onOpenCv={() => void handleOpenCv(row._id)}
-                    onOpenInterview={() => openDrawer(row._id)}
-                    onInvite={() => setInviteTarget(row)}
-                    onChangeStatus={(statusKey) =>
-                      statusMutation.mutate({ id: row._id, statusKey })
-                    }
-                    onDelete={() => setDeleteTarget(row)}
-                  />
-                ))}
-              </div>
-            )}
-
-            {/* Pagination footer */}
-            <div className="flex flex-col gap-3 border-t border-line px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-[12px] text-ink-muted">
-                    Rows per page
-                  </span>
-                  <Select
-                    value={String(pageSize)}
-                    onValueChange={(v) => {
-                      setPageSize(Number(v));
-                      resetPage();
-                    }}
-                  >
-                    <SelectTrigger className="h-8 w-[72px] rounded-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PAGE_SIZE_OPTIONS.map((n) => (
-                        <SelectItem key={n} value={String(n)}>
-                          {n}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex items-center gap-2 text-[12px] text-ink-muted">
-                  <span className="mono">
-                    Page {page} of {Math.max(totalPages, 1)}
-                  </span>
-                  {/* Rows stay put via keepPreviousData, so without this a page
+              {/* Rows stay put via keepPreviousData, so without this a page
                       change would feel like nothing happened. */}
-                  {isFetching ? (
-                    <span className="inline-flex items-center gap-1">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      Loading…
-                    </span>
-                  ) : null}
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page <= 1 || isFetching}
-                >
-                  <ChevronLeft className="h-4 w-4" strokeWidth={1.7} />
-                  Previous
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setPage((p) => p + 1)}
-                  disabled={!data?.nextPage || isFetching}
-                >
-                  Next
-                  <ChevronRight className="h-4 w-4" strokeWidth={1.7} />
-                </Button>
-              </div>
+              {isFetching ? (
+                <span className="inline-flex items-center gap-1">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Loading…
+                </span>
+              ) : null}
             </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1 || isFetching}
+            >
+              <ChevronLeft className="h-4 w-4" strokeWidth={1.7} />
+              Previous
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setPage((p) => p + 1)}
+              disabled={!data?.nextPage || isFetching}
+            >
+              Next
+              <ChevronRight className="h-4 w-4" strokeWidth={1.7} />
+            </Button>
+          </div>
+        </div>
       </div>
 
       <ConfirmDialog
@@ -951,10 +963,10 @@ export function CandidatesPage() {
         title={`Delete ${deleteTarget?.fullName || "this candidate"}?`}
         description={
           <>
-            This permanently removes <strong>{deleteTarget?.fullName}</strong>, their
-            CV, and their interview recordings. Any live invite link stops working
-            immediately. The activity timeline is kept as an audit trail.{" "}
-            <strong>This can&apos;t be undone.</strong>
+            This permanently removes <strong>{deleteTarget?.fullName}</strong>,
+            their CV, and their interview recordings. Any live invite link stops
+            working immediately. The activity timeline is kept as an audit
+            trail. <strong>This can&apos;t be undone.</strong>
           </>
         }
         confirmLabel="Delete candidate"
@@ -974,10 +986,10 @@ export function CandidatesPage() {
         title={`Delete ${selectedCount} candidate${selectedCount === 1 ? "" : "s"}?`}
         description={
           <>
-            This permanently removes the <strong>{selectedCount}</strong> selected
-            candidate{selectedCount === 1 ? "" : "s"}, each one&apos;s CV, and their
-            interview recordings. Live invite links stop working immediately.{" "}
-            <strong>This can&apos;t be undone.</strong>
+            This permanently removes the <strong>{selectedCount}</strong>{" "}
+            selected candidate{selectedCount === 1 ? "" : "s"}, each one&apos;s
+            CV, and their interview recordings. Live invite links stop working
+            immediately. <strong>This can&apos;t be undone.</strong>
           </>
         }
         confirmLabel="Delete selected"
@@ -999,10 +1011,10 @@ export function CandidatesPage() {
         description={
           <>
             The CV vetting engine scored{" "}
-            <strong>{inviteTarget?.fullName}</strong> between the auto-invite and
-            auto-reject thresholds, so it parked them at{" "}
-            <strong>Pre-screened</strong> for a human to decide. Inviting them now
-            mints their interview link, emails it, and moves them to{" "}
+            <strong>{inviteTarget?.fullName}</strong> between the auto-invite
+            and auto-reject thresholds, so it parked them at{" "}
+            <strong>Pre-screened</strong> for a human to decide. Inviting them
+            now mints their interview link, emails it, and moves them to{" "}
             <strong>Invited</strong>.
           </>
         }
@@ -1176,12 +1188,13 @@ function CandidateRow({
     <div
       onClick={onOpenInterview}
       className={cn(
-        // `items-start`, not `items-center`: a status cell can stack a
-        // "Reading CV…" / "CV couldn't be read" line under its badge, and
-        // centering pushed the badge above the other columns on those rows.
-        // Top-aligning keeps the badge level with the name and scores; the
-        // extra line just hangs below, like the email under the name.
-        "grid cursor-pointer items-start gap-3 border-b border-line px-5 py-3.5 text-[13.5px] transition-colors last:border-b-0 hover:bg-hover",
+        // `items-center` so every cell sits vertically centered against the
+        // 34px avatar — single-line cells (Role, Status, AI score, Date) would
+        // otherwise top-align and read as "floating up" next to the name block.
+        // On the rare rows that stack a "Reading CV…" / "CV couldn't be read"
+        // line under the status pill, the whole status cell just centers as one
+        // taller block, which stays visually balanced with the rest.
+        "grid cursor-pointer items-center gap-3 border-b border-line px-5 py-3.5 text-[13.5px] transition-colors last:border-b-0 hover:bg-hover",
         ROW_GRID,
         selected && "bg-[var(--accent-softer)]",
       )}
@@ -1332,7 +1345,7 @@ function CandidateRow({
             {canInvite ? (
               <DropdownMenuItem onSelect={onInvite}>
                 <Send className="h-4 w-4" />
-                Send invite
+                Send Interview invite
               </DropdownMenuItem>
             ) : null}
             <DropdownMenuSub>
@@ -1353,8 +1366,7 @@ function CandidateRow({
                       <span
                         className="h-2 w-2 shrink-0 rounded-full"
                         style={{
-                          backgroundColor:
-                            option.color ?? "var(--ink-muted)",
+                          backgroundColor: option.color ?? "var(--ink-muted)",
                         }}
                       />
                       <span className="min-w-0 truncate">{option.label}</span>
