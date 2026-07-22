@@ -1029,12 +1029,9 @@ export function CandidatesPage() {
         title={`Invite ${inviteTarget?.fullName || "this candidate"} to interview?`}
         description={
           <>
-            The CV vetting engine scored{" "}
-            <strong>{inviteTarget?.fullName}</strong> between the auto-invite and
-            auto-reject thresholds, so it parked them at{" "}
-            <strong>Pre-screened</strong> for a human to decide. Inviting them now
-            mints their interview link, emails it, and moves them to{" "}
-            <strong>Invited</strong>.
+            This sends <strong>{inviteTarget?.fullName}</strong> an interview
+            invite. It generates a secure interview link, emails it to them, and
+            moves them to <strong>Invited</strong>.
           </>
         }
         confirmLabel="Send invite"
@@ -1216,19 +1213,19 @@ function CandidateRow({
   // Always offered — the invite endpoint now accepts any status (it only
   // refuses on a closed job / spent attempt cap, with a clear message).
   const canInvite = true;
-  const hasInterview = Boolean(row.latestInterviewId);
   const scoreState = aiScoreState(row.latestInterviewId);
 
   return (
     <div
       onClick={onOpenInterview}
       className={cn(
-        // `items-start`, not `items-center`: a status cell can stack a
-        // "Reading CV…" / "CV couldn't be read" line under its badge, and
-        // centering pushed the badge above the other columns on those rows.
-        // Top-aligning keeps the badge level with the name and scores; the
-        // extra line just hangs below, like the email under the name.
-        "grid cursor-pointer items-start gap-3 border-b border-line px-5 py-3.5 text-[13.5px] transition-colors last:border-b-0 hover:bg-hover",
+        // `items-center` so every cell sits vertically centered against the
+        // 34px avatar, single-line cells (Role, Status, AI score, Date) would
+        // otherwise top-align and read as "floating up" next to the name block.
+        // On the rare rows that stack a "Reading CV…" / "CV couldn't be read"
+        // line under the status pill, the whole status cell just centers as one
+        // taller block, which stays visually balanced with the rest.
+        "grid cursor-pointer items-center gap-3 border-b border-line px-5 py-3.5 text-[13.5px] transition-colors last:border-b-0 hover:bg-hover",
         ROW_GRID,
         selected && "bg-[var(--accent-softer)]",
       )}
@@ -1333,28 +1330,23 @@ function CandidateRow({
         {formatDate(row.createdAt)}
       </span>
 
-      {/* Actions — an explicit "View interview" button plus the kebab menu.
-          The whole row is still clickable, but the button surfaces the primary
-          action the way the admin-dashboard applicants table does. */}
+      {/* Actions, an explicit "View interview" button plus the kebab menu.
+          Always shown: clicking anywhere on the row opens the same drawer
+          (it resolves for rows without an interview yet too), so the button
+          just makes that primary action visible on every row. */}
       <div
         onClick={(e) => e.stopPropagation()}
         className="flex items-center justify-self-end gap-1.5"
       >
-        {hasInterview ? (
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={onOpenInterview}
-            disabled={resolvingInterview}
-          >
-            {resolvingInterview ? (
-              <Loader2 className="animate-spin" />
-            ) : (
-              <Eye />
-            )}
-            View interview
-          </Button>
-        ) : null}
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={onOpenInterview}
+          disabled={resolvingInterview}
+        >
+          {resolvingInterview ? <Loader2 className="animate-spin" /> : <Eye />}
+          View interview
+        </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -1379,7 +1371,7 @@ function CandidateRow({
             {canInvite ? (
               <DropdownMenuItem onSelect={onInvite}>
                 <Send className="h-4 w-4" />
-                Send invite
+                Send Interview invite
               </DropdownMenuItem>
             ) : null}
             <DropdownMenuItem onSelect={onSendEmail}>

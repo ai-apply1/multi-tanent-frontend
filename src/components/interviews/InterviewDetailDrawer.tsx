@@ -53,7 +53,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -1199,7 +1198,6 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                       Send email
                     </DropdownMenuItem>
                   ) : null}
-                  <DropdownMenuSeparator />
                   {data?.scores ? (
                     <DropdownMenuItem
                       onSelect={() => setScoringDetailsOpen(true)}
@@ -1240,7 +1238,6 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                       Reattempt interview
                     </DropdownMenuItem>
                   ) : null}
-                  <DropdownMenuSeparator />
                   {data ? (
                     <DropdownMenuItem
                       className="text-[color:var(--danger)] focus:text-[color:var(--danger)]"
