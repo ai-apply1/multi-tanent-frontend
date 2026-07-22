@@ -1,4 +1,5 @@
 import api from "@/lib/api"
+import type { ThemeFont } from "@/features/organization/types"
 
 /**
  * The org that owns the domain this dashboard is being served from.
@@ -34,6 +35,8 @@ export interface TenantBranding {
      * dashboard's theme, which is a per-viewer toggle in `ThemeContext`.
      */
     mode: "light" | "dark"
+    /** The org's brand typeface, applied app-wide via `--font-sans`. */
+    font: ThemeFont
     primary: string
     secondary: string
     /** A MODE, not a colour: how primary and secondary combine. */

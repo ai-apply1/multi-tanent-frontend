@@ -22,6 +22,7 @@
  */
 
 import { BASIC_AUTH_HEADER } from "@/lib/basicAuth"
+import { API_PREFIX } from "@/lib/apiPrefix"
 
 export interface EncryptedEnvelope {
   iv: string
@@ -131,7 +132,12 @@ async function importPublicKey(jwk: JsonWebKey): Promise<CryptoKey> {
   return crypto.subtle.importKey("jwk", jwk, RSA_OAEP_PARAMS, false, ["encrypt"])
 }
 
-async function fetchPublicKey(): Promise<PublicKeyBundle> {
+const BOOTSTRAP_RETRY_DELAYS_MS = [400, 1200]
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms))
+
+async function attemptPublicKeyFetch(): Promise<PublicKeyBundle> {
   // Native fetch — we can't use the axios instance because that's where
   // this very layer is plugged into. The endpoint is marked
   // `@SkipCrypto()` on the server.
@@ -149,28 +155,47 @@ async function fetchPublicKey(): Promise<PublicKeyBundle> {
   if (BASIC_AUTH_HEADER) headers["Authorization"] = BASIC_AUTH_HEADER
 
   // Resolve the bootstrap URL against VITE_API_BASE_URL the same way
-  // `@/lib/api` does. We inline the one-liner instead of importing
+  // `@/lib/api` does. We inline the base-URL one-liner instead of importing
   // `apiUrl` from there because `@/lib/api` imports THIS module, and a
-  // back-import would create a load-time cycle.
+  // back-import would create a load-time cycle. `API_PREFIX` is safe to import
+  // because it lives in its own zero-import module (no cycle).
   const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001").replace(
     /\/+$/,
     ""
   )
 
-  const res = await fetch(`${apiBaseUrl}/api/v1/crypto/public-key`, {
-    credentials: "include",
-    cache: "no-store",
-    headers,
-    // Native fetch has NO timeout of its own. Against a host that blackholes
-    // packets rather than refusing them (wrong IP, firewall DROP) this never
-    // settles — and since every encrypted request awaits this bootstrap, the
-    // boot `/admin/auth/me` never settles either and the app sits on
-    // FullScreenLoader forever with nothing in the console. Same budget as
-    // the axios instance's JSON timeout; this is a tiny JSON GET.
-    signal: AbortSignal.timeout(BOOTSTRAP_TIMEOUT_MS)
-  })
+  let res: Response
+  try {
+    res = await fetch(`${apiBaseUrl}${API_PREFIX}/crypto/public-key`, {
+      credentials: "include",
+      cache: "no-store",
+      headers,
+      // Native fetch has NO timeout of its own. Against a host that blackholes
+      // packets rather than refusing them (wrong IP, firewall DROP) this never
+      // settles — and since every encrypted request awaits this bootstrap, the
+      // boot `/admin/auth/me` never settles either and the app sits on
+      // FullScreenLoader forever with nothing in the console. Same budget as
+      // the axios instance's JSON timeout; this is a tiny JSON GET.
+      signal: AbortSignal.timeout(BOOTSTRAP_TIMEOUT_MS)
+    })
+  } catch (err) {
+    // Network failure, DNS, an aborted (timed-out) connection, or a CORS
+    // rejection — the browser withholds which. Retryable: a transient blip is
+    // the commonest member of that set.
+    throw Object.assign(
+      new Error(
+        `Could not reach the crypto bootstrap: ${
+          err instanceof Error ? err.message : "network error"
+        }`
+      ),
+      { retryable: true }
+    )
+  }
   if (!res.ok) {
-    throw new Error(`Failed to bootstrap crypto key (HTTP ${res.status})`)
+    throw Object.assign(
+      new Error(`Failed to bootstrap crypto key (HTTP ${res.status})`),
+      { retryable: res.status >= 500 || res.status === 429 }
+    )
   }
   const json = (await res.json()) as { kid: string; jwk: JsonWebKey }
   if (!json?.kid || !json?.jwk) {
@@ -178,6 +203,29 @@ async function fetchPublicKey(): Promise<PublicKeyBundle> {
   }
   const key = await importPublicKey(json.jwk)
   return { kid: json.kid, jwk: json.jwk, key }
+}
+
+/**
+ * The bootstrap, with a short retry on transient failure (5xx/429, a network
+ * blip, or the timeout). A 4xx is a verdict, not a blip — a wrong perimeter
+ * credential — so it is NOT retried and fails fast. Every encrypted request
+ * awaits this, so one dropped packet or a routine backend redeploy would
+ * otherwise take the app down for that admin.
+ */
+async function fetchPublicKey(): Promise<PublicKeyBundle> {
+  let lastError: unknown
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await attemptPublicKeyFetch()
+    } catch (err) {
+      lastError = err
+      const retryable = Boolean((err as { retryable?: boolean })?.retryable)
+      const delay = BOOTSTRAP_RETRY_DELAYS_MS[attempt]
+      if (!retryable || delay === undefined) break
+      await sleep(delay)
+    }
+  }
+  throw lastError
 }
 
 /**

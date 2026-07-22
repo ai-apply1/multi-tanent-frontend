@@ -9,8 +9,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <!-- The curated brand typefaces an org can pick in Branding, plus the mono
+       face. Only the family an org actually selects is downloaded (browsers
+       fetch @font-face lazily per rendered glyph); listing them here just makes
+       every choice available for instant switching. Keep in step with
+       `src/features/organization/fonts.ts`. -->
   <link
-    href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700&family=Roboto:wght@400;500;700&family=Lora:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
     rel="stylesheet" />
   <!-- The PLATFORM's placeholder, not a tenant's. `TenantBrandingProvider`
          replaces this with the org's own name once `GET /org/branding`
@@ -56,12 +61,26 @@
                 }
               }
             } else {
-              var accent = ["--primary", "--primary-foreground", "--brand-secondary", "--btn-fill-end", "--accent-hover", "--accent-active", "--accent-soft", "--accent-softer", "--accent-ring"];
+              var accent = ["--font-sans", "--primary", "--primary-foreground", "--brand-secondary", "--btn-fill-end", "--accent-hover", "--accent-active", "--accent-soft", "--accent-softer", "--accent-ring"];
               for (var i = 0; i < accent.length; i++) {
                 if (typeof vars[accent[i]] === "string") root.style.setProperty(accent[i], vars[accent[i]]);
               }
             }
           }
+        }
+
+        // Replay this org's cached favicon before the CSS bundle loads, so a
+        // returning viewer's tab already shows the employer's icon instead of
+        // flashing a blank/platform one until `DocumentBranding` runs. Written
+        // per host by `applyFavicon`'s cache. The href regex is a guard: only a
+        // data-image or http(s) URL is trusted, never a `javascript:` href a
+        // poisoned localStorage could smuggle in.
+        var icon = localStorage.getItem("admin-favicon:" + location.hostname.toLowerCase());
+        if (icon && /^(data:image\/|https?:\/\/)/.test(icon)) {
+          var link = document.querySelector("link[rel~='icon']") ||
+            document.head.appendChild(Object.assign(document.createElement("link"), { rel: "icon" }));
+          link.href = icon;
+          link.removeAttribute("type");
         }
       } catch (e) {}
     })();

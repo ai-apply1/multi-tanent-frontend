@@ -84,7 +84,20 @@ export function DocumentBranding() {
   useEffect(() => {
     // Empty -> the org has no favicon of its own; restore the platform icon
     // rather than leaving the previous tenant's behind.
-    applyFavicon(faviconUrl || PLATFORM_FAVICON)
+    const href = faviconUrl || PLATFORM_FAVICON
+    applyFavicon(href)
+    // Cache per host so the inline boot script in index.html can replay it
+    // BEFORE React mounts — otherwise the tab flashes a blank/platform icon on
+    // every load until auth + branding resolve. Mirrors the screening app and
+    // the theme-var cache next to it. Keyed by hostname (the org this domain
+    // fronts), the only identifier the pre-module boot script has.
+    try {
+      const key = "admin-favicon:" + location.hostname.toLowerCase()
+      if (href) localStorage.setItem(key, href)
+      else localStorage.removeItem(key)
+    } catch {
+      /* private mode: the icon just isn't cached for next load */
+    }
   }, [faviconUrl])
 
   // Re-apply when the viewer toggles mode: which slice of the palette lands

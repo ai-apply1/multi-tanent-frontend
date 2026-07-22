@@ -6,13 +6,11 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
-import toast from "react-hot-toast"
 import {
   Bell,
   Briefcase,
   CheckCircle2,
   Loader2,
-  LogOut,
   Moon,
   Search,
   Sun,
@@ -27,8 +25,6 @@ import { MobileNavTrigger } from "@/components/layout/Sidebar"
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Sheet, SheetClose, SheetContent } from "@/components/ui/sheet"
@@ -161,7 +157,7 @@ function NotificationsSkeleton() {
  * notification bell, and the profile dropdown.
  */
 export function TopBar() {
-  const { user, logout } = useAuth()
+  const { user } = useAuth()
   const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -244,17 +240,6 @@ export function TopBar() {
     window.addEventListener("keydown", handleKey)
     return () => window.removeEventListener("keydown", handleKey)
   }, [])
-
-  const handleSignOut = async () => {
-    try {
-      await logout()
-      toast.success("Signed out.")
-    } catch {
-      toast.error("Signed out locally, but the server session may still be active.")
-    } finally {
-      navigate(ROUTES.LOGIN, { replace: true })
-    }
-  }
 
   const rendered = useMemo(
     () =>
@@ -472,25 +457,6 @@ export function TopBar() {
                 {rolePill}
               </span>
             </div>
-            <DropdownMenuSeparator />
-            {/* <DropdownMenuItem onSelect={(event) => event.preventDefault()}>
-              <User className="h-3.5 w-3.5" strokeWidth={1.7} />
-              Your profile
-            </DropdownMenuItem> */}
-            <DropdownMenuItem onSelect={() => navigate(ROUTES.SETTINGS)}>
-              <Bell className="h-3.5 w-3.5" strokeWidth={1.7} />
-              Notification settings
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onSelect={(event) => {
-                event.preventDefault()
-                void handleSignOut()
-              }}
-            >
-              <LogOut className="h-3.5 w-3.5" strokeWidth={1.7} />
-              Sign out
-            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

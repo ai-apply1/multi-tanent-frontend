@@ -93,16 +93,16 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const isOrgAdmin = user?.role === "org_admin"
   const goToItems = useMemo<PaletteItem[]>(() => {
     const raw: Array<Omit<PaletteItem, "onSelect"> & { to: string }> = [
-      { id: "go-overview", icon: LayoutGrid, title: "Overview", sub: "Pipeline dashboard", to: ROUTES.OVERVIEW },
+      { id: "go-overview", icon: LayoutGrid, title: "Dashboard", sub: "Pipeline dashboard", to: ROUTES.OVERVIEW },
       { id: "go-jobs", icon: Briefcase, title: "Jobs", sub: "All postings", to: ROUTES.JOBS },
       { id: "go-jobs-new", icon: Briefcase, title: "Create job", sub: "New draft posting", to: ROUTES.JOB_NEW },
       { id: "go-candidates", icon: Users2, title: "Candidates", sub: "Every applicant", to: ROUTES.CANDIDATES },
-      { id: "go-questions", icon: Library, title: "Question bank", sub: "Screening questions", to: ROUTES.QUESTIONS },
-      { id: "go-pipeline", icon: GitBranch, title: "Pipeline", sub: "Candidate statuses", to: ROUTES.PIPELINE },
+      { id: "go-questions", icon: Library, title: "Questions", sub: "Screening questions", to: ROUTES.QUESTIONS },
+      { id: "go-pipeline", icon: GitBranch, title: "Hiring Pipeline", sub: "Candidate statuses", to: ROUTES.PIPELINE },
       { id: "go-settings", icon: Settings, title: "Settings", sub: "Branding, domains, apply video & email", to: ROUTES.SETTINGS },
     ]
     if (isOrgAdmin) {
-      raw.push({ id: "go-team", icon: UserSquare2, title: "Team", sub: "Manage members", to: ROUTES.TEAM })
+      raw.push({ id: "go-team", icon: UserSquare2, title: "Manage Team", sub: "Manage members", to: ROUTES.TEAM })
     }
     const q = debouncedQuery.toLowerCase()
     const filtered = q

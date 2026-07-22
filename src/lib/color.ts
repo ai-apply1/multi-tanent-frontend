@@ -104,14 +104,18 @@ export const contrastOf = (a: string, b: string): number | null => {
 }
 
 export const WHITE: Rgb = { r: 255, g: 255, b: 255 }
-export const INK: Rgb = { r: 20, g: 16, b: 31 }
+// The dark-ink option, `#111111`. Kept byte-identical to the apply portal's
+// `inkOn` and the screening portal's `readableInk` so the settings preview
+// predicts exactly the near-black candidates get (it used to be `#14101f`, the
+// dark surface tint, which made the "mirror the portal" claim below untrue).
+export const INK: Rgb = { r: 17, g: 17, b: 17 }
 
 /**
  * Readable text on a brand-coloured button. NOT always white: an org can pick
  * `#fbbf24`, and white on amber is illegible.
  */
 export const readableInk = (bg: Rgb): string =>
-  contrast(bg, WHITE) >= contrast(bg, INK) ? "#ffffff" : "#14101f"
+  contrast(bg, WHITE) >= contrast(bg, INK) ? "#ffffff" : "#111111"
 
 /** `readableInk` from a hex string; falls back to white when unparseable. */
 export const readableInkOn = (hex: string): string => {
@@ -132,7 +136,7 @@ export const readableInkOnAll = (hexes: string[]): string => {
   const rgbs = hexes.map(parseHex).filter((c): c is Rgb => c !== null)
   if (rgbs.length === 0) return "#ffffff"
   const worst = (ink: Rgb) => Math.min(...rgbs.map((fill) => contrast(ink, fill)))
-  return worst(WHITE) >= worst(INK) ? "#ffffff" : "#14101f"
+  return worst(WHITE) >= worst(INK) ? "#ffffff" : "#111111"
 }
 
 /**
@@ -176,9 +180,14 @@ export const AA_BODY_CONTRAST = 4.5
  * Is this colour dark enough that a light logo reads better on it than a dark
  * one?
  *
- * THE tenant-portal rule for choosing a logo variant. The candidate portals
- * have no viewer light/dark preference to consult — they render one palette,
- * the org's own — so polarity has to be derived from the canvas colour itself.
+ * Used HERE only for the settings-page contradiction warning: `ThemeCard`
+ * compares `isDarkSurface(background)` against the org's STORED `mode` and warns
+ * when a hand-edit leaves them disagreeing (a "dark" mode over a light canvas).
+ *
+ * NOTE: this is NOT how the candidate portals pick a logo variant anymore. They
+ * switched to the stored `theme.mode` field (see the apply portal's
+ * `logoVariant.ts`), so the luminance derivation below is a UI heuristic for the
+ * warning, not the portal's selection rule. Do not re-point the portals at it.
  *
  * The threshold is relative luminance, not "is it #000-ish": a saturated brand
  * navy and a mid-grey both need the light mark, and both would pass a naive

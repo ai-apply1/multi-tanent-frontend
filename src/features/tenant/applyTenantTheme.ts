@@ -37,6 +37,7 @@
  */
 
 import { isHexColor, readableInkOnAll } from "@/lib/color"
+import { fontStackFor } from "@/features/organization/fonts"
 import type { OrganizationTheme, ThemeMode } from "@/features/organization/types"
 
 /** Darken toward black — the pressed/hover step derived from a brand primary. */
@@ -69,6 +70,12 @@ export const buildBrandVars = (
   viewerMode: ThemeMode,
 ): Record<string, string> => {
   const vars: Record<string, string> = { "--applied-polarity": viewerMode }
+
+  // ── Brand typeface — ALWAYS applied, polarity-independent ────────────
+  // Drives `--font-sans`, which `body { font-family }` already reads, so the
+  // org's chosen font replaces the dashboard default app-wide. Not gated on a
+  // valid primary: a font is independent of the colour palette.
+  vars["--font-sans"] = fontStackFor(theme.font)
 
   // ── Accent-safe subset — ALWAYS applied, in either polarity ──────────
   // Needs a valid primary; without one there is no brand to paint and the
@@ -177,6 +184,7 @@ export const buildBrandVars = (
  */
 const PROBE_THEME: OrganizationTheme = {
   mode: "light",
+  font: "jakarta",
   primary: "#000000",
   secondary: "#000000",
   accent: "gradient",

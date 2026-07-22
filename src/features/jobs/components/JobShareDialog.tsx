@@ -78,7 +78,7 @@ export function JobShareDialog({ jobId, open, onOpenChange }: JobShareDialogProp
         }
         if (next.has(lower)) continue
         if (merged.length >= MAX_EMAILS) {
-          toast.error(`Limit reached — up to ${MAX_EMAILS} emails per send.`)
+          toast.error(`Limit reached. Up to ${MAX_EMAILS} emails per send.`)
           break
         }
         next.add(lower)

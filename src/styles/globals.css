@@ -233,7 +233,11 @@
   --radius-xl: 16px;
   --radius-pill: 999px;
 
-  --font-sans: "Outfit", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+  /* Platform default typeface for the first paint before branding resolves.
+     `applyTenantTheme` overrides `--font-sans` with the org's chosen font (this
+     is the default, Plus Jakarta Sans, so an unbranded paint already matches
+     the default brand font). See src/features/organization/fonts.ts. */
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
     sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }

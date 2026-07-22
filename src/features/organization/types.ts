@@ -179,6 +179,20 @@ export type ThemeAccentMode = "gradient" | "solid"
 export type ThemeMode = "light" | "dark"
 
 /**
+ * The org's brand typeface, applied across every portal (screening, apply, this
+ * dashboard). A curated set the platform ships and can render, NOT free text.
+ * The ids are a wire contract with the backend `ThemeFont` enum; the concrete
+ * font-family stack for each lives in `fonts.ts`.
+ */
+export type ThemeFont =
+  | "jakarta"
+  | "inter"
+  | "poppins"
+  | "montserrat"
+  | "roboto"
+  | "lora"
+
+/**
  * The org's palette, as stored. Every colour is a hex string the backend
  * normalises to lower case on write, so compare case-insensitively when
  * diffing (see `sameColor` in OrgSettingsPage).
@@ -201,6 +215,8 @@ export interface OrganizationTheme {
    * warns when a hand-edit leaves them contradicting each other.
    */
   mode: ThemeMode
+  /** Brand typeface, applied across every portal. See `ThemeFont`. */
+  font: ThemeFont
   primary: string
   secondary: string
   accent: ThemeAccentMode

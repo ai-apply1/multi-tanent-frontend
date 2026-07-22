@@ -22,6 +22,46 @@ export const ROUTES = {
   TEAM: "/dashboard/team",
 } as const;
 
+/**
+ * The Settings page's sub-sections. The page renders these as in-card tabs
+ * driven by a `?tab=` query param, and the sidebar's Settings dropdown links
+ * straight to each one. Defined here so the page and the sidebar share ONE
+ * list of ids + labels rather than drifting apart.
+ */
+export type SettingsTabId =
+  | "general"
+  | "branding"
+  | "domains"
+  | "video"
+  | "defaults"
+  | "platform"
+  | "notifications";
+
+export const SETTINGS_TABS: ReadonlyArray<{ id: SettingsTabId; label: string }> =
+  [
+    { id: "general", label: "General" },
+    { id: "branding", label: "Branding" },
+    { id: "domains", label: "Domains" },
+    { id: "video", label: "Apply video" },
+    { id: "defaults", label: "Interview defaults" },
+    { id: "platform", label: "Platform" },
+    { id: "notifications", label: "My notifications" },
+  ];
+
+export const DEFAULT_SETTINGS_TAB: SettingsTabId = "general";
+
+const SETTINGS_TAB_IDS = new Set<string>(SETTINGS_TABS.map((t) => t.id));
+
+/** Narrow an untrusted `?tab=` value to a real tab id (falls back to default). */
+export const asSettingsTab = (value: string | null | undefined): SettingsTabId =>
+  value && SETTINGS_TAB_IDS.has(value)
+    ? (value as SettingsTabId)
+    : DEFAULT_SETTINGS_TAB;
+
+/** Deep link into a specific Settings tab, e.g. the sidebar dropdown. */
+export const settingsTab = (id: SettingsTabId): string =>
+  `${ROUTES.SETTINGS}?tab=${id}`;
+
 // Builders for the `:jobId` routes above. The pattern constants are what
 // `<Route path>` wants; these are what every `navigate()` / `<Link to>`
 // wants — so the param is interpolated in exactly one place per route.
