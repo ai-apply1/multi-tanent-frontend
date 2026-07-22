@@ -659,37 +659,44 @@ function BasicsStep({
           {titleError ? <p className={ERROR_CLASS}>{titleError}</p> : null}
         </div>
         <div>
-          <div className="mb-1.5 flex items-center justify-between gap-2">
+          {/* Label + Write/Preview toggle share one vertically-centered row. */}
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <label
               htmlFor="job-description"
-              className="block text-[13px] font-semibold text-ink"
+              className="text-[13px] font-semibold text-ink"
             >
               Description
             </label>
-            {/* Write / Preview toggle — lets HR see the rendered markdown
-                (same react-markdown pipeline the candidate ultimately sees via
-                `Markdown`) before creating the job. */}
-            <div className="inline-flex rounded-md border border-[var(--field-border)] bg-surface p-0.5 text-[12px] font-medium">
+            {/* Write / Preview segmented control — lets HR see the rendered
+                markdown (same react-markdown pipeline the candidate ultimately
+                sees via `Markdown`) before creating the job. */}
+            <div
+              role="tablist"
+              aria-label="Description editor mode"
+              className="inline-flex items-center gap-1 rounded-lg border border-[var(--field-border)] bg-surface-3 p-1 text-[12px] font-semibold"
+            >
               <button
                 type="button"
+                role="tab"
                 onClick={() => setShowPreview(false)}
-                aria-pressed={!showPreview}
-                className={`rounded px-2.5 py-1 transition-colors ${
+                aria-selected={!showPreview}
+                className={`rounded-md px-3 py-1 transition-colors ${
                   !showPreview
-                    ? "bg-primary text-white"
-                    : "text-ink-muted hover:text-ink"
+                    ? "bg-primary text-white shadow-sm"
+                    : "text-ink-muted hover:bg-surface hover:text-ink"
                 }`}
               >
                 Write
               </button>
               <button
                 type="button"
+                role="tab"
                 onClick={() => setShowPreview(true)}
-                aria-pressed={showPreview}
-                className={`rounded px-2.5 py-1 transition-colors ${
+                aria-selected={showPreview}
+                className={`rounded-md px-3 py-1 transition-colors ${
                   showPreview
-                    ? "bg-primary text-white"
-                    : "text-ink-muted hover:text-ink"
+                    ? "bg-primary text-white shadow-sm"
+                    : "text-ink-muted hover:bg-surface hover:text-ink"
                 }`}
               >
                 Preview
