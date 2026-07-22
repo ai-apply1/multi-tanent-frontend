@@ -1141,7 +1141,7 @@ export function OrgSettingsPage() {
           <input
             id="org-industry"
             className={cn(inputBase, "cursor-not-allowed bg-ink-faint")}
-            value={org.industry || "—"}
+            value={org.industry || "-"}
             readOnly
             disabled
           />

@@ -16,6 +16,7 @@ import {
   FileText,
   History,
   Loader2,
+  Mail,
   MailPlus,
   Maximize,
   MessageSquare,
@@ -34,6 +35,7 @@ import {
 import { errorMessage } from "@/lib/errors";
 import { cn } from "@/lib/utils";
 import { ScoringDetailsDialog } from "@/components/interviews/ScoringDetailsDialog";
+import { BulkEmailDialog } from "@/features/candidates/components/BulkEmailDialog";
 import {
   HlsPlayer,
   type VideoPlayerHandle,
@@ -602,7 +604,7 @@ function PipelineCard({
               <strong className="font-bold">
                 {recommendation === "no" ? "No Hire" : "Hire"}
               </strong>
-              . Your confirmation is required — nothing advances automatically.
+              . Your confirmation is required, nothing advances automatically.
             </p>
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -672,7 +674,7 @@ function PipelineCard({
             strokeWidth={2.2}
           />
           <span className="text-[13px] font-semibold">
-            Candidate hired — welcome aboard!
+            Candidate hired, welcome aboard!
           </span>
         </div>
       ) : null}
@@ -865,6 +867,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   const [statusPending, setStatusPending] = useState(false);
   const [confirmDeleteInterview, setConfirmDeleteInterview] = useState(false);
   const [confirmDeleteCandidate, setConfirmDeleteCandidate] = useState(false);
+  const [emailOpen, setEmailOpen] = useState(false);
 
   const handleRetranscode = async () => {
     if (!activeSessionId) return;
@@ -893,8 +896,8 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
       setScoringInFlight(true);
       toast.success(
         res.alreadyQueued
-          ? "Scoring is already running — watching for it to finish."
-          : "Rescoring queued — scores will refresh here once the pipeline finishes.",
+          ? "Scoring is already running, watching for it to finish."
+          : "Rescoring queued, scores will refresh here once the pipeline finishes.",
       );
     } catch (err) {
       toast.error(errorMessage(err, "Could not queue rescoring."));
@@ -1190,6 +1193,12 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                     <Send className="h-3.5 w-3.5" strokeWidth={1.7} />
                     Resend invite
                   </DropdownMenuItem>
+                  {candidateId ? (
+                    <DropdownMenuItem onSelect={() => setEmailOpen(true)}>
+                      <Mail className="h-3.5 w-3.5" strokeWidth={1.7} />
+                      Send email
+                    </DropdownMenuItem>
+                  ) : null}
                   <DropdownMenuSeparator />
                   {data?.scores ? (
                     <DropdownMenuItem
@@ -1369,8 +1378,8 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                       <p className="inline-flex items-center gap-2">
                         <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
                         {scoringStatus === "queued"
-                          ? "Scoring is queued — results will appear here as soon as the pipeline runs."
-                          : "Scoring in progress — results will appear here automatically."}
+                          ? "Scoring is queued, results will appear here as soon as the pipeline runs."
+                          : "Scoring in progress, results will appear here automatically."}
                       </p>
                     ) : scoringStatus === "failed" ||
                       scoringStatus === "needs_review" ? (
@@ -1392,7 +1401,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                           <span>
                             {scoringStatus === "needs_review"
-                              ? "Needs human review — we couldn't reliably transcribe one or more answers"
+                              ? "Needs human review, we couldn't reliably transcribe one or more answers"
                               : "The last scoring run failed"}
                             {scoringError ? `: ${scoringError}` : "."}
                           </span>
@@ -1537,7 +1546,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                           <TabScoringInProgress
                             status={scoringStatus}
                             scoringError={scoringError}
-                            messageOverride="Transcript pending — it's generated after the recording is transcribed."
+                            messageOverride="Transcript pending, it's generated after the recording is transcribed."
                           />
                         )}
                       </section>
@@ -1625,6 +1634,15 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
         loading={deleteCandidateMutation.isPending}
         onConfirm={() => deleteCandidateMutation.mutate()}
       />
+
+      {candidateId ? (
+        <BulkEmailDialog
+          open={emailOpen}
+          onOpenChange={setEmailOpen}
+          candidateIds={[candidateId]}
+          recipientLabel={data?.candidateName || "this candidate"}
+        />
+      ) : null}
     </>
   );
 }
@@ -1704,7 +1722,7 @@ function TabScoringInProgress({
     messageOverride ??
     (isRunning
       ? status === "queued"
-        ? "Scoring is queued — results will appear here as soon as the pipeline runs."
+        ? "Scoring is queued, results will appear here as soon as the pipeline runs."
         : "Scoring in progress…"
       : status === "failed"
         ? `The last scoring run failed${scoringError ? `: ${scoringError}` : "."}`
@@ -2012,7 +2030,7 @@ function ResponsesTab({
             const timeLabel =
               typeof q.askedAtSec === "number"
                 ? formatClock(q.askedAtSec)
-                : "—";
+                : "-";
             return (
               <button
                 key={q.questionId || i}

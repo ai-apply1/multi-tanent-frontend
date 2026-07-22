@@ -342,7 +342,7 @@ export function VideoPlayer({
       setHasError(true)
       setDownload(null)
       setIsLoading(false)
-      // eslint-disable-next-line no-console
+       
       console.error("[video-player] failed to fetch recording", err)
     })
 
@@ -1029,7 +1029,7 @@ export function VideoPlayer({
           <span className="ml-1 select-none font-mono text-[11px] tabular-nums text-white/80">
             {formatTime(currentTime)}
             <span className="mx-1 text-white/40">/</span>
-            {duration ? formatTime(duration) : "—:—"}
+            {duration ? formatTime(duration) : "0:00"}
           </span>
 
           <div className="flex-1" />

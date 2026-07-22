@@ -55,12 +55,12 @@ function w(n: number): string {
 }
 
 function pct(n?: number | null): string {
-  if (n == null || Number.isNaN(n)) return "—"
+  if (n == null || Number.isNaN(n)) return "-"
   return `${Math.round(n * 100)}%`
 }
 
 function secs(n?: number | null): string {
-  if (n == null || Number.isNaN(n)) return "—"
+  if (n == null || Number.isNaN(n)) return "-"
   if (n < 60) return `${Math.round(n)}s`
   const m = Math.floor(n / 60)
   const rem = Math.round(n % 60)
@@ -274,10 +274,10 @@ export function ScoringDetailsDialog({
       <DialogContent className="max-w-[620px]">
         <DialogHeader>
           <DialogTitle className="text-[18px] font-semibold text-ink">
-            {displayName} — Scoring
+            {displayName}, Scoring
           </DialogTitle>
           <DialogDescription className="text-[13px] text-ink-muted leading-relaxed">
-            How {firstName}&apos;s scores were computed — every metric and how
+            How {firstName}&apos;s scores were computed, every metric and how
             they combine. The AI only judges; every number that gates the
             verdict is computed in deterministic code.
           </DialogDescription>
@@ -326,7 +326,7 @@ export function ScoringDetailsDialog({
                   note={
                     folded
                       ? "Spoken English leads; substance is a low-end floor (g) that crushes fluent-but-empty answers toward 0."
-                      : "Fluency was not folded in — communication is the per-answer substance mean (structure / clarity / concision)."
+                      : "Fluency was not folded in, communication is the per-answer substance mean (structure / clarity / concision)."
                   }
                 />
                 <div className="grid grid-cols-2 gap-2">
@@ -388,7 +388,7 @@ export function ScoringDetailsDialog({
                   }
                   note={
                     fluency.temporalScore == null
-                      ? "Too little clean speech for temporal metrics — fluency is the spoken-language judge alone."
+                      ? "Too little clean speech for temporal metrics, fluency is the spoken-language judge alone."
                       : undefined
                   }
                 />
@@ -443,7 +443,7 @@ export function ScoringDetailsDialog({
                     <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle">
                       Spoken-language judge
                       <span className="ml-1 normal-case tracking-normal font-normal text-ink-muted">
-                        (accent-guarded — “clear” means intelligible, not
+                        (accent-guarded, “clear” means intelligible, not
                         native-sounding)
                       </span>
                     </p>
@@ -486,7 +486,7 @@ export function ScoringDetailsDialog({
               </div>
             ) : (
               <p className="rounded-lg border border-dashed border-line-2 bg-surface p-3 text-[13px] text-ink-muted leading-relaxed">
-                Fluency wasn&apos;t scored for this interview — either there was
+                Fluency wasn&apos;t scored for this interview, either there was
                 no scorable speech, or the fold was turned off. Communication is
                 the substance mean alone.
               </p>
@@ -546,7 +546,7 @@ export function ScoringDetailsDialog({
                   </p>
                   <p className="mt-0.5 text-[10.5px] leading-tight text-ink-subtle">
                     {integrity.score < 6
-                      ? "flag — human review"
+                      ? "flag, human review"
                       : "flag-only, never auto-fails"}
                   </p>
                 </div>

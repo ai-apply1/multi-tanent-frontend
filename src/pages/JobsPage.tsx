@@ -530,7 +530,7 @@ function JobClassification({ job }: { job: JobListItem }) {
   ].filter((c): c is string => Boolean(c));
 
   if (chips.length === 0) {
-    return <span className="text-ink-subtle">—</span>;
+    return <span className="text-ink-subtle">-</span>;
   }
   return (
     <div className="flex flex-wrap items-center gap-1.5">

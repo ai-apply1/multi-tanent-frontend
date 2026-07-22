@@ -344,8 +344,8 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
   };
 
   const subCopy = isEdit
-    ? `Step ${step + 1} of ${STEPS.length} — update the posting, its scoring split and its vetting rules.`
-    : `Step ${step + 1} of ${STEPS.length} — saved as a draft; add questions and publish next.`;
+    ? `Step ${step + 1} of ${STEPS.length}, update the posting, its scoring split and its vetting rules.`
+    : `Step ${step + 1} of ${STEPS.length}, saved as a draft; add questions and publish next.`;
 
   return (
     <div className="mx-auto max-w-[1080px] px-6 py-6 lg:px-8 lg:py-8">
@@ -979,7 +979,7 @@ function EligibilityStep({
               />
             ) : null}
             <p className={HELP_CLASS}>
-              A hard gate — pick “Any city” for no city requirement.
+              A hard gate, pick “Any city” for no city requirement.
             </p>
           </div>
           <div>

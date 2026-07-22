@@ -13,9 +13,9 @@
 
 /** Date only — "Mar 4, 2026". For "when did this happen" columns. */
 export function formatDate(value?: string | null): string {
-  if (!value) return "—";
+  if (!value) return "-";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
+  if (Number.isNaN(date.getTime())) return "-";
   return date.toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
@@ -25,9 +25,9 @@ export function formatDate(value?: string | null): string {
 
 /** Date + time — "Mar 04, 2026, 09:15 AM". For audit-ish columns. */
 export function formatDateTime(value?: string | null): string {
-  if (!value) return "—";
+  if (!value) return "-";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
+  if (Number.isNaN(date.getTime())) return "-";
   return date.toLocaleString(undefined, {
     year: "numeric",
     month: "short",

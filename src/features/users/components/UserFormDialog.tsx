@@ -59,10 +59,10 @@ const USER_NAME_HINT_LONG =
 
 /** Role options with the descriptive labels the design ships with. */
 const ROLE_OPTIONS: Array<{ value: UserRole; label: string }> = [
-  { value: "hr", label: "HR — gets everything except team & org settings" },
+  { value: "hr", label: "HR, gets everything except team & org settings" },
   {
     value: "org_admin",
-    label: "Org admin — manages the team and org settings",
+    label: "Org admin, manages the team and org settings",
   },
 ];
 
@@ -73,10 +73,10 @@ const ROLE_OPTIONS: Array<{ value: UserRole; label: string }> = [
  */
 function errorHint(message: string): string | null {
   if (/seat/i.test(message)) {
-    return "Seat counts are set by the platform admin — you can deactivate an existing member to free a seat, or ask them to raise the limit.";
+    return "Seat counts are set by the platform admin, you can deactivate an existing member to free a seat, or ask them to raise the limit.";
   }
   if (/(already|taken|duplicate|in use|registered)/i.test(message)) {
-    return "That email or username is already used by a member of your organization — reactivate the existing member (they may be deactivated) or pick a different value.";
+    return "That email or username is already used by a member of your organization, reactivate the existing member (they may be deactivated) or pick a different value.";
   }
   return null;
 }
@@ -241,7 +241,7 @@ export function UserFormDialog({
               <DialogDescription className="mt-1.5 text-[13px] leading-relaxed text-ink-muted">
                 {isEdit
                   ? "Update this member's role or status."
-                  : "They get an account straight away — a temporary password is generated and emailed to them."}
+                  : "They get an account straight away, a temporary password is generated and emailed to them."}
               </DialogDescription>
             </div>
           </div>
@@ -376,7 +376,7 @@ export function UserFormDialog({
               </Select>
               {isSelf ? (
                 <p className="mt-1.5 text-[12px] text-ink-muted">
-                  You can't change your own role — ask another org admin to do
+                  You can't change your own role, ask another org admin to do
                   it.
                 </p>
               ) : null}
@@ -427,7 +427,7 @@ export function UserFormDialog({
                   <Info className="h-4 w-4" strokeWidth={1.7} />
                 </span>
                 <p className="text-[12.5px] leading-relaxed text-ink-2">
-                  No password to set — a temporary one is generated and emailed
+                  No password to set, a temporary one is generated and emailed
                   on save. They can change it after signing in.
                 </p>
               </div>

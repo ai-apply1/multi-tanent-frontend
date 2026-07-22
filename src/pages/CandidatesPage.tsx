@@ -21,6 +21,7 @@ import {
   Inbox,
   Loader2,
   Loader,
+  Mail,
   MoreVertical,
   RefreshCw,
   Search,
@@ -52,6 +53,7 @@ import {
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { InterviewDetailDrawer } from "@/components/interviews/InterviewDetailDrawer";
+import { BulkEmailDialog } from "@/features/candidates/components/BulkEmailDialog";
 import {
   deleteCandidate,
   exportCandidatesCsv,
@@ -140,7 +142,7 @@ function isProcessing(row: CandidateListItem): boolean {
 /** Two initials, uppercased. Empty string collapses to a single dash. */
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "—";
+  if (parts.length === 0) return "-";
   return parts
     .slice(0, 2)
     .map((p) => p[0]?.toUpperCase() ?? "")
@@ -187,6 +189,14 @@ export function CandidatesPage() {
   const [inviteTarget, setInviteTarget] = useState<CandidateListItem | null>(
     null,
   );
+  // Drives the compose-email dialog for BOTH a multi-select send (fromSelection)
+  // and a single row. `ids` snapshots the recipients so the dialog keeps them
+  // through its close animation.
+  const [emailState, setEmailState] = useState<{
+    ids: string[];
+    label: string;
+    fromSelection: boolean;
+  } | null>(null);
   const [exporting, setExporting] = useState(false);
 
   // The candidate whose interview the drawer shows, read straight from the URL
@@ -453,7 +463,7 @@ export function CandidatesPage() {
     mutationFn: (id: string) => sendCandidateInvite(id),
     onSuccess: (res) => {
       toast.success(
-        `Invite sent — attempt ${res.attemptNumber}, link expires ${formatDate(
+        `Invite sent, attempt ${res.attemptNumber}, link expires ${formatDate(
           res.expiresAt,
         )}.`,
       );
@@ -562,7 +572,7 @@ export function CandidatesPage() {
     ? `Candidates · ${selectedJob.title}`
     : "Candidates";
   const subtitle = routeJobId
-    ? "Applicants for this job — CVs, pre-screen verdicts, interview results and funnel stage."
+    ? "Applicants for this job, CVs, pre-screen verdicts, interview results and funnel stage."
     : "Every applicant across your jobs CVs, pre-screen verdicts, interview results, and where each one sits in the funnel.";
   const cardTitle = selectedJob ? "Applicants" : "All candidates";
   const cardSubline =
@@ -753,6 +763,20 @@ export function CandidatesPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() =>
+                      setEmailState({
+                        ids: Array.from(selectedIds),
+                        label: `${selectedCount} candidate${selectedCount === 1 ? "" : "s"}`,
+                        fromSelection: true,
+                      })
+                    }
+                  >
+                    <Mail className="h-4 w-4" strokeWidth={1.7} />
+                    Send email
+                  </Button>
+                  <Button
                     variant="danger"
                     size="sm"
                     disabled={bulkDeleteMutation.isPending}
@@ -781,7 +805,7 @@ export function CandidatesPage() {
                   <strong className="font-semibold text-ink">
                     {processingCount} CV{processingCount === 1 ? " is" : "s are"} still being read.
                   </strong>{" "}
-                  Their status updates once the AI finishes — this table won&apos;t update on
+                  Their status updates once the AI finishes. This table won&apos;t update on
                   its own, so hit Refresh in a moment to see the result.
                 </p>
                 <Button
@@ -871,6 +895,13 @@ export function CandidatesPage() {
                     onOpenCv={() => void handleOpenCv(row._id)}
                     onOpenInterview={() => openDrawer(row._id)}
                     onInvite={() => setInviteTarget(row)}
+                    onSendEmail={() =>
+                      setEmailState({
+                        ids: [row._id],
+                        label: row.fullName || "this candidate",
+                        fromSelection: false,
+                      })
+                    }
                     onChangeStatus={(statusKey) =>
                       statusMutation.mutate({ id: row._id, statusKey })
                     }
@@ -1014,6 +1045,20 @@ export function CandidatesPage() {
         }}
       />
 
+      <BulkEmailDialog
+        open={emailState !== null}
+        onOpenChange={(open) => {
+          if (!open) setEmailState(null);
+        }}
+        candidateIds={emailState?.ids ?? []}
+        recipientLabel={emailState?.label ?? ""}
+        onSent={() => {
+          // A send launched from the multi-select bar clears the selection;
+          // a single-row send leaves any selection untouched.
+          if (emailState?.fromSelection) setSelectedIds(new Set());
+        }}
+      />
+
       {/* `candidateId` is passed alongside `sessionId` so the drawer opens
           for rows without an interview yet — rejected pre-screens, invited
           but not started, etc. Otherwise those clicks silently no-op'd
@@ -1149,6 +1194,7 @@ function CandidateRow({
   onOpenCv,
   onOpenInterview,
   onInvite,
+  onSendEmail,
   onChangeStatus,
   onDelete,
 }: {
@@ -1162,6 +1208,7 @@ function CandidateRow({
   onOpenCv: () => void;
   onOpenInterview: () => void;
   onInvite: () => void;
+  onSendEmail: () => void;
   onChangeStatus: (statusKey: string) => void;
   onDelete: () => void;
 }) {
@@ -1209,7 +1256,7 @@ function CandidateRow({
             className="block truncate font-bold text-ink"
             title={row.fullName}
           >
-            {row.fullName || "—"}
+            {row.fullName || "-"}
           </span>
           <span
             className="block truncate text-[11.5px] text-ink-subtle"
@@ -1272,7 +1319,7 @@ function CandidateRow({
             ) : null}
           </span>
         ) : (
-          <span className="text-ink-muted">—</span>
+          <span className="text-ink-muted">-</span>
         )}
       </span>
 
@@ -1335,6 +1382,10 @@ function CandidateRow({
                 Send invite
               </DropdownMenuItem>
             ) : null}
+            <DropdownMenuItem onSelect={onSendEmail}>
+              <Mail className="h-4 w-4" />
+              Send email
+            </DropdownMenuItem>
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>Change status</DropdownMenuSubTrigger>
               {/* Capped + scrollable: a long custom pipeline must not tower
