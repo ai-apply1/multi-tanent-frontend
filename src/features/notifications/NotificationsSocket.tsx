@@ -46,6 +46,7 @@ const SOCKET_PATH = import.meta.env.VITE_SOCKET_PATH ?? "/socket.io"
 export function NotificationsSocket() {
   const { user } = useAuth()
   const userId = user?.id ?? null
+  const organizationId = user?.organizationId ?? null
   const queryClient = useQueryClient()
 
   useEffect(() => {
@@ -55,6 +56,11 @@ export function NotificationsSocket() {
       path: SOCKET_PATH,
       withCredentials: true,
       transports: ["websocket", "polling"],
+      // Name our org on the handshake. The browser sends EVERY org's session
+      // cookie to the shared backend host, so the server needs this hint to
+      // read the right one (the token inside is still verified, so this only
+      // selects a cookie we already hold, it never grants access).
+      auth: { organizationId },
       // socket.io reconnects by default; cap the backoff so a flaky network
       // doesn't drift into minute-long gaps.
       reconnectionDelayMax: 10_000,
@@ -86,7 +92,7 @@ export function NotificationsSocket() {
       socket.removeAllListeners()
       socket.disconnect()
     }
-  }, [userId, queryClient])
+  }, [userId, organizationId, queryClient])
 
   return null
 }
