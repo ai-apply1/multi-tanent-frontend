@@ -1078,7 +1078,10 @@ export function ThemeCard({
 
           <div
             className="mt-3 rounded-xl border border-line p-4"
-            style={{ background: value.background }}
+            // Drive the whole candidate mock in the SELECTED font (inherited by
+            // every child), so this preview updates with the Typeface picker the
+            // same way the colours below already track the palette.
+            style={{ background: value.background, fontFamily: selectedFont.stack }}
           >
             <div
               className="rounded-xl p-4"
