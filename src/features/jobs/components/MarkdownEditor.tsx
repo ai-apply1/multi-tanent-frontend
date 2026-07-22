@@ -228,8 +228,7 @@ export function MarkdownEditor({
       )}
 
       <p className="mt-1.5 text-[12px] text-ink-muted">
-        Markdown supported. Max {maxLength} characters. {value.length}/
-        {maxLength}
+        Max {maxLength} characters. {value.length}/{maxLength}
       </p>
     </div>
   );
