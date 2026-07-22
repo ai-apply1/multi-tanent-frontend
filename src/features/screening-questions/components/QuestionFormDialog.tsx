@@ -285,13 +285,31 @@ export function QuestionFormDialog({
         return
       }
       setDrafts(kept)
-      setDraftSel({})
+      // Select every fresh draft by default, so "Add selected variants" adds
+      // them all in one click. Untick any you don't want.
+      setDraftSel(Object.fromEntries(kept.map((_, i) => [i, true])))
       toast.success(
-        `Drafted ${kept.length} wording${kept.length === 1 ? "" : "s"} — pick the ones worth keeping.`
+        `Drafted ${kept.length} wording${kept.length === 1 ? "" : "s"}, all selected. Untick any you don't want.`
       )
     },
     onError: (err) => toast.error(apiError(err, "Could not draft variants."))
   })
+
+  /** How many pool drafts are currently ticked. */
+  const selectedDraftCount = drafts.reduce(
+    (n, _, i) => (draftSel[i] ? n + 1 : n),
+    0
+  )
+  const allDraftsSelected =
+    drafts.length > 0 && selectedDraftCount === drafts.length
+
+  /** Tick every draft at once, or clear them all if they're already all ticked. */
+  const toggleSelectAllDrafts = () =>
+    setDraftSel(
+      allDraftsSelected
+        ? {}
+        : Object.fromEntries(drafts.map((_, i) => [i, true]))
+    )
 
   const acceptSelectedDrafts = () => {
     const picked = drafts.filter((_, i) => draftSel[i])
@@ -299,14 +317,16 @@ export function QuestionFormDialog({
       toast("Tick at least one wording to add.")
       return
     }
+    // `room` caps what actually fits; report what landed, not what was ticked.
+    const added = picked.slice(0, Math.max(room, 0))
     setVariants((prev) => [
       ...prev,
-      ...picked.slice(0, room).map((text) => ({ text, retired: false }))
+      ...added.map((text) => ({ text, retired: false }))
     ])
     setDrafts([])
     setDraftSel({})
     toast.success(
-      `Added ${picked.length} wording${picked.length === 1 ? "" : "s"}.`
+      `Added ${added.length} wording${added.length === 1 ? "" : "s"}.`
     )
   }
 
@@ -648,9 +668,12 @@ export function QuestionFormDialog({
                   <button
                     type="button"
                     onClick={() =>
-                      setSuggestCount((n) =>
-                        Math.max(VARIANT_SUGGEST_MIN, n - 1)
-                      )
+                      // Step from the CLAMPED, displayed value (`askFor`), not
+                      // the raw `suggestCount`. After adding synonyms the room
+                      // shrinks and `suggestCount` can sit above the new ceiling;
+                      // stepping off the raw value would leave this button frozen
+                      // for several clicks. Off `askFor` it always moves by one.
+                      setSuggestCount(Math.max(VARIANT_SUGGEST_MIN, askFor - 1))
                     }
                     disabled={
                       askFor <= VARIANT_SUGGEST_MIN ||
@@ -673,7 +696,8 @@ export function QuestionFormDialog({
                   <button
                     type="button"
                     onClick={() =>
-                      setSuggestCount((n) => Math.min(maxSuggest, n + 1))
+                      // Step from the clamped `askFor` (see the minus button).
+                      setSuggestCount(Math.min(maxSuggest, askFor + 1))
                     }
                     disabled={
                       askFor >= maxSuggest ||
@@ -723,7 +747,23 @@ export function QuestionFormDialog({
 
               {drafts.length > 0 ? (
                 <>
-                  <div className="mt-3 grid gap-2">
+                  {/* Select-all header — tick every draft in one go rather than
+                      one by one, and see how many are currently selected. */}
+                  <div className="mt-3 flex items-center justify-between">
+                    <label className="flex cursor-pointer select-none items-center gap-2 text-[12.5px] font-semibold text-ink-2">
+                      <input
+                        type="checkbox"
+                        checked={allDraftsSelected}
+                        onChange={toggleSelectAllDrafts}
+                        className="h-4 w-4 accent-primary"
+                      />
+                      Select all
+                    </label>
+                    <span className="text-[12px] text-ink-subtle tabular-nums">
+                      {selectedDraftCount} of {drafts.length} selected
+                    </span>
+                  </div>
+                  <div className="mt-2 grid gap-2">
                     {drafts.map((s, i) => {
                       const selected = !!draftSel[i]
                       return (
@@ -758,10 +798,11 @@ export function QuestionFormDialog({
                       type="button"
                       size="sm"
                       onClick={acceptSelectedDrafts}
-                      disabled={saveMutation.isPending}
+                      disabled={saveMutation.isPending || selectedDraftCount === 0}
                     >
                       <Plus className="h-4 w-4" />
-                      Add selected variants
+                      Add {selectedDraftCount > 0 ? `${selectedDraftCount} ` : ""}
+                      selected variant{selectedDraftCount === 1 ? "" : "s"}
                     </Button>
                   </div>
                 </>
