@@ -153,16 +153,8 @@ export function EmailTemplatesCard({ canWrite }: { canWrite: boolean }) {
 
   return (
     <div>
-      <div className="mb-4">
-        <h3 className="text-[15px] font-semibold text-ink">Emails</h3>
-        <p className="mt-1.5 max-w-[620px] text-[13.5px] text-ink-muted leading-relaxed">
-          Customise the wording of the emails your candidates receive. The
-          layout, your logo and colours stay on brand. Use the merge fields to
-          drop in each candidate's details.
-        </p>
-      </div>
-
-      {/* Email picker */}
+      {/* Email picker. The page header (EmailTemplatesPage) carries the title +
+          description now that this is its own destination, not a Settings tab. */}
       <div className="scroll mb-4 flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-line bg-surface-3 p-1">
         {templates.map((t) => {
           const isActive = t.purpose === selected.purpose

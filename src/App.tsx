@@ -11,6 +11,7 @@ import { CandidatesPage } from "@/pages/CandidatesPage";
 import { QuestionBankPage } from "@/pages/QuestionBankPage";
 import { OrgSettingsPage } from "@/pages/OrgSettingsPage";
 import { PipelinePage } from "@/pages/PipelinePage";
+import { EmailTemplatesPage } from "@/pages/EmailTemplatesPage";
 import { TeamPage } from "@/pages/TeamPage";
 import { CvViewerPage } from "@/pages/CvViewerPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
@@ -92,6 +93,10 @@ export default function App() {
         <Route path={ROUTES.CANDIDATES} element={<CandidatesPage />} />
         <Route path={ROUTES.QUESTIONS} element={<QuestionBankPage />} />
         <Route path={ROUTES.PIPELINE} element={<PipelinePage />} />
+        <Route
+          path={ROUTES.EMAIL_TEMPLATES}
+          element={<EmailTemplatesPage />}
+        />
         <Route path={ROUTES.SETTINGS} element={<OrgSettingsPage />} />
         <Route path={ROUTES.TEAM} element={<TeamPage />} />
       </Route>

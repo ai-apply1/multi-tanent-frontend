@@ -12,6 +12,10 @@ export const ROUTES = {
   CANDIDATES: "/dashboard/candidates",
   QUESTIONS: "/dashboard/questions",
   PIPELINE: "/dashboard/pipeline",
+  /** The editable candidate-email templates editor + live preview. Its own
+   *  top-level destination (reached from the Settings dropdown), not a Settings
+   *  tab: the editor + preview want the full page width, like the Pipeline. */
+  EMAIL_TEMPLATES: "/dashboard/email-templates",
   /**
    * The dedicated settings destination (identity, branding, domains, apply
    * video, email, defaults, notifications). Named `SETTINGS`, not
@@ -31,7 +35,6 @@ export const ROUTES = {
 export type SettingsTabId =
   | "general"
   | "branding"
-  | "emails"
   | "domains"
   | "video"
   | "defaults"
@@ -42,7 +45,6 @@ export const SETTINGS_TABS: ReadonlyArray<{ id: SettingsTabId; label: string }> 
   [
     { id: "general", label: "General" },
     { id: "branding", label: "Branding" },
-    { id: "emails", label: "Emails" },
     { id: "domains", label: "Domains" },
     { id: "video", label: "Apply video" },
     { id: "defaults", label: "Interview defaults" },
