@@ -2248,16 +2248,6 @@ function AnswerRow({
               Transcript pending, the scoring worker will fill this in shortly.
             </p>
           )}
-          {!skipped && question.answerAudioUrl ? (
-            <audio
-              controls
-              preload="none"
-              src={question.answerAudioUrl}
-              className="h-8 w-full max-w-sm"
-            >
-              Your browser can&apos;t play this audio.
-            </audio>
-          ) : null}
           {scored ? (
             <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
               <span className="rounded-full border border-line px-2 py-0.5 font-semibold text-ink-2">
