@@ -908,7 +908,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
     setReinviting(true);
     try {
       await reinviteInterview(activeSessionId);
-      toast.success("New attempt created — invite email sent.");
+      toast.success("New attempt created. Invite email sent.");
       // The new attempt (N+1) is prepared asynchronously (the question-prep
       // worker) or lazily when the candidate opens the link, so its row may
       // not exist the instant this POST returns. Refresh the attempts
@@ -1188,7 +1188,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                       !candidateId || !canSendCandidateInvite || invitingCand
                     }
                     onSelect={handleSendCandidateInvite}
-                    title={'Re-sends the link while the invite is still pending — once started, use "Reattempt interview"'}
+                    title={'Re-sends the link while the invite is still pending. Once started, use "Reattempt interview"'}
                   >
                     <Send className="h-3.5 w-3.5" strokeWidth={1.7} />
                     Resend invite

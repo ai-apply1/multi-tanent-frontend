@@ -213,7 +213,7 @@ export function PipelinePage() {
               <GitBranch className="h-[18px] w-[18px]" strokeWidth={1.7} />
             </span>
             <h1 className="text-[23px] font-semibold tracking-tight text-ink">
-              Pipeline
+              Hiring Pipeline
             </h1>
           </div>
           <p className="mt-1.5 max-w-[620px] text-[13.5px] text-ink-muted">

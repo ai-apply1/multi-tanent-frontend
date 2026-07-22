@@ -12,6 +12,7 @@ import type {
   ThemeAccentMode,
   ThemeMode,
 } from "@/features/organization/types"
+import { FONT_OPTIONS } from "@/features/organization/fonts"
 import {
   AA_BODY_CONTRAST,
   contrastOf,
@@ -74,12 +75,15 @@ const sectionHint = "mt-0.5 block text-[12px] leading-relaxed text-ink-muted"
 
 /**
  * The schema defaults, mirrored, so "Reset to platform colours" writes the
- * same nine values a brand-new org gets rather than clearing the subdoc.
+ * same values a brand-new org gets (mode, font and the nine colours) rather
+ * than clearing the subdoc.
  */
 export const PLATFORM_THEME: OrganizationTheme = {
   // Dark, matching the canvas below. Keep the two in step: a mode that
   // contradicted its own defaults would ship every new org a mismatch warning.
   mode: "dark",
+  // The typeface every new org ships with, mirroring backend `ThemeFont.JAKARTA`.
+  font: "jakarta",
   primary: "#850cff",
   secondary: "#ff00cc",
   accent: "gradient",
@@ -571,6 +575,10 @@ export function ThemeCard({
     (next: string): void =>
       onChange({ [key]: next } as Partial<OrganizationTheme>)
 
+  // The font backing the live preview box, resolved from the stored id.
+  const selectedFont =
+    FONT_OPTIONS.find((f) => f.id === value.font) ?? FONT_OPTIONS[0]
+
   /*
    * Open when the org has ALREADY customised a status colour — hiding edited
    * values behind a closed fold would misread as "back to defaults". Initial
@@ -762,6 +770,103 @@ export function ThemeCard({
               className="mt-3 h-2.5 rounded-full border border-line"
               style={{ background: ctaBackground }}
             />
+          </div>
+
+          {/* ---- Typeface ---- */}
+          <div className="border-t border-line pt-5">
+            <div className="mb-3">
+              <span className={sectionTitle}>Typeface</span>
+              <span className={sectionHint}>
+                The font every candidate page and this dashboard is set in. Pick
+                one below and see it live in the preview.
+              </span>
+            </div>
+
+            {/* Live preview box — renders real sample text in the selected
+                font (the org's own name up top, a pangram, and a weight ramp),
+                so an admin sees the actual result before saving. */}
+            <div className="mb-3.5 overflow-hidden rounded-2xl border border-line bg-surface-3">
+              <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2">
+                <span className="text-[10.5px] font-bold uppercase tracking-[0.07em] text-ink-subtle">
+                  Preview
+                </span>
+                <span className="text-[11.5px] font-semibold text-ink-2">
+                  {selectedFont.label}
+                  <span className="text-ink-muted"> · {selectedFont.hint}</span>
+                </span>
+              </div>
+              <div
+                className="px-5 py-4"
+                style={{ fontFamily: selectedFont.stack }}
+              >
+                <div className="truncate text-[28px] font-bold leading-tight text-ink">
+                  {orgName || "Your organization"}
+                </div>
+                <p className="mt-2 text-[14.5px] leading-relaxed text-ink-2">
+                  The quick brown fox jumps over the lazy dog.
+                </p>
+                <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                  <span className="text-[15px] font-normal text-ink-muted">
+                    Regular
+                  </span>
+                  <span className="text-[15px] font-medium text-ink-muted">
+                    Medium
+                  </span>
+                  <span className="text-[15px] font-semibold text-ink-muted">
+                    Semibold
+                  </span>
+                  <span className="text-[15px] font-bold text-ink-muted">
+                    Bold
+                  </span>
+                  <span className="text-[13px] tracking-wide text-ink-subtle">
+                    AaBbCc 0123456789
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Selectable options — each label + specimen rendered in its own
+                font so the whole set reads as a specimen sheet. */}
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+              {FONT_OPTIONS.map((opt) => {
+                const selected = value.font === opt.id
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    disabled={!canWrite}
+                    aria-pressed={selected}
+                    onClick={() => onChange({ font: opt.id })}
+                    className={`relative flex flex-col items-start gap-1 rounded-xl border px-3.5 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                      selected
+                        ? "border-primary bg-accent ring-1 ring-[var(--accent-ring)]"
+                        : "border-[var(--line-2)] hover:border-primary/40 hover:bg-hover"
+                    }`}
+                  >
+                    {selected ? (
+                      <Check
+                        className="absolute right-2.5 top-2.5 h-3.5 w-3.5 text-primary"
+                        strokeWidth={2.75}
+                      />
+                    ) : null}
+                    <span
+                      style={{ fontFamily: opt.stack }}
+                      className={`text-[17px] font-semibold leading-tight ${
+                        selected ? "text-primary" : "text-ink"
+                      }`}
+                    >
+                      {opt.label}
+                    </span>
+                    <span
+                      style={{ fontFamily: opt.stack }}
+                      className="text-[12.5px] text-ink-muted"
+                    >
+                      Aa Bb Cc 123
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
           </div>
 
           {/* ---- Canvas ---- */}

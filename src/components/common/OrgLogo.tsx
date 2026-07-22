@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -77,7 +78,15 @@ export function OrgLogo({
 }: OrgLogoProps) {
   const { box, fallback } = SIZES[size];
 
-  if (!logoUrl) {
+  // Recover from a DEAD logo URL (deleted S3 object, expired link) instead of
+  // painting the browser's broken-image glyph. `brokenSrc` is keyed by the URL
+  // that failed, so it resets naturally when the tenant (and its `logoUrl`)
+  // changes. Mirrors the screening app's `BrandLogo`, which the same candidate
+  // may also see. The dark variant falls back to the light one on error (below)
+  // rather than to initials, so a broken dark asset never hides a working mark.
+  const [brokenSrc, setBrokenSrc] = useState<string | null>(null);
+
+  if (!logoUrl || brokenSrc === logoUrl) {
     return (
       <span
         title={name}
@@ -120,6 +129,7 @@ export function OrgLogo({
             title={name}
             className={cn(imgClass, "block dark:hidden")}
             draggable={false}
+            onError={() => setBrokenSrc(logoUrl)}
           />
           <img
             src={logoDarkUrl}
@@ -127,6 +137,11 @@ export function OrgLogo({
             title={name}
             className={cn(imgClass, "hidden dark:block")}
             draggable={false}
+            // Fall the dark variant back to the light mark rather than to
+            // initials, so a broken dark asset doesn't hide a working logo.
+            onError={(e) => {
+              if (e.currentTarget.src !== logoUrl) e.currentTarget.src = logoUrl;
+            }}
           />
         </span>
       </span>
@@ -156,6 +171,7 @@ export function OrgLogo({
           title={name}
           className={imgClass}
           draggable={false}
+          onError={() => setBrokenSrc(logoUrl)}
         />
       </span>
     </span>

@@ -6,6 +6,12 @@ import {
   type ReactNode,
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
+import {
+  SETTINGS_TABS,
+  asSettingsTab,
+  type SettingsTabId,
+} from "@/routes";
 import {
   ImageOff,
   Loader2,
@@ -154,29 +160,20 @@ const toInt = (value: string) => {
  * Save bar is hidden on those rather than sitting there permanently disabled,
  * which reads as broken.
  */
-type SettingsTab =
-  | "general"
-  | "branding"
-  | "domains"
-  | "video"
-  | "defaults"
-  | "platform"
-  | "notifications";
+// Ids + labels live in routes.ts so the sidebar's Settings dropdown and this
+// page can't drift. Only the "does this tab feed the shared org PATCH?" flag is
+// this page's concern, so it stays here as a lookup over the shared list.
+type SettingsTab = SettingsTabId;
 
-const TABS: Array<{ id: SettingsTab; label: string; saves: boolean }> = [
-  { id: "general", label: "General", saves: true },
-  { id: "branding", label: "Branding", saves: true },
-  { id: "domains", label: "Domains", saves: false },
-  { id: "video", label: "Apply video", saves: false },
-  { id: "defaults", label: "Interview defaults", saves: true },
-  { id: "platform", label: "Platform", saves: false },
-  { id: "notifications", label: "My notifications", saves: true },
-];
+const SAVING_TAB_IDS = new Set<SettingsTab>([
+  "general",
+  "branding",
+  "defaults",
+  "notifications",
+]);
 
-/** Tabs whose edits go through the shared org PATCH + Save bar. */
-const SAVING_TABS = new Set<SettingsTab>(
-  TABS.filter((t) => t.saves).map((t) => t.id),
-);
+const TABS: Array<{ id: SettingsTab; label: string; saves: boolean }> =
+  SETTINGS_TABS.map((t) => ({ ...t, saves: SAVING_TAB_IDS.has(t.id) }));
 
 const inputBase =
   "h-11 w-full rounded-lg border border-[var(--field-border)] bg-surface px-3.5 text-[14px] text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)] disabled:cursor-not-allowed disabled:bg-ink-faint disabled:text-ink-muted";
@@ -504,7 +501,22 @@ export function OrgSettingsPage() {
 
   const canWrite = user?.role === "org_admin";
 
-  const [activeTab, setActiveTab] = useState<SettingsTab>("general");
+  // The active tab is the URL, not local state, so the sidebar's Settings
+  // dropdown (and the command palette) can deep-link straight to a section with
+  // `?tab=`. An unknown or missing value narrows to the default rather than
+  // rendering an empty card.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = asSettingsTab(searchParams.get("tab"));
+  const setActiveTab = (id: SettingsTab) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("tab", id);
+        return next;
+      },
+      { replace: true },
+    );
+  };
   const [name, setName] = useState("");
   const [maxAttempts, setMaxAttempts] = useState("");
   const [expiryDays, setExpiryDays] = useState("");
@@ -671,10 +683,13 @@ export function OrgSettingsPage() {
         if (!isHexColor(next)) continue;
         if (!sameColor(next, profile.theme[key])) themePatch[key] = next;
       }
-      // `mode` and `accent` are enums, not colours: no hex parsing, and a
-      // plain !== is the right comparison (both are lowercase literals).
+      // `mode`, `font` and `accent` are enums, not colours: no hex parsing, and
+      // a plain !== is the right comparison (all are lowercase literals).
       if (theme.mode !== profile.theme.mode) {
         themePatch.mode = theme.mode;
+      }
+      if (theme.font !== profile.theme.font) {
+        themePatch.font = theme.font;
       }
       if (theme.accent !== profile.theme.accent) {
         themePatch.accent = theme.accent;
@@ -744,60 +759,67 @@ export function OrgSettingsPage() {
   };
 
   const header = (
-    <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
-      <div>
-        <div className="flex items-center gap-2.5">
-          <span className="text-primary">
-            <Settings className="h-[18px] w-[18px]" strokeWidth={1.7} />
-          </span>
-          <h1 className="text-[23px] font-semibold tracking-tight text-ink">
-            Settings
-          </h1>
-        </div>
-        <p className="mt-1.5 max-w-[620px] text-[13.5px] text-ink-muted">
-          Your branding, domains and the defaults every job inherits.
-        </p>
+    <div className="mb-5">
+      <div className="flex items-center gap-2.5">
+        <span className="text-primary">
+          <Settings className="h-[18px] w-[18px]" strokeWidth={1.7} />
+        </span>
+        <h1 className="text-[23px] font-semibold tracking-tight text-ink">
+          Settings
+        </h1>
       </div>
-      {/* Save/Reset on tabs that feed the org PATCH — Domains and Platform are
-          read-only, and the apply video and notifications own their own writes,
-          so a permanently disabled Save button there reads as broken rather
-          than as "nothing to save here".
-          `|| isDirty` is the safety catch: the form spans several tabs, so
-          edits made on General and then abandoned by switching to Domains must
-          not vanish behind a hidden Save bar. It also surfaces the bar for a
-          non-org_admin (`hr`) once their self-scoped notification prefs are
-          dirty — `canWrite` only gates the org PATCH half, not the prefs save.
-          Unsaved work always keeps a way out. */}
-      {(canWrite && SAVING_TABS.has(activeTab)) || isDirty ? (
-        <div className="flex shrink-0 items-center gap-2">
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={reset}
-            disabled={!isDirty || isSaving}
-          >
-            Reset
-          </Button>
-          <Button
-            type="submit"
-            size="sm"
-            form="org-settings-form"
-            disabled={!canSave}
-          >
-            {isSaving ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Saving…
-              </>
-            ) : (
-              "Save changes"
-            )}
-          </Button>
-        </div>
-      ) : null}
+      <p className="mt-1.5 max-w-[620px] text-[13.5px] text-ink-muted">
+        Your branding, domains and the defaults every job inherits.
+      </p>
     </div>
   );
+
+  // Save/Reset live in a sticky bar centered at the bottom of the scroll
+  // viewport (see the render), NOT in the header. The form is tall, so a header
+  // bar forced anyone editing a field low on the page to scroll all the way back
+  // up to save. Pinned to the bottom, Save is always one click away wherever you
+  // are in the page.
+  //
+  // It appears ONLY once something is actually dirty, and hides again the moment
+  // the form is clean (including right after a successful save resets the
+  // fields). `isDirty` spans every tab, orgDirty || prefsIsDirty, so an edit on
+  // General then abandoned by switching to Domains still surfaces the bar, and a
+  // non-org_admin's self-scoped notification prefs surface it too.
+  const showActionBar = isDirty;
+
+  const actionBar = showActionBar ? (
+    <div className="pointer-events-none sticky bottom-5 z-20 mt-5 flex justify-center">
+      <div className="pointer-events-auto flex items-center gap-3 rounded-2xl border border-white/15 bg-surface/60 px-4 py-2.5 shadow-2xl ring-1 ring-black/5 backdrop-blur-2xl backdrop-saturate-150">
+        <span className="pl-1 text-[13px] font-medium text-ink-muted">
+          Unsaved changes
+        </span>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={reset}
+          disabled={!isDirty || isSaving}
+        >
+          Reset
+        </Button>
+        <Button
+          type="submit"
+          size="sm"
+          form="org-settings-form"
+          disabled={!canSave}
+        >
+          {isSaving ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Saving…
+            </>
+          ) : (
+            "Save changes"
+          )}
+        </Button>
+      </div>
+    </div>
+  ) : null;
 
   if (isLoading) {
     return (
@@ -1199,6 +1221,8 @@ export function OrgSettingsPage() {
           </div>
         </div>
       </form>
+
+      {actionBar}
     </div>
   );
 }
