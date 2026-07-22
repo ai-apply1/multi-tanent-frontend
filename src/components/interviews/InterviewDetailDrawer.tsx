@@ -27,6 +27,7 @@ import {
   Send,
   Sparkles,
   Star,
+  Tag,
   Trash2,
   User,
   X,
@@ -58,6 +59,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -1150,6 +1155,35 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                 Open CV
                 <ExternalLink className="h-3 w-3" strokeWidth={1.7} />
               </Button>
+              {/* Attempts switcher — sits beside Open CV so the reviewer can
+                  flip between reattempts without hunting a separate row. */}
+              {hasAttempts ? (
+                <div className="flex items-center gap-1.5">
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle">
+                    <History className="h-3 w-3" strokeWidth={1.7} />
+                    Attempts
+                  </span>
+                  <Select
+                    value={activeSessionId ?? undefined}
+                    onValueChange={(v) => setSelectedSessionId(v)}
+                  >
+                    <SelectTrigger className="h-8 w-auto min-w-36 gap-2 text-xs">
+                      <SelectValue placeholder="Select attempt" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {attempts.map((a) => (
+                        <SelectItem
+                          key={a.sessionId}
+                          value={a.sessionId}
+                          className="text-xs"
+                        >
+                          {attemptOptionLabel(a)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
               <div className="flex-1" />
               {/*
                * No Reject / Shortlist here, deliberately.
@@ -1193,6 +1227,49 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                       <Mail className="h-3.5 w-3.5" strokeWidth={1.7} />
                       Send email
                     </DropdownMenuItem>
+                  ) : null}
+                  {/* Change the candidate's pipeline stage — the same move the
+                      candidates table offers, so a reviewer can decide without
+                      closing the drawer. */}
+                  {candidateId && statuses.length > 0 ? (
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>
+                        <Tag className="h-3.5 w-3.5" strokeWidth={1.7} />
+                        Change status
+                      </DropdownMenuSubTrigger>
+                      {/* Capped + scrollable so a long custom pipeline doesn't
+                          tower past the parent menu. */}
+                      <DropdownMenuSubContent className="max-h-72 w-52 overflow-y-auto">
+                        <DropdownMenuLabel>Move to</DropdownMenuLabel>
+                        {statuses.map((option) => {
+                          const isCurrent =
+                            option.key === candidate?.currentStatusId?.key;
+                          return (
+                            <DropdownMenuItem
+                              key={option._id}
+                              disabled={isCurrent || statusPending}
+                              onSelect={() =>
+                                void handleStatusChange(option.key)
+                              }
+                            >
+                              <span
+                                className="h-2 w-2 shrink-0 rounded-full"
+                                style={{
+                                  backgroundColor:
+                                    option.color ?? "var(--ink-muted)",
+                                }}
+                              />
+                              <span className="min-w-0 truncate">
+                                {option.label}
+                              </span>
+                              {isCurrent ? (
+                                <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-ink-muted" />
+                              ) : null}
+                            </DropdownMenuItem>
+                          );
+                        })}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
                   ) : null}
                   {data?.scores ? (
                     <DropdownMenuItem
@@ -1255,34 +1332,6 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
-
-            {hasAttempts ? (
-              <div className="mt-3 flex items-center gap-2">
-                <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle">
-                  <History className="h-3 w-3" strokeWidth={1.7} />
-                  Attempts
-                </span>
-                <Select
-                  value={activeSessionId ?? undefined}
-                  onValueChange={(v) => setSelectedSessionId(v)}
-                >
-                  <SelectTrigger className="h-7 w-auto min-w-40 gap-2 text-xs">
-                    <SelectValue placeholder="Select attempt" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {attempts.map((a) => (
-                      <SelectItem
-                        key={a.sessionId}
-                        value={a.sessionId}
-                        className="text-xs"
-                      >
-                        {attemptOptionLabel(a)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            ) : null}
           </div>
 
           {/* Body */}
