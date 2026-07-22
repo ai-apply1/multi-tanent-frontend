@@ -17,7 +17,7 @@ import {
 import toast from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { ROUTES, asSettingsTab, settingsTab } from "@/routes";
+import { ROUTES, settingsTab } from "@/routes";
 import { useAuth } from "@/features/auth/AuthContext";
 import { useOrganization } from "@/features/organization/useOrganization";
 import type { UserRole } from "@/features/auth/types";
@@ -69,7 +69,7 @@ const SETTINGS_CHILDREN: Array<{
   requiresRole?: UserRole;
 }> = [
   { label: "General", to: settingsTab("general") },
-  { label: "Email templates", to: settingsTab("emails") },
+  { label: "Email templates", to: ROUTES.EMAIL_TEMPLATES },
   { label: "Hiring Pipeline", to: ROUTES.PIPELINE },
   { label: "Manage Team", to: ROUTES.TEAM, requiresRole: "org_admin" },
 ];
@@ -127,8 +127,10 @@ function SettingsNav({
   const onSettings = location.pathname.startsWith(ROUTES.SETTINGS);
   const onPipeline = location.pathname.startsWith(ROUTES.PIPELINE);
   const onTeam = location.pathname.startsWith(ROUTES.TEAM);
-  const currentTab = asSettingsTab(new URLSearchParams(location.search).get("tab"));
-  const groupActive = onSettings || onPipeline || onTeam;
+  const onEmailTemplates = location.pathname.startsWith(
+    ROUTES.EMAIL_TEMPLATES,
+  );
+  const groupActive = onSettings || onPipeline || onTeam || onEmailTemplates;
 
   const children = SETTINGS_CHILDREN.filter(
     (c) => !c.requiresRole || c.requiresRole === user?.role,
@@ -149,8 +151,14 @@ function SettingsNav({
   const isChildActive = (to: string) => {
     if (to === ROUTES.PIPELINE) return onPipeline;
     if (to === ROUTES.TEAM) return onTeam;
-    const id = new URLSearchParams(to.split("?")[1] ?? "").get("tab");
-    return onSettings && id === currentTab;
+    if (to === ROUTES.EMAIL_TEMPLATES) return onEmailTemplates;
+    // The only Settings-page child listed is "General", and it stands in for the
+    // whole Settings page in the nav. So it stays active on EVERY settings tab
+    // (Branding, Domains, Apply video, and the rest), which are reached from the
+    // in-page tab bar, rather than only when its own `?tab=general` is selected.
+    // This is what keeps the highlight on General instead of falling back to the
+    // Settings group header when you switch tabs inside the page.
+    return onSettings;
   };
 
   // Whether any dropdown child represents the current location. When none does
