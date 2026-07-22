@@ -44,6 +44,7 @@ import type { UserRole } from "@/features/auth/types";
 import { formatDateTime } from "@/lib/date";
 import { errorMessage as apiError } from "@/lib/errors";
 import { titleCase } from "@/lib/text";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 const DEFAULT_PAGE_SIZE = 20;
@@ -66,17 +67,24 @@ export function TeamPage() {
   const [activationTarget, setActivationTarget] = useState<OrgUser | null>(null);
 
   const isOrgAdmin = user?.role === "org_admin";
+  const debouncedSearch = useDebouncedValue(search);
 
   const { data, isLoading, isFetching, isError, refetch } = useQuery({
     queryKey: [
       "users",
-      { page, limit: pageSize, search, role: roleFilter, status: statusFilter },
+      {
+        page,
+        limit: pageSize,
+        search: debouncedSearch,
+        role: roleFilter,
+        status: statusFilter,
+      },
     ],
     queryFn: () =>
       listUsers({
         page,
         limit: pageSize,
-        search: search.trim() || undefined,
+        search: debouncedSearch.trim() || undefined,
         role: roleFilter || undefined,
         isActive: statusFilter === "" ? undefined : statusFilter === "active",
       }),
@@ -321,7 +329,9 @@ export function TeamPage() {
                     ) : null}
                   </div>
                   <div className="mono truncate text-[12.5px] text-ink-muted">
-                    {titleCase(row.userName)}
+                    {/* Usernames are canonical lowercase login handles — show
+                        them verbatim, never title-cased. */}
+                    {row.userName}
                   </div>
                   <div className="truncate text-[13px] text-ink-2">
                     {row.email}

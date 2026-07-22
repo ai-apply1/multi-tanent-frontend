@@ -37,7 +37,8 @@ export async function listUsers(
  * response: `false` means the mail never went out.
  *
  * 409s here are the interesting path: the seat limit (only a platform admin
- * can raise it) and duplicate email/username (both unique across ALL orgs).
+ * can raise it) and duplicate email/username (both unique PER organization, so
+ * a conflict always means the value is taken inside the caller's own org).
  */
 export async function createUser(payload: CreateUserPayload) {
   const { data } = await api.post<CreateUserResponse>("/admin/users", payload);

@@ -24,3 +24,22 @@ export function invalidateCandidateData(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ["awaiting-decision"] })
   queryClient.invalidateQueries({ queryKey: ["overviewStats"] })
 }
+
+/**
+ * The candidate fan-out PLUS the Jobs list — for the mutations that change a
+ * job's TOTAL candidate count: a delete or a CV import.
+ *
+ * `["jobs"]` is deliberately NOT part of `invalidateCandidateData`. The Jobs
+ * list's "Applicants" column is a live COUNT of every candidate for the job
+ * regardless of column, so a status decision, a manual invite, or a kanban drag
+ * — which keep the same candidate doc — leave that number unchanged, and
+ * refetching the whole jobs list on every such mutation would be wasteful. Only
+ * creating or deleting a candidate moves the count, so only those call sites
+ * reach for this variant. The JobDetailPage KPI reads `candidateKanban` (already
+ * fanned out above), so it's the Jobs LIST that would otherwise replay a stale
+ * count off the 30s cache.
+ */
+export function invalidateCandidateDataAndJobCounts(queryClient: QueryClient) {
+  invalidateCandidateData(queryClient)
+  queryClient.invalidateQueries({ queryKey: ["jobs"] })
+}

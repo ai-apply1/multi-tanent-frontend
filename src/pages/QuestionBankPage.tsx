@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   keepPreviousData,
   useMutation,
@@ -62,6 +62,7 @@ import {
   type ScreeningQuestion,
 } from "@/features/screening-questions/types";
 import { errorMessage as apiError } from "@/lib/errors";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 const DEFAULT_PAGE_SIZE = 20;
@@ -98,6 +99,7 @@ export function QuestionBankPage() {
   // The delete-guard's 409 message names the jobs holding the question, so it
   // lives in the dialog until dismissed rather than in a toast that vanishes.
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const debouncedSearch = useDebouncedValue(search);
 
   const { data, isLoading, isFetching, isError, refetch } = useQuery({
     queryKey: [
@@ -105,7 +107,7 @@ export function QuestionBankPage() {
       {
         page,
         limit: pageSize,
-        search,
+        search: debouncedSearch,
         difficultyLevel: difficultyFilter,
         tags: tagFilter,
       },
@@ -114,7 +116,7 @@ export function QuestionBankPage() {
       listScreeningQuestions({
         page,
         limit: pageSize,
-        search: search.trim() || undefined,
+        search: debouncedSearch.trim() || undefined,
         difficultyLevel: difficultyFilter || undefined,
         tags: tagFilter.length > 0 ? tagFilter : undefined,
       }),
@@ -123,8 +125,8 @@ export function QuestionBankPage() {
 
   const rows = data?.data ?? [];
 
-  // Category catalog — needed both for the row-label lookup (translating
-  // categoryId → name) and to keep category labels out of tag suggestions.
+  // Category catalog — needed for the row-label lookup (translating
+  // categoryId → name).
   const categoriesQuery = useQuery({
     queryKey: QUESTION_CATEGORIES_QUERY_KEY,
     queryFn: listQuestionCategories,
@@ -132,16 +134,6 @@ export function QuestionBankPage() {
   const categoryById = new Map(
     (categoriesQuery.data ?? []).map((c) => [c._id, c] as const),
   );
-  const categoryLabels = new Set(
-    (categoriesQuery.data ?? []).map((c) => c.label),
-  );
-
-  // Suggestions are drawn from rows in hand (no distinct-tags endpoint),
-  // minus anything that shares a name with a category — the two live in
-  // separate fields on the model.
-  const tagSuggestions = Array.from(
-    new Set(rows.flatMap((q) => q.tags).filter((t) => !categoryLabels.has(t))),
-  ).sort((a, b) => a.localeCompare(b));
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => deleteScreeningQuestion(id),
@@ -177,6 +169,18 @@ export function QuestionBankPage() {
 
   const total = data?.count ?? 0;
   const totalPages = data?.totalPage ?? 0;
+
+  // Deleting the last row on a non-first page leaves `page` pointing past the
+  // end: the backend returns an empty `data` for the out-of-range page while
+  // `count` still reports the survivors, which would strand the user on a
+  // false "No questions yet" screen with the pager hidden. Clamp `page` back
+  // into range so the next fetch lands on a real page. Gated on `!isFetching`
+  // so it reads the resolved response, not a transient keepPreviousData frame.
+  useEffect(() => {
+    if (!isFetching && total > 0 && rows.length === 0 && page > totalPages) {
+      setPage(Math.max(1, totalPages));
+    }
+  }, [isFetching, total, rows.length, page, totalPages]);
 
   return (
     <div className="mx-auto max-w-[1080px] px-6 py-6 lg:px-8 lg:py-8">
@@ -252,7 +256,6 @@ export function QuestionBankPage() {
               setTagFilter(next);
               setPage(1);
             }}
-            suggestions={tagSuggestions}
             placeholder="Filter by tags…"
             className="min-w-[220px] flex-1 basis-[220px]"
           />
@@ -272,7 +275,7 @@ export function QuestionBankPage() {
                 Retry
               </button>
             </div>
-          ) : rows.length === 0 ? (
+          ) : total === 0 ? (
             <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
               <span className="flex h-[50px] w-[50px] items-center justify-center rounded-[14px] bg-accent text-primary">
                 <Library className="h-[26px] w-[26px]" strokeWidth={1.6} />
@@ -433,7 +436,7 @@ export function QuestionBankPage() {
         </TooltipProvider>
 
         {/* Footer / pagination */}
-        {rows.length > 0 ? (
+        {total > 0 ? (
           <div className="flex flex-col gap-3 border-t border-line px-[18px] py-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <div className="flex items-center gap-2">
@@ -497,7 +500,6 @@ export function QuestionBankPage() {
         open={formOpen}
         onOpenChange={setFormOpen}
         question={editTarget}
-        tagSuggestions={tagSuggestions}
       />
 
       <QuestionPreviewDialog

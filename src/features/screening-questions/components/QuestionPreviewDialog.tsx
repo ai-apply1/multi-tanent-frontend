@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Plus, Star, X } from "lucide-react"
 import toast from "react-hot-toast"
@@ -91,6 +92,20 @@ export function QuestionPreviewDialog({
       toast.error(apiError(err, "Could not start audio generation."))
   })
 
+  /**
+   * Which wording is mid-request, so only that one shows a spinner. A single
+   * shared `generateMutation.isPending` would flip EVERY failed/none variant
+   * into a spinner and disable its retry during one variant's request —
+   * mirrors QuestionFormDialog's per-variant `retryingId`.
+   */
+  const [retryingId, setRetryingId] = useState<string | null>(null)
+  const retryAudio = (variantId: string) => {
+    setRetryingId(variantId)
+    generateMutation.mutate([variantId], {
+      onSettled: () => setRetryingId(null)
+    })
+  }
+
   // Nothing to render without a question — but Radix still needs the Dialog
   // root mounted so the open/close transition stays owned by this component.
   if (!question) {
@@ -109,8 +124,6 @@ export function QuestionPreviewDialog({
   const handleEdit = () => {
     onEdit(question)
   }
-
-  const generatePending = generateMutation.isPending
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -162,8 +175,8 @@ export function QuestionPreviewDialog({
                   <VariantAudioStatus
                     variant={canonical}
                     retired={false}
-                    busy={generatePending}
-                    onRetry={() => generateMutation.mutate([canonical._id])}
+                    busy={retryingId === canonical._id}
+                    onRetry={() => retryAudio(canonical._id)}
                   />
                   {variantAudioState(canonical) === "ready" ? (
                     <VariantAudioPlayer
@@ -213,8 +226,8 @@ export function QuestionPreviewDialog({
                     <VariantAudioStatus
                       variant={variant}
                       retired={false}
-                      busy={generatePending}
-                      onRetry={() => generateMutation.mutate([variant._id])}
+                      busy={retryingId === variant._id}
+                      onRetry={() => retryAudio(variant._id)}
                     />
                     {variantAudioState(variant) === "ready" ? (
                       <VariantAudioPlayer

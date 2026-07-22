@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { GuestRoute, ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { LoginPage } from "@/pages/LoginPage";
@@ -11,10 +11,27 @@ import { CandidatesPage } from "@/pages/CandidatesPage";
 import { QuestionBankPage } from "@/pages/QuestionBankPage";
 import { OrgSettingsPage } from "@/pages/OrgSettingsPage";
 import { PipelinePage } from "@/pages/PipelinePage";
+import { EmailTemplatesPage } from "@/pages/EmailTemplatesPage";
 import { TeamPage } from "@/pages/TeamPage";
 import { CvViewerPage } from "@/pages/CvViewerPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
 import { ROUTES } from "@/routes";
+
+/**
+ * The standalone per-job candidates board was retired. A job's candidates now
+ * live on the org-wide list filtered by `?job=`. This redirect keeps the old
+ * `JOB_CANDIDATES` route registered so stale links and notifications land on
+ * the filtered list instead of the 404 page.
+ */
+function JobCandidatesRedirect() {
+  const { jobId } = useParams<{ jobId: string }>();
+  return (
+    <Navigate
+      to={jobId ? `${ROUTES.CANDIDATES}?job=${jobId}` : ROUTES.CANDIDATES}
+      replace
+    />
+  );
+}
 
 export default function App() {
   return (
@@ -68,16 +85,18 @@ export default function App() {
         <Route path={ROUTES.JOB_NEW} element={<JobFormPage />} />
         <Route path={ROUTES.JOB_DETAIL} element={<JobDetailPage />} />
         <Route path={ROUTES.JOB_EDIT} element={<JobFormPage />} />
-        {/* Both routes render CandidatesPage, so React would reconcile them in
-            place and carry the per-job board's filter/view onto the org-wide
-            URL. Distinct keys force a remount when crossing between them; job
-            A → job B keeps one key, so the page's own re-seed effect still
-            handles that case without a needless remount. */}
-        <Route path={ROUTES.JOB_CANDIDATES} element={<CandidatesPage key="job-scoped" />} />
+        {/* Retired standalone per-job board — redirect to the org-wide list
+            filtered by `?job=`. The route stays registered so stale links and
+            notifications redirect here instead of 404ing. */}
+        <Route path={ROUTES.JOB_CANDIDATES} element={<JobCandidatesRedirect />} />
 
-        <Route path={ROUTES.CANDIDATES} element={<CandidatesPage key="org-wide" />} />
+        <Route path={ROUTES.CANDIDATES} element={<CandidatesPage />} />
         <Route path={ROUTES.QUESTIONS} element={<QuestionBankPage />} />
         <Route path={ROUTES.PIPELINE} element={<PipelinePage />} />
+        <Route
+          path={ROUTES.EMAIL_TEMPLATES}
+          element={<EmailTemplatesPage />}
+        />
         <Route path={ROUTES.SETTINGS} element={<OrgSettingsPage />} />
         <Route path={ROUTES.TEAM} element={<TeamPage />} />
       </Route>

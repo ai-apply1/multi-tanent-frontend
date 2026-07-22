@@ -23,10 +23,32 @@ import {
   type OrgUser,
 } from "@/features/users/types";
 import type { UserRole } from "@/features/auth/types";
+import { useAuth } from "@/features/auth/AuthContext";
 import { errorMessage as apiError } from "@/lib/errors";
 import { cn } from "@/lib/utils";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Backend caps fullName at `@MaxLength(100)` — mirror it on the trimmed value. */
+const FULL_NAME_MAX = 100;
+
+/**
+ * The backend validates email with class-validator's `@IsEmail()`; a single
+ * regex can't reproduce validator.js exactly, so on top of the loose shape
+ * check we reject the drift it would 400 on that `EMAIL_PATTERN` and the
+ * browser's native `type=email` both let through: an empty dot-delimited
+ * segment on either side of the `@` (consecutive dots, or a leading/trailing
+ * dot in the local part or any domain label, e.g. `john..doe@acme.com`).
+ */
+function isValidEmail(value: string): boolean {
+  if (!EMAIL_PATTERN.test(value)) return false;
+  const at = value.lastIndexOf("@");
+  const noEmptySegment = (part: string) =>
+    part.split(".").every((segment) => segment.length > 0);
+  return (
+    noEmptySegment(value.slice(0, at)) && noEmptySegment(value.slice(at + 1))
+  );
+}
 
 const USER_NAME_HINT =
   "Lowercase letters, digits, dot, underscore or hyphen. 3–50 chars.";
@@ -54,7 +76,7 @@ function errorHint(message: string): string | null {
     return "Seat counts are set by the platform admin — you can deactivate an existing member to free a seat, or ask them to raise the limit.";
   }
   if (/(already|taken|duplicate|in use|registered)/i.test(message)) {
-    return "Emails and usernames are unique across every organization on the platform, not just yours — a value that looks free here may be claimed elsewhere.";
+    return "That email or username is already used by a member of your organization — reactivate the existing member (they may be deactivated) or pick a different value.";
   }
   return null;
 }
@@ -83,6 +105,7 @@ export function UserFormDialog({
   isSelf = false,
 }: UserFormDialogProps) {
   const queryClient = useQueryClient();
+  const { refreshMe } = useAuth();
   const isEdit = Boolean(user);
 
   const [fullName, setFullName] = useState("");
@@ -154,8 +177,12 @@ export function UserFormDialog({
         // yourself is not offered either (the toggle is disabled).
         ...(!isSelf && user!.isActive !== isActive ? { isActive } : {}),
       }),
-    onSuccess: () => {
+    onSuccess: async () => {
       invalidateLists();
+      // A self-rename must also refresh the session identity: TopBar and
+      // Sidebar render fullName from AuthContext, which the list invalidation
+      // above doesn't touch, so without this they stay stale until a reload.
+      if (isSelf) await refreshMe();
       toast.success("Member updated.");
       onOpenChange(false);
     },
@@ -165,9 +192,14 @@ export function UserFormDialog({
   const mutation = isEdit ? updateMutation : createMutation;
   const busy = mutation.isPending;
 
+  const trimmedName = fullName.trim();
   const nameError =
-    fullName.trim().length === 0 ? "A full name is required." : null;
-  const emailError = !EMAIL_PATTERN.test(email.trim())
+    trimmedName.length === 0
+      ? "A full name is required."
+      : trimmedName.length > FULL_NAME_MAX
+        ? `Full name must be ${FULL_NAME_MAX} characters or fewer.`
+        : null;
+  const emailError = !isValidEmail(email.trim())
     ? "Enter a valid email address."
     : null;
   const userNameError = !USER_NAME_PATTERN.test(userName.trim())

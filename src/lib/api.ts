@@ -9,6 +9,7 @@ import {
 } from "@/lib/crypto"
 import { BASIC_AUTH_HEADER } from "@/lib/basicAuth"
 import { devTenant } from "@/lib/devTenant"
+import { API_PREFIX } from "@/lib/apiPrefix"
 
 /**
  * Default request headers sent on every backend call.
@@ -45,6 +46,11 @@ export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "http://localh
   /\/+$/,
   ""
 )
+
+// Re-exported (imported at the top) from its own zero-import module so
+// `crypto.ts` can share the constant without a load-time cycle. Spelled ONCE now
+// (this app used to inline `/api/v1` here and in the crypto bootstrap).
+export { API_PREFIX }
 
 /**
  * Resolve a backend path (e.g. `/api/v1/admin/interviews/:id/video`) to an
@@ -92,7 +98,7 @@ const BLOB_TIMEOUT_MS = 10 * 60_000
  * a cross-site pair set SAME_SITE=none + SECURE=true on the backend.
  */
 export const api = axios.create({
-  baseURL: `${API_BASE_URL}/api/v1`,
+  baseURL: `${API_BASE_URL}${API_PREFIX}`,
   withCredentials: true,
   timeout: JSON_TIMEOUT_MS,
   headers: defaultHeaders
@@ -210,8 +216,42 @@ interface CryptoRequestMeta {
 
 const SKIP_HEADER = "x-skip-crypto"
 
+/**
+ * Read/remove the skip marker case-INSENSITIVELY. Axios preserves a header key
+ * exactly as the caller cased it, so a caller spelling `X-Skip-Crypto` while
+ * this file looked up `x-skip-crypto` by bracket access would miss the opt-out
+ * entirely: the request gets enveloped anyway AND leaks the marker to the
+ * server. For this dashboard that would corrupt a binary CSV/video download.
+ * Ported from the screening app, which documented and fixed the same trap.
+ */
+type LooseHeaders =
+  | {
+      get?: (n: string) => unknown
+      delete?: (n: string) => unknown
+      [k: string]: unknown
+    }
+  | undefined
+
+const readSkipHeader = (headers: LooseHeaders): unknown => {
+  if (!headers) return undefined
+  if (typeof headers.get === "function") return headers.get(SKIP_HEADER)
+  const key = Object.keys(headers).find((h) => h.toLowerCase() === SKIP_HEADER)
+  return key ? headers[key] : undefined
+}
+
+const removeSkipHeader = (headers: LooseHeaders): void => {
+  if (!headers) return
+  if (typeof headers.delete === "function") {
+    headers.delete(SKIP_HEADER)
+    return
+  }
+  for (const h of Object.keys(headers)) {
+    if (h.toLowerCase() === SKIP_HEADER) delete headers[h]
+  }
+}
+
 function shouldSkipEntirely(config: InternalAxiosRequestConfig): boolean {
-  const skipHeader = config.headers?.[SKIP_HEADER]
+  const skipHeader = readSkipHeader(config.headers as LooseHeaders)
   if (skipHeader === "1" || skipHeader === 1 || skipHeader === true) return true
   const url = config.url ?? ""
   if (url.includes("/crypto/public-key")) return true
@@ -264,7 +304,7 @@ api.interceptors.request.use(async (config) => {
   }
 
   if (shouldSkipEntirely(config)) {
-    if (config.headers) delete config.headers[SKIP_HEADER]
+    removeSkipHeader(config.headers as LooseHeaders)
     return config
   }
 

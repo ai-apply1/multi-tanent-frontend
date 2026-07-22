@@ -1,4 +1,5 @@
-import { cn } from "@/lib/utils"
+import { useState } from "react";
+import { cn } from "@/lib/utils";
 
 /**
  * Standardised box for an ORG-UPLOADED logo. The one place that sizing is
@@ -33,9 +34,9 @@ const SIZES = {
   md: { box: "h-6.5 max-w-36", fallback: "h-7 w-7 text-[13px]" },
   /** Hero: the login screen. */
   lg: { box: "h-8 max-w-44", fallback: "h-9 w-9 text-[14px]" },
-} as const
+} as const;
 
-export type OrgLogoSize = keyof typeof SIZES
+export type OrgLogoSize = keyof typeof SIZES;
 
 /** First letter of each of the first two words — the no-logo avatar. */
 function orgInitials(name: string): string {
@@ -46,7 +47,7 @@ function orgInitials(name: string): string {
       .slice(0, 2)
       .map((p) => p[0]?.toUpperCase() || "")
       .join("") || "?"
-  )
+  );
 }
 
 interface OrgLogoProps {
@@ -55,17 +56,17 @@ interface OrgLogoProps {
    * rather than omitting it), so the initials fallback is the common path, not
    * an edge case.
    */
-  logoUrl?: string | null
+  logoUrl?: string | null;
   /**
    * The variant for DARK backgrounds — "dark" names the backdrop, so the
    * artwork is usually white. Also routinely absent: most orgs upload one mark,
    * and `""` here means "use `logoUrl` on both themes", never "no logo".
    */
-  logoDarkUrl?: string | null
+  logoDarkUrl?: string | null;
   /** Used for `alt`/`title`, and for the initials fallback. */
-  name: string
-  size?: OrgLogoSize
-  className?: string
+  name: string;
+  size?: OrgLogoSize;
+  className?: string;
 }
 
 export function OrgLogo({
@@ -75,9 +76,17 @@ export function OrgLogo({
   size = "md",
   className,
 }: OrgLogoProps) {
-  const { box, fallback } = SIZES[size]
+  const { box, fallback } = SIZES[size];
 
-  if (!logoUrl) {
+  // Recover from a DEAD logo URL (deleted S3 object, expired link) instead of
+  // painting the browser's broken-image glyph. `brokenSrc` is keyed by the URL
+  // that failed, so it resets naturally when the tenant (and its `logoUrl`)
+  // changes. Mirrors the screening app's `BrandLogo`, which the same candidate
+  // may also see. The dark variant falls back to the light one on error (below)
+  // rather than to initials, so a broken dark asset never hides a working mark.
+  const [brokenSrc, setBrokenSrc] = useState<string | null>(null);
+
+  if (!logoUrl || brokenSrc === logoUrl) {
     return (
       <span
         title={name}
@@ -89,7 +98,7 @@ export function OrgLogo({
       >
         {orgInitials(name)}
       </span>
-    )
+    );
   }
 
   /*
@@ -99,7 +108,7 @@ export function OrgLogo({
    * `max-w-full` caps a very wide wordmark, and `object-contain` letterboxes it
    * rather than distorting.
    */
-  const imgClass = "h-full w-auto max-w-full object-contain"
+  const imgClass = "h-full w-auto max-w-full object-contain";
 
   /*
    * With a dark variant on file, the two marks swap on the theme and NEITHER
@@ -120,6 +129,7 @@ export function OrgLogo({
             title={name}
             className={cn(imgClass, "block dark:hidden")}
             draggable={false}
+            onError={() => setBrokenSrc(logoUrl)}
           />
           <img
             src={logoDarkUrl}
@@ -127,10 +137,15 @@ export function OrgLogo({
             title={name}
             className={cn(imgClass, "hidden dark:block")}
             draggable={false}
+            // Fall the dark variant back to the light mark rather than to
+            // initials, so a broken dark asset doesn't hide a working logo.
+            onError={(e) => {
+              if (e.currentTarget.src !== logoUrl) e.currentTarget.src = logoUrl;
+            }}
           />
         </span>
       </span>
-    )
+    );
   }
 
   return (
@@ -156,8 +171,9 @@ export function OrgLogo({
           title={name}
           className={imgClass}
           draggable={false}
+          onError={() => setBrokenSrc(logoUrl)}
         />
       </span>
     </span>
-  )
+  );
 }

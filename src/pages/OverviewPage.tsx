@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { Link } from "react-router-dom";
 import {
   useMutation,
   useQuery,
@@ -81,6 +82,7 @@ import {
 } from "@/features/candidates/candidatesApi";
 import { InterviewDetailDrawer } from "@/components/interviews/InterviewDetailDrawer";
 import { useAuth } from "@/features/auth/AuthContext";
+import { ROUTES } from "@/routes";
 import { errorMessage } from "@/lib/errors";
 import { cn } from "@/lib/utils";
 
@@ -614,7 +616,7 @@ export function OverviewPage() {
                   Awaiting your decision
                 </h2>
                 <span className="mono ml-auto rounded-md bg-[var(--warning-soft)] px-2 py-0.5 text-[11.5px] font-semibold text-[var(--warning)]">
-                  {awaiting.length} open
+                  {awaitingData?.count ?? awaiting.length} open
                 </span>
               </div>
               {awaiting.length === 0 ? (
@@ -649,6 +651,20 @@ export function OverviewPage() {
                   ))}
                 </div>
               )}
+              {/* The list is windowed to the first few rows, but the badge counts
+                  every `scored` candidate — so when the total exceeds the window
+                  the rest are off-screen. Link into the Candidates page
+                  pre-filtered to the `scored` status (its `?status=` param seeds
+                  `statusFilter`) so those rows stay reachable from the dashboard. */}
+              {(awaitingData?.count ?? 0) > awaiting.length ? (
+                <Link
+                  to={`${ROUTES.CANDIDATES}?status=scored`}
+                  className="flex items-center justify-center gap-1 border-t border-line px-[18px] py-3 text-[12.5px] font-semibold text-primary hover:bg-hover"
+                >
+                  View all {awaitingData?.count} awaiting
+                  <ChevronRight className="h-3.5 w-3.5" strokeWidth={1.8} />
+                </Link>
+              ) : null}
             </div>
           </div>
         </>
@@ -706,8 +722,13 @@ export function OverviewPage() {
         }}
       />
 
+      {/* `candidateId` is passed alongside `sessionId` so the drawer opens even
+          when the row has no interview yet — e.g. a candidate manually moved
+          into the `scored` column. Without it the click silently no-op'd,
+          because `interviewSessionId` stays null when `latestInterviewId` is. */}
       <InterviewDetailDrawer
         sessionId={interviewSessionId}
+        candidateId={drawerCandidateId}
         onOpenChange={(open) => {
           if (!open) setDrawerCandidateId(null);
         }}

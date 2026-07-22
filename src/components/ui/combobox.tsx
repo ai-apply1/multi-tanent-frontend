@@ -29,6 +29,12 @@ export interface ComboboxProps {
  * value when `allowCustom` is set. Built on a plain input + an absolutely
  * positioned list (no Radix) so typing focus is never stolen. Suggestions are
  * meant to come from the server (e.g. the distinct question topic labels).
+ *
+ * Filtering only kicks in once the user TYPES in the current open session —
+ * never against the already-committed value. Otherwise opening the picker
+ * with "UTC" selected would show a one-row list and read as "there is nothing
+ * else to choose"; on open the full list renders with the current selection
+ * scrolled into view.
  */
 export function Combobox({
   id,
@@ -44,18 +50,22 @@ export function Combobox({
 }: ComboboxProps) {
   const [open, setOpen] = React.useState(false)
   const [active, setActive] = React.useState(-1)
+  /** Has the user edited the input since this open? Committed text never filters. */
+  const [typedSinceOpen, setTypedSinceOpen] = React.useState(false)
   const blurTimer = React.useRef<number | null>(null)
+  const listRef = React.useRef<HTMLDivElement>(null)
 
   const q = value.trim().toLowerCase()
-  const filtered = q
-    ? options.filter(
-        (o) =>
-          o.value.toLowerCase().includes(q) ||
-          (o.label ?? "").toLowerCase().includes(q)
-      )
-    : options
+  const filtered =
+    typedSinceOpen && q
+      ? options.filter(
+          (o) =>
+            o.value.toLowerCase().includes(q) ||
+            (o.label ?? "").toLowerCase().includes(q)
+        )
+      : options
   const exact = options.some((o) => o.value.toLowerCase() === q)
-  const showCustom = allowCustom && q.length > 0 && !exact
+  const showCustom = allowCustom && typedSinceOpen && q.length > 0 && !exact
 
   React.useEffect(
     () => () => {
@@ -63,6 +73,15 @@ export function Combobox({
     },
     []
   )
+
+  // On a fresh open the full list renders — bring the committed choice into
+  // view so a long catalog (400 timezones) doesn't open at the top.
+  React.useEffect(() => {
+    if (!open || typedSinceOpen) return
+    listRef.current
+      ?.querySelector('[data-selected="true"]')
+      ?.scrollIntoView({ block: "nearest" })
+  }, [open, typedSinceOpen])
 
   const commit = (v: string) => {
     onValueChange(v)
@@ -89,11 +108,15 @@ export function Combobox({
           aria-expanded={open}
           aria-invalid={ariaInvalid}
           className={cn("pr-9", inputClassName)}
-          onFocus={() => setOpen(true)}
+          onFocus={() => {
+            setOpen(true)
+            setTypedSinceOpen(false)
+          }}
           onChange={(e) => {
             onValueChange(e.target.value)
             setOpen(true)
             setActive(-1)
+            setTypedSinceOpen(true)
           }}
           onBlur={() => {
             blurTimer.current = window.setTimeout(() => setOpen(false), 120)
@@ -101,6 +124,7 @@ export function Combobox({
           onKeyDown={(e) => {
             if (!open && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
               setOpen(true)
+              setTypedSinceOpen(false)
               return
             }
             if (!open) return
@@ -126,6 +150,7 @@ export function Combobox({
 
       {open && rows.length > 0 ? (
         <div
+          ref={listRef}
           // Keep the input focused when clicking a row (mousedown fires first).
           onMouseDown={(e) => e.preventDefault()}
           className="absolute z-50 mt-1 max-h-56 w-full overflow-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
@@ -152,6 +177,7 @@ export function Combobox({
               <button
                 key={o.value}
                 type="button"
+                data-selected={isSelected ? "true" : undefined}
                 onClick={() => commit(o.value)}
                 className={cn(
                   "flex w-full cursor-pointer items-center rounded-sm px-2 py-1.5 text-left text-sm outline-none transition-colors",

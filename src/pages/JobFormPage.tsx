@@ -12,8 +12,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Markdown } from "@/components/Markdown";
 import { ChipInput } from "@/features/jobs/components/ChipInput";
+import { MarkdownEditor } from "@/features/jobs/components/MarkdownEditor";
 import {
   ANY_CITY_VALUE,
   OTHER_CITY_VALUE,
@@ -631,9 +631,6 @@ function BasicsStep({
   description: string;
   setDescription: (v: string) => void;
 }) {
-  const [showPreview, setShowPreview] = useState(false);
-  const hasDescription = description.trim().length > 0;
-
   return (
     <div>
       <StepHead
@@ -659,74 +656,17 @@ function BasicsStep({
           {titleError ? <p className={ERROR_CLASS}>{titleError}</p> : null}
         </div>
         <div>
-          {/* Label + Write/Preview toggle share one vertically-centered row. */}
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-            <label
-              htmlFor="job-description"
-              className="text-[13px] font-semibold text-ink"
-            >
-              Description
-            </label>
-            {/* Write / Preview segmented control — lets HR see the rendered
-                markdown (same react-markdown pipeline the candidate ultimately
-                sees via `Markdown`) before creating the job. */}
-            <div
-              role="tablist"
-              aria-label="Description editor mode"
-              className="inline-flex items-center gap-1 rounded-lg border border-[var(--field-border)] bg-surface-3 p-1 text-[12px] font-semibold"
-            >
-              <button
-                type="button"
-                role="tab"
-                onClick={() => setShowPreview(false)}
-                aria-selected={!showPreview}
-                className={`rounded-md px-3 py-1 transition-colors ${
-                  !showPreview
-                    ? "bg-primary text-white shadow-sm"
-                    : "text-ink-muted hover:bg-surface hover:text-ink"
-                }`}
-              >
-                Write
-              </button>
-              <button
-                type="button"
-                role="tab"
-                onClick={() => setShowPreview(true)}
-                aria-selected={showPreview}
-                className={`rounded-md px-3 py-1 transition-colors ${
-                  showPreview
-                    ? "bg-primary text-white shadow-sm"
-                    : "text-ink-muted hover:bg-surface hover:text-ink"
-                }`}
-              >
-                Preview
-              </button>
-            </div>
-          </div>
-          {showPreview ? (
-            <div className="min-h-[168px] w-full rounded-lg border border-[var(--field-border)] bg-surface p-3.5 text-[14px] text-ink">
-              {hasDescription ? (
-                <Markdown content={description} />
-              ) : (
-                <p className="text-[14px] text-ink-subtle">
-                  Nothing to preview yet. Switch to Write and add a description.
-                </p>
-              )}
-            </div>
-          ) : (
-            <textarea
-              id="job-description"
-              value={description}
-              maxLength={5000}
-              rows={6}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="What the role involves…"
-              className="w-full resize-y rounded-lg border border-[var(--field-border)] bg-surface p-3.5 text-[14px] text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)]"
-            />
-          )}
-          <p className={HELP_CLASS}>
-            Markdown supported. Max 5000 characters. {description.length}/5000
-          </p>
+          <label htmlFor="job-description" className={LABEL_CLASS}>
+            Description
+          </label>
+          <MarkdownEditor
+            id="job-description"
+            value={description}
+            onChange={setDescription}
+            maxLength={5000}
+            rows={6}
+            placeholder="What the role involves…"
+          />
         </div>
       </div>
     </div>

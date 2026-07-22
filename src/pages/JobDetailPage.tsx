@@ -1,14 +1,10 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AlertTriangle,
   ChevronDown,
-  Clock,
-  Loader,
   Loader2,
   Pencil,
-  Search,
   Share2,
   Star,
   Upload,
@@ -27,13 +23,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { JobQuestionsManager } from "@/features/jobs/components/JobQuestionsManager";
 import { JobShareDialog } from "@/features/jobs/components/JobShareDialog";
 import { getJob, setJobStatus } from "@/features/jobs/jobsApi";
@@ -48,29 +37,14 @@ import {
 } from "@/features/jobs/types";
 import { useOrganization } from "@/features/organization/useOrganization";
 import { UploadCvsDialog } from "@/features/candidates/components/UploadCvsDialog";
-import {
-  getCandidate,
-  getCandidateKanban,
-  listCandidateStatuses,
-  listCandidates,
-} from "@/features/candidates/candidatesApi";
-import { invalidateCandidateData } from "@/features/candidates/candidatesCache";
-import { aiScoreState, type AiScoreState } from "@/features/candidates/aiScore";
-import type {
-  CandidateListItem,
-  CandidateStatus,
-} from "@/features/candidates/types";
-import { InterviewDetailDrawer } from "@/components/interviews/InterviewDetailDrawer";
+import { getCandidateKanban } from "@/features/candidates/candidatesApi";
+import { invalidateCandidateDataAndJobCounts } from "@/features/candidates/candidatesCache";
+import type { KanbanColumn } from "@/features/candidates/types";
 import { ROUTES, jobEdit } from "@/routes";
 import { errorMessage } from "@/lib/errors";
-import { formatDate } from "@/lib/date";
-import { cn } from "@/lib/utils";
 import { JobStatusBadge } from "./JobsPage";
 
-type TabId = "overview" | "questions" | "candidates";
-
-/** Radix `Select` forbids empty values — sentinel for the "all statuses" case. */
-const ALL_STATUSES = "all";
+type TabId = "overview" | "questions";
 
 /**
  * Stage badge tint. Mirrors the helper used by CandidatesPage so the two
@@ -90,16 +64,6 @@ function stageBadgeStyle(color: string | null | undefined) {
   };
 }
 
-/** Two initials for the avatar bubble. Empty collapses to a single dash. */
-function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "—";
-  return parts
-    .slice(0, 2)
-    .map((p) => p[0]?.toUpperCase() ?? "")
-    .join("");
-}
-
 export function JobDetailPage() {
   const { jobId } = useParams<{ jobId: string }>();
   const navigate = useNavigate();
@@ -107,13 +71,6 @@ export function JobDetailPage() {
   const [tab, setTab] = useState<TabId>("overview");
   const [uploadOpen, setUploadOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
-  // The drawer is keyed by `publicSessionId`, but candidate rows only ship
-  // the interview's raw ObjectId — so opening the drawer is a two-step:
-  // remember the candidate, read the detail, hand the drawer the resolved
-  // session id. Same pattern as CandidatesPage.
-  const [drawerCandidateId, setDrawerCandidateId] = useState<string | null>(
-    null,
-  );
 
   const {
     data: job,
@@ -189,24 +146,12 @@ export function JobDetailPage() {
       hired: stage("hired", "Finalized"),
     };
   }, [boardQuery.data]);
-  // Resolve `publicSessionId` for the drawer target.
-  const detailQuery = useQuery({
-    queryKey: ["candidate", drawerCandidateId],
-    queryFn: () => getCandidate(drawerCandidateId as string),
-    enabled: Boolean(drawerCandidateId),
-  });
-  const interviewSessionId =
-    detailQuery.data?.latestInterviewId?.publicSessionId ?? null;
 
-  useEffect(() => {
-    if (!detailQuery.isError) return;
-    toast.error(
-      errorMessage(detailQuery.error, "Could not open the interview."),
-    );
-    setDrawerCandidateId(null);
-  }, [detailQuery.isError, detailQuery.error]);
-
-  const invalidateCandidates = () => invalidateCandidateData(queryClient);
+  // Import CREATES candidates, which moves this job's total applicant count —
+  // so the CV-import callback below refreshes the Jobs list too, not just the
+  // candidate-derived surfaces.
+  const invalidateCandidates = () =>
+    invalidateCandidateDataAndJobCounts(queryClient);
 
   if (isLoading) {
     return <JobDetailSkeleton />;
@@ -240,14 +185,6 @@ export function JobDetailPage() {
     job.workMode ? WORK_MODE_LABELS[job.workMode] : null,
     job.seniorityLevel ? SENIORITY_LABELS[job.seniorityLevel] : null,
   ].filter((c): c is string => Boolean(c));
-
-  // Row click → drawer. The drawer accepts a bare candidate id (falling back
-  // to the per-tab "no interview yet" empty states) so rejected pre-screens
-  // and invited-but-not-started candidates open the same surface as everyone
-  // else — clicking a row is never a silent no-op.
-  const handleRowClick = (row: CandidateListItem) => {
-    setDrawerCandidateId(row._id);
-  };
 
   return (
     <div className="mx-auto max-w-[1240px] px-6 py-6 lg:px-8 lg:py-8">
@@ -398,31 +335,20 @@ export function JobDetailPage() {
           Questions
         </TabButton>
         <TabButton
-          active={tab === "candidates"}
-          onClick={() => setTab("candidates")}
+          active={false}
+          onClick={() => navigate(`${ROUTES.CANDIDATES}?job=${job._id}`)}
         >
           Candidates
         </TabButton>
       </div>
 
       {tab === "overview" ? (
-        <OverviewTab job={job} kpi={kpi} />
-      ) : tab === "questions" ? (
-        <JobQuestionsManager job={job} />
+        <OverviewTab job={job} kpi={kpi} columns={boardQuery.data?.columns} />
       ) : (
-        <CandidatesTab
-          jobId={job._id}
-          jobTitle={job.title}
-          onRowClick={handleRowClick}
-          onUpload={() => setUploadOpen(true)}
-          resolvingCandidateId={
-            detailQuery.isLoading ? drawerCandidateId : null
-          }
-        />
+        <JobQuestionsManager job={job} />
       )}
 
-      {/* Upload dialog — mounted once, opened by both the header CTA and the
-          Candidates empty-state CTA. */}
+      {/* Upload dialog — mounted once, opened by the header CTA. */}
       <UploadCvsDialog
         open={uploadOpen}
         onOpenChange={setUploadOpen}
@@ -430,21 +356,21 @@ export function JobDetailPage() {
         jobTitle={job.title}
         onImported={invalidateCandidates}
       />
-
-      <InterviewDetailDrawer
-        sessionId={interviewSessionId}
-        candidateId={drawerCandidateId}
-        onOpenChange={(open) => {
-          if (!open) setDrawerCandidateId(null);
-        }}
-      />
     </div>
   );
 }
 
 // ── Overview tab ─────────────────────────────────────────────────────
 
-function OverviewTab({ job, kpi }: { job: Job; kpi: JobKpi }) {
+function OverviewTab({
+  job,
+  kpi,
+  columns,
+}: {
+  job: Job;
+  kpi: JobKpi;
+  columns: KanbanColumn[] | undefined;
+}) {
   const { data: organization } = useOrganization();
   const requiredSkills = job.eligibility.requiredSkills;
 
@@ -520,11 +446,16 @@ function OverviewTab({ job, kpi }: { job: Job; kpi: JobKpi }) {
                 <span className="mono">{job.maxAttempts}</span>
               )}
             </MetaCell>
-            <MetaCell label="Shortlist threshold">
-              <span className="mono">{job.rejectionThreshold}</span>
-            </MetaCell>
           </div>
         </SectionCard>
+      </div>
+
+      {/* Right column. `sticky` inside the two-column grid keeps the rail
+          pinned as the left column (description) scrolls past — the top offset
+          is the 60px TopBar height + a small breathing gap. Falls back to
+          normal flow on narrow layouts where the columns stack. */}
+      <div className="grid gap-4 lg:sticky lg:top-3 lg:self-start">
+        <FunnelCard kpi={kpi} columns={columns} />
 
         <SectionCard>
           <div className="mb-3.5 flex items-center justify-between">
@@ -540,357 +471,13 @@ function OverviewTab({ job, kpi }: { job: Job; kpi: JobKpi }) {
               No candidates have completed their interview yet
             </p>
             <p className="max-w-[340px] text-[12.5px] text-ink-muted">
-              Share the invite link on the right — completed interviews will be
-              ranked here.
+              Share the invite link and completed interviews will be ranked
+              here.
             </p>
           </div>
         </SectionCard>
       </div>
-
-      {/* Right column. `sticky` inside the two-column grid keeps the funnel
-          card pinned as the left column (description + top candidates) scrolls
-          past — the top offset is the 60px TopBar height + a small breathing
-          gap. Falls back to normal flow on narrow layouts where the columns
-          stack. */}
-      <div className="grid gap-4 lg:sticky lg:top-3 lg:self-start">
-        <FunnelCard kpi={kpi} />
-      </div>
     </div>
-  );
-}
-
-// ── Candidates tab ────────────────────────────────────────────────────
-
-/**
- * Job-scoped candidates table. Rides the same list endpoint the org-wide
- * Candidates page uses, filtered to this job. Row click opens the interview
- * drawer via a two-step candidate → publicSessionId resolve; rows without an
- * interview toast the reason (the drawer is session-keyed).
- */
-function CandidatesTab({
-  jobId,
-  jobTitle,
-  onRowClick,
-  onUpload,
-  resolvingCandidateId,
-}: {
-  jobId: string;
-  jobTitle: string;
-  onRowClick: (row: CandidateListItem) => void;
-  onUpload: () => void;
-  resolvingCandidateId: string | null;
-}) {
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>(ALL_STATUSES);
-
-  const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ["candidates", { jobId, limit: 100 }],
-    queryFn: () => listCandidates({ jobId, limit: 100 }),
-  });
-
-  const statusesQuery = useQuery({
-    queryKey: ["candidateStatuses"],
-    queryFn: listCandidateStatuses,
-    staleTime: 5 * 60_000,
-  });
-  const statuses = useMemo<CandidateStatus[]>(
-    () => statusesQuery.data ?? [],
-    [statusesQuery.data],
-  );
-  const statusByKey = useMemo(
-    () => new Map(statuses.map((s) => [s.key, s])),
-    [statuses],
-  );
-
-  const rows = data?.data ?? [];
-  const total = data?.count ?? rows.length;
-
-  // Local filter — the spec calls for search-by-name/email and a status
-  // dropdown that filters in-place rather than firing a new list read.
-  const term = search.trim().toLowerCase();
-  const filtered = useMemo(() => {
-    return rows.filter((row) => {
-      if (
-        statusFilter !== ALL_STATUSES &&
-        row.currentStatusId.key !== statusFilter
-      ) {
-        return false;
-      }
-      if (!term) return true;
-      const hay = `${row.fullName ?? ""} ${row.email ?? ""}`.toLowerCase();
-      return hay.includes(term);
-    });
-  }, [rows, term, statusFilter]);
-
-  const shownCount = filtered.length;
-
-  return (
-    <div className="rounded-2xl border border-line bg-surface">
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-3 border-b border-line px-[18px] py-[15px]">
-        <div className="min-w-0">
-          <span className="text-[13.5px] font-semibold text-ink">
-            {shownCount} applicant{shownCount === 1 ? "" : "s"}
-          </span>
-        </div>
-        <div className="flex-1" />
-        <div className="relative w-full sm:w-72">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name or email…"
-            className="h-9 w-full rounded-full border border-[var(--field-border)] bg-surface pl-9 pr-3 text-[13px] text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)]"
-          />
-        </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger
-            className="h-9 w-full shrink-0 rounded-full sm:w-[170px]"
-            style={
-              statusFilter !== ALL_STATUSES
-                ? stageBadgeStyle(statusByKey.get(statusFilter)?.color)
-                : undefined
-            }
-            aria-label="Status"
-          >
-            <SelectValue placeholder="All statuses" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL_STATUSES}>All statuses</SelectItem>
-            {statuses.map((status) => (
-              <SelectItem key={status._id} value={status.key}>
-                <span className="flex items-center gap-2">
-                  <span
-                    className="h-2 w-2 shrink-0 rounded-full"
-                    style={{
-                      backgroundColor: status.color ?? "var(--ink-muted)",
-                    }}
-                  />
-                  {status.label}
-                </span>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Grid header */}
-      <div
-        className="grid items-center gap-3 border-b border-line bg-surface-3 px-[18px] py-2.5 text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-muted"
-        style={{ gridTemplateColumns: "1.7fr 1.3fr auto 1fr 0.8fr" }}
-      >
-        <span>Candidate</span>
-        <span>Role</span>
-        <span>Status</span>
-        <span>AI score</span>
-        <span>Date</span>
-      </div>
-
-      {isLoading ? (
-        <div className="grid">
-          {[0, 1, 2].map((i) => (
-            <div
-              key={i}
-              className="grid items-center gap-3 border-b border-line px-[18px] py-3.5 last:border-b-0"
-              style={{ gridTemplateColumns: "1.7fr 1.3fr auto 1fr 0.8fr" }}
-            >
-              <div className="flex items-center gap-2.5">
-                <div className="h-[34px] w-[34px] shrink-0 animate-pulse rounded-full bg-surface-3" />
-                <div className="min-w-0 flex-1 space-y-1.5">
-                  <div className="h-3 w-32 animate-pulse rounded bg-surface-3" />
-                  <div className="h-2.5 w-40 animate-pulse rounded bg-surface-3" />
-                </div>
-              </div>
-              <div className="h-3 w-24 animate-pulse rounded bg-surface-3" />
-              <div className="h-5 w-20 animate-pulse rounded-full bg-surface-3" />
-              <div className="h-2 w-[54px] animate-pulse rounded-full bg-surface-3" />
-              <div className="h-3 w-16 animate-pulse rounded bg-surface-3" />
-            </div>
-          ))}
-        </div>
-      ) : isError ? (
-        <div className="flex flex-col items-center gap-2 px-6 py-16 text-center text-[13px] text-[var(--danger)]">
-          Could not load candidates.
-          <button onClick={() => refetch()} className="text-primary underline">
-            Retry
-          </button>
-        </div>
-      ) : total === 0 ? (
-        <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
-          <span className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-primary">
-            <Users className="h-6 w-6" strokeWidth={1.7} />
-          </span>
-          <h3 className="text-[16px] font-semibold text-ink">
-            No candidates for this job yet.
-          </h3>
-          <p className="max-w-[340px] text-[13.5px] text-ink-muted">
-            Import CVs to start pre-screening for {jobTitle}.
-          </p>
-          <Button size="sm" onClick={onUpload} className="mt-2">
-            <Upload className="h-4 w-4" strokeWidth={1.9} />
-            Upload CVs
-          </Button>
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="flex flex-col items-center gap-2 px-6 py-14 text-center text-[13px] text-ink-muted">
-          No candidates match the current search or status filter.
-        </div>
-      ) : (
-        <div>
-          {filtered.map((row) => (
-            <CandidateJobRow
-              key={row._id}
-              row={row}
-              jobTitle={jobTitle}
-              resolving={resolvingCandidateId === row._id}
-              onClick={() => onRowClick(row)}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CandidateJobRow({
-  row,
-  jobTitle,
-  resolving,
-  onClick,
-}: {
-  row: CandidateListItem;
-  jobTitle: string;
-  resolving: boolean;
-  onClick: () => void;
-}) {
-  const status = row.currentStatusId;
-  const scoreState = aiScoreState(row.latestInterviewId);
-
-  return (
-    <div
-      onClick={onClick}
-      className={cn(
-        "grid cursor-pointer items-center gap-3 border-b border-line px-[18px] py-3.5 text-[13.5px] transition-colors last:border-b-0 hover:bg-hover",
-      )}
-      style={{ gridTemplateColumns: "1.7fr 1.3fr auto 1fr 0.8fr" }}
-    >
-      <div className="flex min-w-0 items-center gap-2.5">
-        <span
-          aria-hidden
-          className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-accent text-[12px] font-bold text-primary"
-        >
-          {initialsOf(row.fullName || row.email || "")}
-        </span>
-        <span className="min-w-0">
-          <span
-            className="block truncate text-[13.5px] font-semibold text-ink"
-            title={row.fullName}
-          >
-            {row.fullName || "—"}
-          </span>
-          <span
-            className="block truncate text-[11.5px] text-ink-subtle"
-            title={row.email}
-          >
-            {row.email}
-          </span>
-        </span>
-      </div>
-
-      <span
-        className="min-w-0 truncate text-[13px] text-ink-2"
-        title={jobTitle}
-      >
-        {jobTitle || "This job"}
-      </span>
-
-      <span className="justify-self-start">
-        {status ? (
-          <span
-            className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[12px] font-semibold"
-            style={stageBadgeStyle(status.color)}
-          >
-            <span
-              className="h-[7px] w-[7px] shrink-0 rounded-full"
-              style={{ backgroundColor: status.color ?? "var(--ink-muted)" }}
-            />
-            {status.label}
-          </span>
-        ) : (
-          <span className="text-ink-muted">—</span>
-        )}
-      </span>
-
-      <AiScoreCell state={scoreState} />
-
-      <span className="flex items-center gap-2 text-[12.5px] text-ink-muted">
-        {formatDate(row.createdAt)}
-        {resolving ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-        ) : null}
-      </span>
-    </div>
-  );
-}
-
-/**
- * AI score readout — a 54px fill bar plus the mono value, or the reason there
- * isn't one yet. Mirrors the helper on CandidatesPage; both derive every state
- * from the shared `aiScoreState`, which the drawer's score card also uses, so
- * one candidate cannot read differently in two places.
- */
-function AiScoreCell({ state }: { state: AiScoreState }) {
-  if (state.kind !== "scored") {
-    const label =
-      state.kind === "scoring"
-        ? "Scoring"
-        : state.kind === "failed"
-          ? "Scoring failed"
-          : state.kind === "awaiting"
-            ? "Awaiting interview"
-            : "Not scored";
-    return (
-      <span
-        className="inline-flex items-center gap-1.5 text-[13px]"
-        style={{
-          color: state.kind === "failed" ? "var(--danger)" : undefined,
-        }}
-      >
-        {state.kind === "scoring" ? (
-          <Loader className="h-3.5 w-3.5 animate-spin" strokeWidth={1.7} />
-        ) : state.kind === "failed" ? (
-          <AlertTriangle className="h-3.5 w-3.5" strokeWidth={1.7} />
-        ) : (
-          <Clock className="h-3.5 w-3.5" strokeWidth={1.7} />
-        )}
-        <span className={state.kind === "failed" ? "" : "text-ink-subtle"}>
-          {label}
-        </span>
-      </span>
-    );
-  }
-  const value = state.value;
-  const barColor =
-    value >= 70
-      ? "var(--primary)"
-      : value >= 50
-        ? "var(--warning)"
-        : "var(--danger)";
-  return (
-    <span className="flex items-center gap-2.5">
-      <span
-        className="inline-block h-1.5 w-[54px] overflow-hidden rounded-full"
-        style={{ backgroundColor: "var(--surface-3)" }}
-      >
-        <span
-          className="block h-full rounded-full"
-          style={{ width: `${value}%`, backgroundColor: barColor }}
-        />
-      </span>
-      <span className="mono text-[13px] font-bold" style={{ color: barColor }}>
-        {value}
-      </span>
-    </span>
   );
 }
 
@@ -1061,9 +648,7 @@ function Dash() {
   return <span className="text-ink-subtle">—</span>;
 }
 
-// ── Share / invite ───────────────────────────────────────────────────
-// No matching backend endpoint exists for candidate invites on this page,
-// so that part of the UI is limited to copy-to-clipboard on the share link.
+// ── Funnel ───────────────────────────────────────────────────────────
 
 /**
  * Per-stage counts for one job, shared by the KPI tiles and the funnel card
@@ -1082,21 +667,59 @@ function countLabel(count: number | null): string {
 }
 
 /**
- * This job's funnel: how many of its applicants reached each outcome.
+ * This job's funnel: how many of its applicants reached each stage.
  *
- * Was a stub with three hardcoded dashes and 0%-wide bars, under a comment
- * saying no endpoint existed. One does — the same board read that feeds the
- * KPI tiles above, passed in rather than fetched again so the card and the
- * tiles can never show different numbers for the same job.
+ * Every pipeline stage is rendered in board order (do NOT re-sort) using the
+ * column's TRUE total (`count`, independent of the 25-row `candidates` cap) —
+ * the same board read that feeds the KPI tiles above, passed in rather than
+ * fetched again so the card and the tiles can never disagree for the same job.
  *
- * Labels come from the catalog, so a renamed column renames the row.
+ * Labels and dot colours come from the catalog, so a renamed or recoloured
+ * column carries through. While the board is loading (`columns` undefined) the
+ * previous three static rows render with dashes — never a flash of zeros.
+ *
+ * Long pipelines collapse to the first `FUNNEL_COLLAPSED_ROWS` stages (board
+ * order, so the top of the funnel) behind a "View all" toggle — the card sits
+ * in the sticky right rail and must not grow past the viewport.
  */
-function FunnelCard({ kpi }: { kpi: JobKpi }) {
-  const rows = [
-    { ...kpi.shortlisted, tint: "var(--stage-shortlisted)" },
-    { ...kpi.finalRejected, tint: "var(--danger)" },
-    { ...kpi.hired, tint: "var(--success)" },
-  ];
+const FUNNEL_COLLAPSED_ROWS = 6;
+
+function FunnelCard({
+  kpi,
+  columns,
+}: {
+  kpi: JobKpi;
+  columns: KanbanColumn[] | undefined;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const rows: { key: string; label: string; count: number | null; tint: string }[] =
+    columns
+      ? columns.map((column) => ({
+          key: column.key,
+          label: column.label,
+          count: column.count,
+          tint: stageBadgeStyle(column.color).color,
+        }))
+      : [
+          {
+            key: "shortlisted",
+            label: kpi.shortlisted.label,
+            count: null,
+            tint: "var(--stage-shortlisted)",
+          },
+          {
+            key: "final_rejected",
+            label: kpi.finalRejected.label,
+            count: null,
+            tint: "var(--danger)",
+          },
+          {
+            key: "hired",
+            label: kpi.hired.label,
+            count: null,
+            tint: "var(--success)",
+          },
+        ];
   return (
     <div className="rounded-2xl border border-line bg-surface p-5 sm:p-6">
       <div className="mb-3 flex items-center justify-between">
@@ -1108,22 +731,28 @@ function FunnelCard({ kpi }: { kpi: JobKpi }) {
         </span>
       </div>
       <div className="grid gap-3">
-        {rows.map((r) => {
+        {(expanded ? rows : rows.slice(0, FUNNEL_COLLAPSED_ROWS)).map((r) => {
           /*
            * Share of all applicants. The 6% floor keeps a real-but-tiny bar
            * visible (1 of 900 rounds to 0%) and must NOT apply to zero — a
            * stub of colour on an empty stage reads as "a few", which is the
-           * one thing a funnel must never imply. Same rule as the overview
-           * funnel; they are separate components but must not disagree.
+           * one thing a funnel must never imply.
            */
           const pct =
             kpi.total && r.count
               ? Math.max(6, Math.round((r.count / kpi.total) * 100))
               : 0;
           return (
-            <div key={r.label}>
+            <div key={r.key}>
               <div className="mb-1.5 flex justify-between text-[12.5px]">
-                <span className="font-medium text-ink-2">{r.label}</span>
+                <span className="flex items-center gap-1.5 font-medium text-ink-2">
+                  <span
+                    aria-hidden
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: r.tint }}
+                  />
+                  {r.label}
+                </span>
                 <span className="mono font-bold text-ink-muted">
                   {countLabel(r.count)}
                 </span>
@@ -1138,6 +767,15 @@ function FunnelCard({ kpi }: { kpi: JobKpi }) {
           );
         })}
       </div>
+      {rows.length > FUNNEL_COLLAPSED_ROWS ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((e) => !e)}
+          className="mt-4 w-full rounded-lg border border-line py-1.5 text-center text-[12.5px] font-semibold text-primary transition-colors hover:bg-surface-2"
+        >
+          {expanded ? "Show less" : `View all ${rows.length} stages`}
+        </button>
+      ) : null}
     </div>
   );
 }

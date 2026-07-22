@@ -46,9 +46,10 @@ import {
   type JobListItem,
   type JobStatus,
 } from "@/features/jobs/types";
-import { ROUTES, jobCandidates, jobDetail, jobEdit } from "@/routes";
+import { ROUTES, jobDetail, jobEdit } from "@/routes";
 import { formatDate } from "@/lib/date";
 import { errorMessage } from "@/lib/errors";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 const DEFAULT_PAGE_SIZE = 20;
@@ -71,14 +72,18 @@ export function JobsPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<JobStatus | "">("");
   const [deleteTarget, setDeleteTarget] = useState<JobListItem | null>(null);
+  const debouncedSearch = useDebouncedValue(search);
 
   const { data, isLoading, isFetching, isError, refetch } = useQuery({
-    queryKey: ["jobs", { page, limit: pageSize, search, status: statusFilter }],
+    queryKey: [
+      "jobs",
+      { page, limit: pageSize, search: debouncedSearch, status: statusFilter },
+    ],
     queryFn: () =>
       listJobs({
         page,
         limit: pageSize,
-        search: search.trim() || undefined,
+        search: debouncedSearch.trim() || undefined,
         status: statusFilter || undefined,
       }),
     placeholderData: keepPreviousData,
@@ -325,7 +330,9 @@ export function JobsPage() {
                         Edit
                       </DropdownMenuItem>
                       <DropdownMenuItem
-                        onSelect={() => navigate(jobCandidates(row._id))}
+                        onSelect={() =>
+                          navigate(`${ROUTES.CANDIDATES}?job=${row._id}`)
+                        }
                       >
                         View candidates
                       </DropdownMenuItem>

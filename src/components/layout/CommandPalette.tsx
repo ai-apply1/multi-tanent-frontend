@@ -16,6 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { listCandidates } from "@/features/candidates/candidatesApi"
 import { listJobs } from "@/features/jobs/jobsApi"
 import { useAuth } from "@/features/auth/AuthContext"
+import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { ROUTES, jobDetail } from "@/routes"
 
 interface CommandPaletteProps {
@@ -43,20 +44,6 @@ interface PaletteGroup {
 }
 
 /**
- * Debounce a raw search string. Two-hundred ms is deliberate: any less and
- * fast typists trigger a query per keystroke; any more and the palette feels
- * laggy on the first result. Trimmed here so a lone space never fires.
- */
-function useDebounced(value: string, delay = 200): string {
-  const [debounced, setDebounced] = useState(value.trim())
-  useEffect(() => {
-    const id = window.setTimeout(() => setDebounced(value.trim()), delay)
-    return () => window.clearTimeout(id)
-  }, [value, delay])
-  return debounced
-}
-
-/**
  * Command palette (⌘K / Ctrl+K). Renders a centered modal 100px from the top
  * with a search input and result groups: recent Candidates, Jobs, and a
  * static "Go to" list of app routes. Candidate hits deep-link into the
@@ -67,7 +54,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [query, setQuery] = useState("")
-  const debouncedQuery = useDebounced(query)
+  const debouncedQuery = useDebouncedValue(query, 200).trim()
   const inputRef = useRef<HTMLInputElement>(null)
   const [activeIndex, setActiveIndex] = useState(0)
 
@@ -106,16 +93,16 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const isOrgAdmin = user?.role === "org_admin"
   const goToItems = useMemo<PaletteItem[]>(() => {
     const raw: Array<Omit<PaletteItem, "onSelect"> & { to: string }> = [
-      { id: "go-overview", icon: LayoutGrid, title: "Overview", sub: "Pipeline dashboard", to: ROUTES.OVERVIEW },
+      { id: "go-overview", icon: LayoutGrid, title: "Dashboard", sub: "Pipeline dashboard", to: ROUTES.OVERVIEW },
       { id: "go-jobs", icon: Briefcase, title: "Jobs", sub: "All postings", to: ROUTES.JOBS },
       { id: "go-jobs-new", icon: Briefcase, title: "Create job", sub: "New draft posting", to: ROUTES.JOB_NEW },
       { id: "go-candidates", icon: Users2, title: "Candidates", sub: "Every applicant", to: ROUTES.CANDIDATES },
-      { id: "go-questions", icon: Library, title: "Question bank", sub: "Screening questions", to: ROUTES.QUESTIONS },
-      { id: "go-pipeline", icon: GitBranch, title: "Pipeline", sub: "Candidate statuses", to: ROUTES.PIPELINE },
+      { id: "go-questions", icon: Library, title: "Questions", sub: "Screening questions", to: ROUTES.QUESTIONS },
+      { id: "go-pipeline", icon: GitBranch, title: "Hiring Pipeline", sub: "Candidate statuses", to: ROUTES.PIPELINE },
       { id: "go-settings", icon: Settings, title: "Settings", sub: "Branding, domains, apply video & email", to: ROUTES.SETTINGS },
     ]
     if (isOrgAdmin) {
-      raw.push({ id: "go-team", icon: UserSquare2, title: "Team", sub: "Manage members", to: ROUTES.TEAM })
+      raw.push({ id: "go-team", icon: UserSquare2, title: "Manage Team", sub: "Manage members", to: ROUTES.TEAM })
     }
     const q = debouncedQuery.toLowerCase()
     const filtered = q

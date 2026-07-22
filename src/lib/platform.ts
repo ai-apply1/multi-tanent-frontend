@@ -20,7 +20,7 @@
  * intentional and survives for years.
  */
 export const PLATFORM_NAME: string =
-  (import.meta.env.VITE_PLATFORM_NAME ?? "").trim() || "Talent Portal"
+  (import.meta.env.VITE_PLATFORM_NAME ?? "").trim() || "";
 
 /**
  * The platform mark, in two variants because the dashboard has a light and a
@@ -35,12 +35,13 @@ export const PLATFORM_LOGO = {
   light: "/platform-logo-dark.svg",
   /** White ink, for the dark theme. */
   dark: "/platform-logo.svg",
-} as const
+} as const;
 
 /**
- * The browser-tab icon shown when no tenant resolves. Matches the static
- * `<link rel="icon">` in `index.html`; `DocumentBranding` swaps back to this
- * when an org has no favicon of its own. A file in `public/` rather than an
- * inlined data URI so it can be replaced without a rebuild.
+ * The browser-tab icon shown when no tenant resolves. Empty = the platform
+ * ships NO icon of its own (white-label): `DocumentBranding` removes the
+ * `<link rel="icon">` outright when this is the fallback, and only a tenant's
+ * own favicon ever reaches the tab. Point this at a file in `public/` to
+ * restore a platform mark without touching `DocumentBranding`.
  */
-export const PLATFORM_FAVICON = "/favicon.ico"
+export const PLATFORM_FAVICON = "";

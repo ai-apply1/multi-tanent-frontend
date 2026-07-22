@@ -179,6 +179,20 @@ export type ThemeAccentMode = "gradient" | "solid"
 export type ThemeMode = "light" | "dark"
 
 /**
+ * The org's brand typeface, applied across every portal (screening, apply, this
+ * dashboard). A curated set the platform ships and can render, NOT free text.
+ * The ids are a wire contract with the backend `ThemeFont` enum; the concrete
+ * font-family stack for each lives in `fonts.ts`.
+ */
+export type ThemeFont =
+  | "jakarta"
+  | "inter"
+  | "poppins"
+  | "montserrat"
+  | "roboto"
+  | "lora"
+
+/**
  * The org's palette, as stored. Every colour is a hex string the backend
  * normalises to lower case on write, so compare case-insensitively when
  * diffing (see `sameColor` in OrgSettingsPage).
@@ -201,6 +215,8 @@ export interface OrganizationTheme {
    * warns when a hand-edit leaves them contradicting each other.
    */
   mode: ThemeMode
+  /** Brand typeface, applied across every portal. See `ThemeFont`. */
+  font: ThemeFont
   primary: string
   secondary: string
   accent: ThemeAccentMode
@@ -297,58 +313,8 @@ export interface OrgProfile {
    * here is asking Resend to re-check (see `verifyEmailDomain`).
    */
   emailDomain: OrgEmailDomain
-  /** The org's own S3 storage lifecycle. See `OrgAwsStorage`. */
-  awsStorage: OrgAwsStorage
   createdAt: string
   updatedAt: string
-}
-
-/**
- * Backend `TenantStorageState`. The org's own S3 bucket in the org's own AWS
- * account walks `pending -> provisioning -> verifying -> active`, with a
- * `failed` loop-back. Only `active` means storage works — there is no fallback.
- */
-export type TenantStorageState =
-  | "pending"
-  | "provisioning"
-  | "verifying"
-  | "active"
-  | "failed"
-
-/** The org's storage lifecycle, as the profile exposes it (no secrets). */
-export interface OrgAwsStorage {
-  state: TenantStorageState
-  /** The org's bucket name; empty until provisioning creates it. */
-  bucket: string
-  region: string
-  /** Reason when `state` is `failed`; empty otherwise. */
-  error: string
-}
-
-/**
- * What the "connect your AWS" guide needs: the platform constants (whose account
- * the org trusts, the fixed role/bucket names) plus the org's own STABLE
- * bootstrap ExternalId, minted server-side on first read. The settings page
- * renders the trust policy with that exact ExternalId, so it matches what
- * provisioning presents and never rotates across retries. From
- * GET /admin/organization/storage/setup.
- */
-export interface StorageSetup {
-  platformAccountId: string
-  bootstrapRoleName: string
-  dataRoleName: string
-  bucketPrefix: string
-  bootstrapExternalId: string
-}
-
-/**
- * Inputs the org admin supplies to connect their AWS account. No ExternalId: it
- * is server-owned and stable (read from the setup call, pinned into the trust
- * policy), so provisioning reuses the stored value.
- */
-export interface ProvisionStoragePayload {
-  bootstrapRoleArn: string
-  region: string
 }
 
 /**

@@ -11,6 +11,7 @@ import toast from "react-hot-toast";
 import {
   AlertTriangle,
   ArrowLeft,
+  Check,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -41,6 +42,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -59,7 +61,10 @@ import {
   sendCandidateInvite,
   updateCandidateStatus,
 } from "@/features/candidates/candidatesApi";
-import { invalidateCandidateData } from "@/features/candidates/candidatesCache";
+import {
+  invalidateCandidateData,
+  invalidateCandidateDataAndJobCounts,
+} from "@/features/candidates/candidatesCache";
 import { aiScoreState, type AiScoreState } from "@/features/candidates/aiScore";
 import {
   type CandidateListItem,
@@ -70,6 +75,7 @@ import { ROUTES, jobDetail } from "@/routes";
 import { formatDate } from "@/lib/date";
 import { errorMessage } from "@/lib/errors";
 import { cn } from "@/lib/utils";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 
 /** Radix `Select` forbids an empty value — the "no filter" sentinel. */
 const ALL = "all";
@@ -305,12 +311,14 @@ export function CandidatesPage() {
     setPage(1);
   }, [routeJobId]);
 
+  const debouncedSearch = useDebouncedValue(search);
+
   const listParams = {
     page,
     limit: pageSize,
     ...(jobFilter !== ALL ? { jobId: jobFilter } : {}),
     ...(statusFilter !== ALL ? { statusKey: statusFilter } : {}),
-    ...(search.trim() ? { search: search.trim() } : {}),
+    ...(debouncedSearch.trim() ? { search: debouncedSearch.trim() } : {}),
   };
 
   const { data, isLoading, isError, isFetching, refetch } = useQuery({
@@ -366,7 +374,9 @@ export function CandidatesPage() {
     mutationFn: (id: string) => deleteCandidate(id),
     onSuccess: (res) => {
       toast.success("Candidate deleted.");
-      invalidateCandidates();
+      // Delete moves the job's TOTAL candidate count, so also refresh the
+      // Jobs list's "Applicants" column (status/invite mutations don't).
+      invalidateCandidateDataAndJobCounts(queryClient);
       queryClient.removeQueries({ queryKey: ["candidate", res.candidateId] });
       if (drawerCandidateId === res.candidateId) closeDrawer();
       setSelectedIds((prev) => {
@@ -410,7 +420,7 @@ export function CandidatesPage() {
           `${failed} could not be deleted${reason ? `: ${reason}` : "."}`,
         );
       }
-      invalidateCandidates();
+      invalidateCandidateDataAndJobCounts(queryClient);
       setSelectedIds(new Set());
       setBulkDeleteOpen(false);
     },
@@ -1327,23 +1337,33 @@ function CandidateRow({
             ) : null}
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>Change status</DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-48">
-                {statuses.map((option) => (
-                  <DropdownMenuItem
-                    key={option._id}
-                    disabled={option.key === status?.key}
-                    onSelect={() => onChangeStatus(option.key)}
-                  >
-                    <span
-                      className="h-2 w-2 shrink-0 rounded-full"
-                      style={{
-                        backgroundColor:
-                          option.color ?? "var(--ink-muted)",
-                      }}
-                    />
-                    {option.label}
-                  </DropdownMenuItem>
-                ))}
+              {/* Capped + scrollable: a long custom pipeline must not tower
+                  past the parent menu — uncapped, Radix shifts it up to fit
+                  the viewport and it reads as a detached floating list. */}
+              <DropdownMenuSubContent className="max-h-72 w-52 overflow-y-auto">
+                <DropdownMenuLabel>Move to</DropdownMenuLabel>
+                {statuses.map((option) => {
+                  const isCurrent = option.key === status?.key;
+                  return (
+                    <DropdownMenuItem
+                      key={option._id}
+                      disabled={isCurrent}
+                      onSelect={() => onChangeStatus(option.key)}
+                    >
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-full"
+                        style={{
+                          backgroundColor:
+                            option.color ?? "var(--ink-muted)",
+                        }}
+                      />
+                      <span className="min-w-0 truncate">{option.label}</span>
+                      {isCurrent ? (
+                        <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-ink-muted" />
+                      ) : null}
+                    </DropdownMenuItem>
+                  );
+                })}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
             <DropdownMenuSeparator />

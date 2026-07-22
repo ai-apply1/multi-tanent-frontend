@@ -1,25 +1,95 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" href="/favicon.ico" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
-    <!-- The PLATFORM's placeholder, not a tenant's. `TenantBrandingProvider`
+
+<head>
+  <meta charset="UTF-8" />
+  <!-- No static favicon: the platform ships none (white-label), and
+       `DocumentBranding` injects the tenant's own icon once branding
+       resolves. A static link here would flash a wrong/dead icon first. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <!-- The curated brand typefaces an org can pick in Branding, plus the mono
+       face. Only the family an org actually selects is downloaded (browsers
+       fetch @font-face lazily per rendered glyph); listing them here just makes
+       every choice available for instant switching. Keep in step with
+       `src/features/organization/fonts.ts`. -->
+  <link
+    href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700&family=Roboto:wght@400;500;700&family=Lora:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet" />
+  <!-- The PLATFORM's placeholder, not a tenant's. `TenantBrandingProvider`
          replaces this with the org's own name once `GET /org/branding`
          resolves, so this is only what shows for the first paint and for a
          host that names no tenant. The design branch hardcoded "DevExcel"
          here: that is one customer's name shipped to every other customer's
          tab, which is the whole thing the branding work removes. -->
-    <title>Talent Portal</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+  <title>Loading</title>
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("admin-theme");
+        if (t !== "light" && t !== "dark") {
+          t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        }
+        if (t === "dark") document.documentElement.classList.add("dark");
+
+        // Replay this org's cached brand variables before the CSS bundle loads,
+        // so a returning viewer's first frame is already branded instead of
+        // flashing the platform default. The map is the finished output of
+        // `buildBrandVars` from the last visit — a dumb setProperty loop, no
+        // derivation duplicated here. Keyed by hostname (the org this domain
+        // fronts), matching `applyTenantTheme`.
+        //
+        // POLARITY carrier `--applied-polarity`: the full canvas palette is only
+        // safe when the cached map was built for the mode resolved above. On a
+        // match, replay every key; on the opposite side replay ONLY the
+        // brand-accent subset over the dashboard's own neutral canvas — never
+        // paint an org's dark canvas under a light page, or the reverse.
+        //
+        // Cache-only, never truth: `DocumentBranding` re-applies from the API.
+        // Defensive by necessity — this runs before the error boundary exists,
+        // so anything unexpected must do nothing, not throw.
+        var root = document.documentElement;
+        var raw = localStorage.getItem("admin-brand-vars:" + location.hostname.toLowerCase());
+        if (raw) {
+          var vars = JSON.parse(raw);
+          if (vars && typeof vars === "object") {
+            if (vars["--applied-polarity"] === t) {
+              for (var k in vars) {
+                if (k.charAt(0) === "-" && k.charAt(1) === "-" && typeof vars[k] === "string") {
+                  root.style.setProperty(k, vars[k]);
+                }
+              }
+            } else {
+              var accent = ["--font-sans", "--primary", "--primary-foreground", "--brand-secondary", "--btn-fill-end", "--accent-hover", "--accent-active", "--accent-soft", "--accent-softer", "--accent-ring"];
+              for (var i = 0; i < accent.length; i++) {
+                if (typeof vars[accent[i]] === "string") root.style.setProperty(accent[i], vars[accent[i]]);
+              }
+            }
+          }
+        }
+
+        // Replay this org's cached favicon before the CSS bundle loads, so a
+        // returning viewer's tab already shows the employer's icon instead of
+        // flashing a blank/platform one until `DocumentBranding` runs. Written
+        // per host by `applyFavicon`'s cache. The href regex is a guard: only a
+        // data-image or http(s) URL is trusted, never a `javascript:` href a
+        // poisoned localStorage could smuggle in.
+        var icon = localStorage.getItem("admin-favicon:" + location.hostname.toLowerCase());
+        if (icon && /^(data:image\/|https?:\/\/)/.test(icon)) {
+          var link = document.querySelector("link[rel~='icon']") ||
+            document.head.appendChild(Object.assign(document.createElement("link"), { rel: "icon" }));
+          link.href = icon;
+          link.removeAttribute("type");
+        }
+      } catch (e) {}
+    })();
+  </script>
+</head>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+
 </html>

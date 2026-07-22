@@ -1,3 +1,4 @@
+import { useEffect } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { AlertCircle, Check, Clock, Loader2, RefreshCw } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
@@ -99,6 +100,19 @@ export function EmailDomainCard({ emailDomain, canWrite }: EmailDomainCardProps)
   const notSetUp = emailDomain.status === "not_configured"
   const tone = statusTone[emailDomain.status]
   const StatusIcon = toneIcon[tone]
+
+  // The backend re-verifies a pending sending domain on its own (the email
+  // domain poller), which is what lets the copy below promise "you can close
+  // this page". While the card is open and still pending, refetch the profile
+  // periodically so it flips to Verified without a manual Re-verify. Stops once
+  // verified (`active`) or when there's nothing to set up.
+  useEffect(() => {
+    if (emailDomain.active || notSetUp) return
+    const id = setInterval(() => {
+      void queryClient.invalidateQueries({ queryKey: ["organization"] })
+    }, 30_000)
+    return () => clearInterval(id)
+  }, [emailDomain.active, notSetUp, queryClient])
 
   return (
     <div className="rounded-2xl border border-line bg-surface p-6">
