@@ -27,6 +27,42 @@
           t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
         }
         if (t === "dark") document.documentElement.classList.add("dark");
+
+        // Replay this org's cached brand variables before the CSS bundle loads,
+        // so a returning viewer's first frame is already branded instead of
+        // flashing the platform default. The map is the finished output of
+        // `buildBrandVars` from the last visit — a dumb setProperty loop, no
+        // derivation duplicated here. Keyed by hostname (the org this domain
+        // fronts), matching `applyTenantTheme`.
+        //
+        // POLARITY carrier `--applied-polarity`: the full canvas palette is only
+        // safe when the cached map was built for the mode resolved above. On a
+        // match, replay every key; on the opposite side replay ONLY the
+        // brand-accent subset over the dashboard's own neutral canvas — never
+        // paint an org's dark canvas under a light page, or the reverse.
+        //
+        // Cache-only, never truth: `DocumentBranding` re-applies from the API.
+        // Defensive by necessity — this runs before the error boundary exists,
+        // so anything unexpected must do nothing, not throw.
+        var root = document.documentElement;
+        var raw = localStorage.getItem("admin-brand-vars:" + location.hostname.toLowerCase());
+        if (raw) {
+          var vars = JSON.parse(raw);
+          if (vars && typeof vars === "object") {
+            if (vars["--applied-polarity"] === t) {
+              for (var k in vars) {
+                if (k.charAt(0) === "-" && k.charAt(1) === "-" && typeof vars[k] === "string") {
+                  root.style.setProperty(k, vars[k]);
+                }
+              }
+            } else {
+              var accent = ["--primary", "--primary-foreground", "--brand-secondary", "--btn-fill-end", "--accent-hover", "--accent-active", "--accent-soft", "--accent-softer", "--accent-ring"];
+              for (var i = 0; i < accent.length; i++) {
+                if (typeof vars[accent[i]] === "string") root.style.setProperty(accent[i], vars[accent[i]]);
+              }
+            }
+          }
+        }
       } catch (e) {}
     })();
   </script>

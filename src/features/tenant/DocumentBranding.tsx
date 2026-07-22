@@ -59,7 +59,7 @@ const applyFavicon = (href: string): void => {
 export function DocumentBranding() {
   const branding = useTenantBranding()
   const { data: org } = useOrganization()
-  const { setOrgMode } = useTheme()
+  const { setOrgMode, theme: viewerMode } = useTheme()
 
   // Authenticated org first, then the host's public branding, then the
   // platform. Each rung is only used when the one above it has nothing.
@@ -67,14 +67,15 @@ export function DocumentBranding() {
   const faviconUrl = org?.faviconUrl || branding?.faviconUrl || ""
   // Same precedence as the two above, and it matters more here than it looks:
   // the settings page writes the saved profile straight into the `organization`
-  // query cache, so saving a new primary repaints the dashboard's accent on the
-  // spot instead of on the next full reload. Falling back to the host-resolved
+  // query cache, so saving a new theme repaints the dashboard on the spot
+  // instead of on the next full reload. Falling back to the host-resolved
   // branding keeps the login page (no session, no profile) branded.
   //
-  // `applyTenantTheme` takes only `primary` — see its header for why the other
-  // eight colours are deliberately ignored — and a `null` removes the override
-  // so the stylesheet's own light/dark colours resume.
-  const primary = org?.theme.primary ?? branding?.theme.primary ?? null
+  // The WHOLE theme now, not just `primary`: `applyTenantTheme` paints the full
+  // palette when the viewer's mode matches the org's polarity and the brand
+  // accent alone otherwise (see its header). `null` removes the override so the
+  // stylesheet's own light/dark colours resume.
+  const theme = org?.theme ?? branding?.theme ?? null
 
   useEffect(() => {
     document.title = name
@@ -86,9 +87,12 @@ export function DocumentBranding() {
     applyFavicon(faviconUrl || PLATFORM_FAVICON)
   }, [faviconUrl])
 
+  // Re-apply when the viewer toggles mode: which slice of the palette lands
+  // (full vs accent-only) is a function of `viewerMode`, so a toggle has to
+  // rebuild it, not just the theme changing.
   useEffect(() => {
-    applyTenantTheme(primary)
-  }, [primary])
+    applyTenantTheme(theme, viewerMode)
+  }, [theme, viewerMode])
 
   /*
    * The org's saved light/dark mode drives this dashboard too, not just the
