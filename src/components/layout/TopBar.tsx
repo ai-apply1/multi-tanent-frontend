@@ -11,9 +11,9 @@ import {
   Briefcase,
   CheckCircle2,
   Loader2,
-  Moon,
+  // Moon, — dark/light toggle commented out
   Search,
-  Sun,
+  // Sun, — dark/light toggle commented out
   Trash2,
   // User,
   Users,
@@ -30,7 +30,7 @@ import {
 import { Sheet, SheetClose, SheetContent } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAuth } from "@/features/auth/AuthContext"
-import { useTheme } from "@/features/theme/ThemeContext"
+// import { useTheme } from "@/features/theme/ThemeContext" — dark/light toggle commented out
 import { USER_ROLE_LABELS } from "@/features/users/types"
 import type { UserRole } from "@/features/auth/types"
 import {
@@ -158,7 +158,7 @@ function NotificationsSkeleton() {
  */
 export function TopBar() {
   const { user } = useAuth()
-  const { theme, toggleTheme } = useTheme()
+  // const { theme, toggleTheme } = useTheme() — dark/light toggle commented out
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
@@ -283,6 +283,9 @@ export function TopBar() {
       <div className="flex-1 lg:hidden" />
 
       <div className="ml-auto flex items-center gap-2">
+        {/* Dark/light mode toggle — commented out for now. To restore, uncomment
+            this button plus the `useTheme` import, the `theme`/`toggleTheme`
+            destructuring, and the `Moon`/`Sun` icon imports.
         <button
           type="button"
           onClick={toggleTheme}
@@ -296,6 +299,7 @@ export function TopBar() {
             <Moon className="h-[17px] w-[17px]" strokeWidth={1.7} />
           )}
         </button>
+        */}
 
         <Sheet open={notifOpen} onOpenChange={setNotifOpen}>
           <button
