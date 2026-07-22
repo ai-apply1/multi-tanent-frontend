@@ -27,6 +27,7 @@ import { Combobox } from "@/components/ui/combobox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useOrganization } from "@/features/organization/useOrganization";
 import { EmailDomainCard } from "@/features/organization/components/EmailDomainCard";
+import { EmailTemplatesCard } from "@/features/organization/components/EmailTemplatesCard";
 import {
   presignFavicon,
   presignLogo,
@@ -982,6 +983,8 @@ export function OrgSettingsPage() {
     </div>
   );
 
+  const emailsBody = <EmailTemplatesCard canWrite={canWrite} />;
+
   /**
    * Its own tab rather than a row under Branding: it is an ingested asset with
    * its own upload/transcode routes and its own polling, so it neither belongs
@@ -1204,6 +1207,7 @@ export function OrgSettingsPage() {
           <div className="p-5 sm:p-6">
             {activeTab === "general" ? generalBody : null}
             {activeTab === "branding" ? brandingBody : null}
+            {activeTab === "emails" ? emailsBody : null}
             {activeTab === "domains" ? domainsBody : null}
             {activeTab === "video" ? videoBody : null}
             {activeTab === "defaults" ? defaultsBody : null}

@@ -31,6 +31,7 @@ export const ROUTES = {
 export type SettingsTabId =
   | "general"
   | "branding"
+  | "emails"
   | "domains"
   | "video"
   | "defaults"
@@ -41,6 +42,7 @@ export const SETTINGS_TABS: ReadonlyArray<{ id: SettingsTabId; label: string }> 
   [
     { id: "general", label: "General" },
     { id: "branding", label: "Branding" },
+    { id: "emails", label: "Emails" },
     { id: "domains", label: "Domains" },
     { id: "video", label: "Apply video" },
     { id: "defaults", label: "Interview defaults" },
