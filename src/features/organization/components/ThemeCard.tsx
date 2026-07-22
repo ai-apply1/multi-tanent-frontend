@@ -167,6 +167,19 @@ const PRESETS: Array<{ id: string; name: string; theme: PresetTheme }> = [
     },
   },
   {
+    id: "amber",
+    name: "Amber",
+    theme: {
+      mode: "dark",
+      accent: "gradient",
+      primary: "#f59e0b",
+      secondary: "#f43f5e",
+      background: "#120e07",
+      surface: "#1c1610",
+      foreground: "#fefce8",
+    },
+  },
+  {
     id: "indigo",
     name: "Indigo",
     theme: {
@@ -177,6 +190,32 @@ const PRESETS: Array<{ id: string; name: string; theme: PresetTheme }> = [
       background: "#0f1115",
       surface: "#171a21",
       foreground: "#e5e7eb",
+    },
+  },
+  {
+    id: "mono",
+    name: "Mono",
+    theme: {
+      mode: "dark",
+      accent: "solid",
+      primary: "#f5f5f5",
+      secondary: "#f5f5f5",
+      background: "#0a0a0a",
+      surface: "#141414",
+      foreground: "#fafafa",
+    },
+  },
+  {
+    id: "cobalt",
+    name: "Cobalt",
+    theme: {
+      mode: "light",
+      accent: "solid",
+      primary: "#1d4ed8",
+      secondary: "#1d4ed8",
+      background: "#f5f7fa",
+      surface: "#ffffff",
+      foreground: "#111827",
     },
   },
   {
@@ -203,6 +242,19 @@ const PRESETS: Array<{ id: string; name: string; theme: PresetTheme }> = [
       background: "#f0f9ff",
       surface: "#ffffff",
       foreground: "#0f172a",
+    },
+  },
+  {
+    id: "meadow",
+    name: "Meadow",
+    theme: {
+      mode: "light",
+      accent: "solid",
+      primary: "#047857",
+      secondary: "#047857",
+      background: "#f3faf6",
+      surface: "#ffffff",
+      foreground: "#0c2a21",
     },
   },
   {
@@ -761,7 +813,7 @@ export function ThemeCard({
             {modeMismatch ? (
               <div className="mb-3 flex items-start gap-2 rounded-lg border border-[var(--warning)]/35 bg-[var(--warning-soft)] px-3 py-2.5">
                 <AlertTriangle className="mt-px h-4 w-4 shrink-0 text-[var(--warning)]" />
-                <p className="text-[12.5px] leading-relaxed text-ink-2">
+                <p className="text-[12.5px] leading-relaxed text-[var(--warning)]">
                   This is set to {value.mode === "dark" ? "Dark" : "Light"} mode
                   but the page colour is{" "}
                   {value.mode === "dark" ? "light" : "dark"}. Candidates would
