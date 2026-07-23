@@ -26,6 +26,7 @@ export async function listScreeningQuestions(
         ...(params.difficultyLevel
           ? { difficultyLevel: params.difficultyLevel }
           : {}),
+        ...(params.categoryId ? { categoryId: params.categoryId } : {}),
         ...(params.tags?.length ? { tags: params.tags } : {})
       },
       // `tags` must go out as REPEATED params (`tags=a&tags=b`). Axios's

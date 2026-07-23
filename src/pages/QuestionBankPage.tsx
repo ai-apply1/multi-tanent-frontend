@@ -86,6 +86,7 @@ export function QuestionBankPage() {
   const [difficultyFilter, setDifficultyFilter] = useState<DifficultyLevel | "">(
     "",
   );
+  const [categoryFilter, setCategoryFilter] = useState("");
   const [tagFilter, setTagFilter] = useState<string[]>([]);
   const [formOpen, setFormOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<ScreeningQuestion | null>(null);
@@ -109,6 +110,7 @@ export function QuestionBankPage() {
         limit: pageSize,
         search: debouncedSearch,
         difficultyLevel: difficultyFilter,
+        categoryId: categoryFilter,
         tags: tagFilter,
       },
     ],
@@ -118,6 +120,7 @@ export function QuestionBankPage() {
         limit: pageSize,
         search: debouncedSearch.trim() || undefined,
         difficultyLevel: difficultyFilter || undefined,
+        categoryId: categoryFilter || undefined,
         tags: tagFilter.length > 0 ? tagFilter : undefined,
       }),
     placeholderData: keepPreviousData,
@@ -125,8 +128,8 @@ export function QuestionBankPage() {
 
   const rows = data?.data ?? [];
 
-  // Category catalog — needed for the row-label lookup (translating
-  // categoryId → name).
+  // Category catalog — feeds the category filter and the row-label lookup
+  // (translating categoryId → name).
   const categoriesQuery = useQuery({
     queryKey: QUESTION_CATEGORIES_QUERY_KEY,
     queryFn: listQuestionCategories,
@@ -231,6 +234,25 @@ export function QuestionBankPage() {
               className="h-[37px] w-full rounded-[9px] border border-[var(--field-border)] bg-surface pl-9 pr-3 text-[13px] text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)]"
             />
           </div>
+          <Select
+            value={categoryFilter || ALL}
+            onValueChange={(v) => {
+              setCategoryFilter(v === ALL ? "" : v);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="h-[37px] w-[160px] rounded-[9px] border-[var(--field-border)] bg-surface text-[13px]">
+              <SelectValue placeholder="All categories" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>All categories</SelectItem>
+              {(categoriesQuery.data ?? []).map((c) => (
+                <SelectItem key={c._id} value={c._id}>
+                  {c.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Select
             value={difficultyFilter || ALL}
             onValueChange={(v) => {
