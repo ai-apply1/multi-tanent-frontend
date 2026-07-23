@@ -449,36 +449,46 @@ function StatusRow({
           consumer sorts by it — but its VALUE is an implementation detail
           (10, 20, 30… with gaps left for insertions), and the row's position
           in this list already says everything the number did. */}
-      <span
-        className="inline-flex items-center rounded-full px-2.5 py-1 text-[12.5px] font-semibold"
-        style={{
-          background: `color-mix(in oklab, ${color}, white 88%)`,
-          color,
-        }}
-      >
-        {status.label}
-      </span>
-      <code className="rounded bg-surface-3 px-1.5 py-0.5 font-mono text-[11.5px] text-ink-muted">
-        {status.key}
-      </code>
-      {status.builtin ? (
-        <span className="rounded-full bg-surface-3 px-2 py-0.5 text-[11px] font-semibold text-ink-muted">
-          Built-in
-        </span>
-      ) : null}
-      {/* Same wording as the create dialog's checkbox — "Terminal" was the
-          mechanism's name, "Frozen" is what it does to the candidates in
-          the column. */}
-      {status.isTerminal ? (
-        <span
-          title="The AI won't move candidates out of this column"
-          className="inline-flex items-center gap-1 rounded-full bg-ink-faint px-2 py-0.5 text-[11px] font-semibold text-ink-2"
-        >
-          <Lock className="h-[10px] w-[10px]" strokeWidth={1.9} />
-          Frozen
-        </span>
-      ) : null}
-      <div className="flex-1" />
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-3">
+          <span
+            className="inline-flex items-center rounded-full px-2.5 py-1 text-[12.5px] font-semibold"
+            style={{
+              background: `color-mix(in oklab, ${color}, white 88%)`,
+              color,
+            }}
+          >
+            {status.label}
+          </span>
+          <code className="rounded bg-surface-3 px-1.5 py-0.5 font-mono text-[11.5px] text-ink-muted">
+            {status.key}
+          </code>
+          {status.builtin ? (
+            <span className="rounded-full bg-surface-3 px-2 py-0.5 text-[11px] font-semibold text-ink-muted">
+              Built-in
+            </span>
+          ) : null}
+          {/* Same wording as the create dialog's checkbox — "Terminal" was
+              the mechanism's name, "Frozen" is what it does to the
+              candidates in the column. */}
+          {status.isTerminal ? (
+            <span
+              title="The AI won't move candidates out of this column"
+              className="inline-flex items-center gap-1 rounded-full bg-ink-faint px-2 py-0.5 text-[11px] font-semibold text-ink-2"
+            >
+              <Lock className="h-[10px] w-[10px]" strokeWidth={1.9} />
+              Frozen
+            </span>
+          ) : null}
+        </div>
+        {/* What the column is for — set in the edit dialog. Rendered only
+            when present, so rows without one stay a single line. */}
+        {status.description ? (
+          <p className="mt-1.5 max-w-[640px] text-[12.5px] leading-relaxed text-ink-muted">
+            {status.description}
+          </p>
+        ) : null}
+      </div>
       <button
         type="button"
         onClick={onEdit}

@@ -46,6 +46,7 @@ import {
   type JobListItem,
   type JobStatus,
 } from "@/features/jobs/types";
+import { useOrgTimezone } from "@/features/organization/useOrgTimezone";
 import { ROUTES, jobDetail, jobEdit } from "@/routes";
 import { formatDate } from "@/lib/date";
 import { errorMessage } from "@/lib/errors";
@@ -66,6 +67,7 @@ const COLS = "grid-cols-[2.2fr_0.8fr_1.2fr_0.7fr_0.7fr_0.7fr_0.9fr_40px]";
 export function JobsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const tz = useOrgTimezone();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [search, setSearch] = useState("");
@@ -303,7 +305,7 @@ export function JobsPage() {
                   {row.rejectionThreshold}
                 </div>
                 <div className="text-[12.5px] text-ink-muted">
-                  {formatDate(row.createdAt)}
+                  {formatDate(row.createdAt, tz)}
                 </div>
                 <div className="flex justify-end">
                   <DropdownMenu>

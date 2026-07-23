@@ -212,10 +212,6 @@ export interface UpdateScreeningQuestionPayload {
   tags?: string[]
 }
 
-export interface ListScreeningQuestionsParamsWithCategory {
-  categoryId?: string
-}
-
 /** Body for `POST /admin/questions/suggest-variants` — drafts only, saves nothing. */
 export interface SuggestVariantsPayload {
   sourceText: string
@@ -228,7 +224,12 @@ export interface ListScreeningQuestionsParams {
   /** Case-insensitive substring match on ANY of a question's wordings. */
   search?: string
   difficultyLevel?: DifficultyLevel
-  /** NARROWING ($all): a question must carry ALL of these tags, not any. */
+  /** Filter to one category id (from `/admin/question-categories`). */
+  categoryId?: string
+  /**
+   * NARROWING ($all): a question must carry ALL of these tags, not any.
+   * Matched case-insensitively by the backend.
+   */
   tags?: string[]
   page?: number
   limit?: number

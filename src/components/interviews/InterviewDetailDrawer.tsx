@@ -95,6 +95,7 @@ import {
   invalidateCandidateDataAndJobCounts,
 } from "@/features/candidates/candidatesCache";
 import { toDisplayScore } from "@/features/candidates/aiScore";
+import { useOrgTimezone } from "@/features/organization/useOrgTimezone";
 import {
   INVITABLE_STATUS_KEY,
   POST_INTERVIEW_REJECT_STATUS_KEY,
@@ -756,6 +757,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   const activeSessionId = selectedSessionId ?? sessionId;
 
   const queryClient = useQueryClient();
+  const orgTimezone = useOrgTimezone();
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["interview", activeSessionId],
@@ -1553,6 +1555,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                       createdAt={data.createdAt}
                       startedAt={data.startedAt}
                       submittedAt={data.submittedAt}
+                      timeZone={orgTimezone}
                       scoringStatus={scoringStatus}
                       overall={data.scores?.overall}
                       questionCount={questions.length}
@@ -2042,10 +2045,24 @@ const SKIPPED_TRANSCRIPT_MARKER = "[Skipped by candidate]";
 
 // ── Activity tab ───────────────────────────────────────────────────────
 
+/** A timeline row's full date+time, in the org's zone when it's a valid IANA
+ *  name and the browser-local render otherwise (RangeError). */
+function timelineTime(iso: string, timeZone?: string): string {
+  if (timeZone) {
+    try {
+      return new Date(iso).toLocaleString(undefined, { timeZone });
+    } catch {
+      return new Date(iso).toLocaleString();
+    }
+  }
+  return new Date(iso).toLocaleString();
+}
+
 function ActivityTab({
   createdAt,
   startedAt,
   submittedAt,
+  timeZone,
   scoringStatus,
   overall,
   questionCount,
@@ -2055,6 +2072,7 @@ function ActivityTab({
   createdAt: string | null;
   startedAt: string | null;
   submittedAt: string | null;
+  timeZone: string;
   scoringStatus: ScoringStatus;
   overall: number | undefined;
   questionCount: number;
@@ -2087,7 +2105,7 @@ function ActivityTab({
     events.push({
       title: "Interview invited",
       sub: "Invite link emailed to candidate",
-      time: new Date(createdAt).toLocaleString(),
+      time: timelineTime(createdAt, timeZone),
       at: new Date(createdAt).getTime(),
       seq: 0,
       kind: "create",
@@ -2097,7 +2115,7 @@ function ActivityTab({
     events.push({
       title: "Interview started",
       sub: "Candidate began recording",
-      time: new Date(startedAt).toLocaleString(),
+      time: timelineTime(startedAt, timeZone),
       at: new Date(startedAt).getTime(),
       seq: 1,
       kind: "start",
@@ -2107,7 +2125,7 @@ function ActivityTab({
     events.push({
       title: "Interview submitted",
       sub: `${answeredCount} video response${answeredCount === 1 ? "" : "s"}`,
-      time: new Date(submittedAt).toLocaleString(),
+      time: timelineTime(submittedAt, timeZone),
       at: new Date(submittedAt).getTime(),
       seq: 2,
       kind: "submit",
@@ -2121,7 +2139,7 @@ function ActivityTab({
       title: `AI interview scored, overall ${toDisplayScore(overall)}`,
       sub: `${answeredCount} of ${questionCount} answered`,
       time: submittedAt
-        ? new Date(submittedAt).toLocaleString()
+        ? timelineTime(submittedAt, timeZone)
         : "Time unknown",
       at: submittedAt ? new Date(submittedAt).getTime() : Number.MAX_SAFE_INTEGER,
       seq: 3,

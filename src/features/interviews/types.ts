@@ -326,6 +326,21 @@ export interface AdminInterviewListItem {
   proctoring: InterviewProctoring
 }
 
+/**
+ * One row of `GET /admin/interviews/top-candidates` — the job overview's
+ * "Top ranked candidates" leaderboard. Only completed + scored interviews,
+ * highest score first. `overall` is already 0-100 (the scale the UI shows).
+ */
+export interface TopCandidate {
+  /** publicSessionId — the interview key, if we ever deep-link the row. */
+  sessionId: string
+  candidateName: string
+  email: string
+  overall: number
+  recommendation: string
+  submittedAt: string | null
+}
+
 export interface AdminInterviewDetail {
   sessionId: string
   /** The candidate who sat this interview — resolves the parsed-CV profile. */

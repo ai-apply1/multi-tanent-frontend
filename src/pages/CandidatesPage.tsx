@@ -73,6 +73,7 @@ import {
   type CandidateStatus,
 } from "@/features/candidates/types";
 import { JOB_OPTIONS_QUERY_KEY, listJobOptions } from "@/features/jobs/jobsApi";
+import { useOrgTimezone } from "@/features/organization/useOrgTimezone";
 import { ROUTES, jobDetail } from "@/routes";
 import { formatDate } from "@/lib/date";
 import { errorMessage } from "@/lib/errors";
@@ -151,6 +152,7 @@ function initialsOf(name: string): string {
 
 export function CandidatesPage() {
   const queryClient = useQueryClient();
+  const tz = useOrgTimezone();
   // This page serves two routes: the org-wide `/dashboard/candidates` and
   // `/dashboard/jobs/:jobId/candidates`, which Jobs links to as "View
   // candidates". On the latter the job is the whole point of the URL, so it
@@ -465,6 +467,7 @@ export function CandidatesPage() {
       toast.success(
         `Invite sent, attempt ${res.attemptNumber}, link expires ${formatDate(
           res.expiresAt,
+          tz,
         )}.`,
       );
       invalidateCandidates();
@@ -538,7 +541,20 @@ export function CandidatesPage() {
       const url = URL.createObjectURL(withBom);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `candidates-${new Date().toISOString().slice(0, 10)}.csv`;
+      // en-CA renders `YYYY-MM-DD`; stamp the filename with today's calendar
+      // date in the org's zone, falling back to the UTC date on a bad zone.
+      let stamp: string;
+      try {
+        stamp = new Intl.DateTimeFormat("en-CA", {
+          timeZone: tz,
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).format(new Date());
+      } catch {
+        stamp = new Date().toISOString().slice(0, 10);
+      }
+      a.download = `candidates-${stamp}.csv`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -881,6 +897,7 @@ export function CandidatesPage() {
                   <CandidateRow
                     key={row._id}
                     row={row}
+                    tz={tz}
                     selected={selectedIds.has(row._id)}
                     jobTitle={jobsById.get(row.jobId)?.title ?? null}
                     statuses={statuses}
@@ -1182,6 +1199,7 @@ function CandidatesTableSkeleton() {
 
 function CandidateRow({
   row,
+  tz,
   selected,
   jobTitle,
   statuses,
@@ -1196,6 +1214,7 @@ function CandidateRow({
   onDelete,
 }: {
   row: CandidateListItem;
+  tz: string;
   selected: boolean;
   jobTitle: string | null;
   statuses: CandidateStatus[];
@@ -1327,7 +1346,7 @@ function CandidateRow({
 
       {/* Date */}
       <span className="text-[12.5px] text-ink-muted">
-        {formatDate(row.createdAt)}
+        {formatDate(row.createdAt, tz)}
       </span>
 
       {/* Actions, an explicit "View interview" button plus the kebab menu.

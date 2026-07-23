@@ -10,6 +10,7 @@ import {
   Bell,
   Briefcase,
   CheckCircle2,
+  KeyRound,
   Loader2,
   LogOut,
   // Moon, — dark/light toggle commented out
@@ -32,7 +33,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetClose, SheetContent } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ChangePasswordDialog } from "@/features/auth/components/ChangePasswordDialog";
 import { useAuth } from "@/features/auth/AuthContext";
+import { useOrgTimezone } from "@/features/organization/useOrgTimezone";
 // import { useTheme } from "@/features/theme/ThemeContext" — dark/light toggle commented out
 import { USER_ROLE_LABELS } from "@/features/users/types";
 import type { UserRole } from "@/features/auth/types";
@@ -120,7 +123,7 @@ const EVENT_STYLES: Record<
   },
 };
 
-function relativeTime(iso: string): string {
+function relativeTime(iso: string, timeZone?: string): string {
   const then = new Date(iso).getTime();
   const now = Date.now();
   const seconds = Math.max(1, Math.round((now - then) / 1000));
@@ -131,6 +134,13 @@ function relativeTime(iso: string): string {
   if (hours < 24) return `${hours} h ago`;
   const days = Math.round(hours / 24);
   if (days < 30) return `${days} d ago`;
+  if (timeZone) {
+    try {
+      return new Date(iso).toLocaleDateString(undefined, { timeZone });
+    } catch {
+      return new Date(iso).toLocaleDateString();
+    }
+  }
   return new Date(iso).toLocaleDateString();
 }
 
@@ -165,6 +175,7 @@ export function TopBar() {
   // const { theme, toggleTheme } = useTheme() — dark/light toggle commented out
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const tz = useOrgTimezone();
 
   const rawDisplayName = user?.fullName || user?.email || "Admin";
   const displayName = titleCase(rawDisplayName) || rawDisplayName;
@@ -175,6 +186,7 @@ export function TopBar() {
 
   const [notifOpen, setNotifOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
 
   const refreshNotifs = () => {
     void queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_UNREAD_KEY });
@@ -457,7 +469,7 @@ export function TopBar() {
                           </div>
                         ) : null}
                         <div className="mt-1 text-[11.5px] text-ink-subtle">
-                          {relativeTime(n.createdAt)}
+                          {relativeTime(n.createdAt, tz)}
                         </div>
                       </div>
                     </div>
@@ -515,6 +527,11 @@ export function TopBar() {
               ) : null}
             </div>
             <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => setChangePasswordOpen(true)}>
+              <KeyRound strokeWidth={1.8} />
+              Change password
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={handleLogout}
               className="text-[var(--danger)] focus:bg-[var(--danger-soft)] focus:text-[var(--danger)]"
@@ -525,6 +542,11 @@ export function TopBar() {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      <ChangePasswordDialog
+        open={changePasswordOpen}
+        onOpenChange={setChangePasswordOpen}
+      />
     </header>
   );
 }

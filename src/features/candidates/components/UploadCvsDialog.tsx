@@ -27,6 +27,15 @@ import {
   PAKISTAN_CITY_SET,
 } from "@/features/candidates/cities"
 import {
+  combinePhone,
+  DIAL_BY_ISO,
+  E164_MAX_DIGITS,
+  KEEPS_LEADING_ZERO,
+  PHONE_COUNTRIES,
+  PHONE_NATIONAL_MIN,
+  splitPhone,
+} from "@/features/candidates/phone"
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -121,7 +130,15 @@ interface UploadRow {
   contentType: AllowedCvContentType
   fullName: string
   email: string
-  phone: string
+  /**
+   * The phone lives SPLIT in this dialog (dropdown + digits) and is joined
+   * back into one string only in the confirm payload — `candidates.phone`
+   * stays a single key. `phoneIso` is an ISO country code ("PK"), not the
+   * dial code, because dial codes repeat across countries and the Select
+   * needs unique values.
+   */
+  phoneIso: string
+  phoneNumber: string
   city: string
   status: RowStatus
   progress: number
@@ -236,7 +253,8 @@ export function UploadCvsDialog({
         contentType,
         fullName: nameFromFile(file.name),
         email: "",
-        phone: "",
+        phoneIso: "",
+        phoneNumber: "",
         city: "",
         status: "idle",
         progress: 0,
@@ -320,8 +338,26 @@ export function UploadCvsDialog({
   const nameError = (row: UploadRow): string | null =>
     row.fullName.trim() ? null : "Name is required."
 
-  const phoneError = (row: UploadRow): string | null =>
-    row.phone.trim() ? null : "Phone is required. The CV didn't have one."
+  /**
+   * The split field validates the halves separately, then the E.164 envelope
+   * of what they'd join into. Per-country length rules are deliberately not
+   * enforced (static catalog, see phone.ts) — the reviewer is looking at the
+   * CV, which is a better validator than a rule table.
+   */
+  const phoneError = (row: UploadRow): string | null => {
+    const number = row.phoneNumber.trim()
+    if (!number) return "Phone is required. The CV didn't have one."
+    if (!/^\d+$/.test(number))
+      return "Digits only — the country code goes in the dropdown."
+    if (!row.phoneIso) return "Pick a country code."
+    const dial = DIAL_BY_ISO.get(row.phoneIso) ?? ""
+    if (!KEEPS_LEADING_ZERO.has(dial) && number.startsWith("0"))
+      return "Drop the leading 0 — it's only used when dialling locally."
+    if (number.length < PHONE_NATIONAL_MIN) return "That number looks too short."
+    if (dial.length - 1 + number.length > E164_MAX_DIGITS)
+      return "That number looks too long."
+    return null
+  }
 
   /**
    * City is required because the job's city gate compares against it. A CV
@@ -402,6 +438,11 @@ export function UploadCvsDialog({
             prev.map((r) => {
               const got = r.cvKey ? byKey.get(r.cvKey) : undefined
               if (!got) return r
+              // splitPhone picks a country off an international prefix
+              // (+92 / 0092) or an unambiguous embedded dial code
+              // (923134856792); anything it can't be sure of leaves the
+              // dropdown empty so the reviewer chooses — not the software.
+              const parsedPhone = splitPhone(got.phone)
               return {
                 ...r,
                 // An empty extracted name falls back to the filename guess;
@@ -410,7 +451,8 @@ export function UploadCvsDialog({
                 // person.
                 fullName: got.fullName || r.fullName,
                 email: got.email,
-                phone: got.phone,
+                phoneIso: parsedPhone.iso,
+                phoneNumber: parsedPhone.number,
                 city: got.city,
                 extractError: got.error,
               }
@@ -445,7 +487,9 @@ export function UploadCvsDialog({
         importable.map((row) => ({
           fullName: row.fullName.trim(),
           email: row.email.trim(),
-          phone: row.phone.trim(),
+          // The halves rejoin here and nowhere else: the stored value is a
+          // single E.164-shaped string, same as the apply portal writes.
+          phone: combinePhone(row.phoneIso, row.phoneNumber.trim()),
           city: row.city.trim(),
           cvKey: row.cvKey as string,
         }))
@@ -937,16 +981,55 @@ function ReviewRow({
           <Label htmlFor={`phone-${row.id}`} className="text-xs text-ink">
             Phone
           </Label>
-          <Input
-            id={`phone-${row.id}`}
-            value={row.phone}
-            disabled={busy}
-            aria-invalid={Boolean(phoneMsg)}
-            maxLength={40}
-            placeholder="Not found, type it"
-            onChange={(e) => onPatch({ phone: e.target.value })}
-            onBlur={onTouch}
-          />
+          <div className="flex gap-1.5">
+            {/* The trigger shows only the dial code (the country name would
+                eat the number's room); the list spells both out. */}
+            <Select
+              value={row.phoneIso}
+              disabled={busy}
+              onValueChange={(iso) => {
+                onPatch({ phoneIso: iso })
+                onTouch()
+              }}
+            >
+              <SelectTrigger
+                aria-label="Country code"
+                aria-invalid={Boolean(phoneMsg)}
+                onBlur={onTouch}
+                // h-11 matches the Input beside it (the trigger's own default
+                // is h-10, which reads as a broken baseline in the same row);
+                // the width fits the widest dial code (+1868) without ellipsis.
+                className="h-11 w-[100px] shrink-0"
+              >
+                <SelectValue placeholder="Code">
+                  {row.phoneIso ? DIAL_BY_ISO.get(row.phoneIso) : null}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent className="max-h-72">
+                {PHONE_COUNTRIES.map((c) => (
+                  <SelectItem key={c.iso} value={c.iso}>
+                    {c.name} ({c.dial})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Input
+              id={`phone-${row.id}`}
+              type="tel"
+              inputMode="tel"
+              value={row.phoneNumber}
+              disabled={busy}
+              aria-invalid={Boolean(phoneMsg)}
+              maxLength={15}
+              placeholder="Not found, type it"
+              // Digits only, at the door: pastes with spaces/dashes land
+              // clean, and the +code can never sneak into the number half.
+              onChange={(e) =>
+                onPatch({ phoneNumber: e.target.value.replace(/\D/g, "") })
+              }
+              onBlur={onTouch}
+            />
+          </div>
           {phoneMsg ? <p className="text-xs text-[var(--danger)]">{phoneMsg}</p> : null}
         </div>
         <CityField
@@ -1060,7 +1143,7 @@ function CityField({
             id={`city-${rowId}`}
             aria-invalid={invalid}
             onBlur={onTouch}
-            className="w-full"
+            className="h-11 w-full"
           >
             <SelectValue placeholder="Select a city" />
           </SelectTrigger>

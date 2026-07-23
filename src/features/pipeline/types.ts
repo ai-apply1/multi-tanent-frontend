@@ -46,6 +46,8 @@ export const STATUS_KEY_PATTERN = /^[a-z0-9][a-z0-9_-]*$/
 export interface CreateStatusPayload {
   key: string
   label: string
+  /** What the column is for — display-only, shown under the row. */
+  description?: string
   color?: string
   isTerminal?: boolean
 }
@@ -60,6 +62,8 @@ export interface CreateStatusPayload {
  */
 export interface UpdateStatusPayload {
   label?: string
+  /** Sent on every edit; an empty string is a deliberate clear. */
+  description?: string
   color?: string
   isTerminal?: boolean
 }

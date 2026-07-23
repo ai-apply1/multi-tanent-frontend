@@ -2,16 +2,29 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ReactNode } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { subscribeToAuthFailure } from "@/lib/api"
-import { loginRequest, logoutRequest, meRequest } from "@/features/auth/authApi"
-import type { SessionUser } from "@/features/auth/types"
+import {
+  exitImpersonationRequest,
+  loginRequest,
+  logoutRequest,
+  meRequest
+} from "@/features/auth/authApi"
+import type { Impersonation, SessionUser } from "@/features/auth/types"
 
 interface AuthContextValue {
   user: SessionUser | null
+  /**
+   * Non-null ONLY when a super-admin is acting as `user` (impersonation). The
+   * app-wide banner reads this; `exitImpersonation` ends it. Null on a normal
+   * HR session.
+   */
+  impersonation: Impersonation | null
   isInitializing: boolean
   isAuthenticating: boolean
   /** `identifier` is an email or a userName — either authenticates. */
   login: (identifier: string, password: string) => Promise<void>
   logout: () => Promise<void>
+  /** End impersonation: revoke the session server-side and clear local state. */
+  exitImpersonation: () => Promise<void>
   refreshMe: () => Promise<void>
 }
 
@@ -20,6 +33,7 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
   const [user, setUser] = useState<SessionUser | null>(null)
+  const [impersonation, setImpersonation] = useState<Impersonation | null>(null)
   const [isInitializing, setIsInitializing] = useState(true)
   const [isAuthenticating, setIsAuthenticating] = useState(false)
   const initialized = useRef(false)
@@ -27,9 +41,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshMe = useCallback(async () => {
     try {
       const me = await meRequest()
-      setUser(me)
+      setUser(me.user)
+      setImpersonation(me.impersonation)
     } catch {
       setUser(null)
+      setImpersonation(null)
     }
   }, [])
 
@@ -44,6 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     return subscribeToAuthFailure(() => {
       setUser(null)
+      setImpersonation(null)
       // The tab is never reloaded on an expired session — ProtectedRoute only
       // routes to /login — so without this the previous org's cached rows
       // survive in the module-level QueryClient for the next admin to log in.
@@ -60,6 +77,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         queryClient.clear()
         const next = await loginRequest(identifier, password)
         setUser(next)
+        // A real login is never an impersonation session.
+        setImpersonation(null)
       } finally {
         setIsAuthenticating(false)
       }
@@ -74,13 +93,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // In the `finally` alongside `setUser`: a failing logout request still
       // tears the session down locally, so the cache must go with it.
       setUser(null)
+      setImpersonation(null)
+      queryClient.clear()
+    }
+  }, [queryClient])
+
+  const exitImpersonation = useCallback(async () => {
+    try {
+      await exitImpersonationRequest()
+    } finally {
+      // Like logout: the server has revoked the impersonation session and
+      // cleared its cookies, so drop local state even if the request failed.
+      setUser(null)
+      setImpersonation(null)
       queryClient.clear()
     }
   }, [queryClient])
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, isInitializing, isAuthenticating, login, logout, refreshMe }),
-    [user, isInitializing, isAuthenticating, login, logout, refreshMe]
+    () => ({
+      user,
+      impersonation,
+      isInitializing,
+      isAuthenticating,
+      login,
+      logout,
+      exitImpersonation,
+      refreshMe
+    }),
+    [
+      user,
+      impersonation,
+      isInitializing,
+      isAuthenticating,
+      login,
+      logout,
+      exitImpersonation,
+      refreshMe
+    ]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

@@ -22,7 +22,17 @@ export interface LoginResponse {
   user: SessionUser
 }
 
+/**
+ * Present ONLY when a platform super-admin is acting AS this user
+ * (impersonation). `superAdminEmail` is who to attribute actions to, shown in
+ * the impersonation banner. Absent on a normal HR session.
+ */
+export interface Impersonation {
+  superAdminEmail: string
+}
+
 export interface MeResponse {
   success: boolean
   user: SessionUser
+  impersonation?: Impersonation
 }

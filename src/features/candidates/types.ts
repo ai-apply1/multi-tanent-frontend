@@ -86,6 +86,11 @@ export interface CandidateStatus {
   organizationId: string
   key: string
   label: string
+  /**
+   * What the column is for — shown under the row on the pipeline settings
+   * screen. Display-only; no automation reads it. `""` when unset.
+   */
+  description: string
   /** Hex (e.g. "#0ea5e9"), or null when the org cleared it. */
   color: string | null
   stageOrder: number

@@ -28,11 +28,22 @@ export async function loginRequest(identifier: string, password: string) {
 
 export async function meRequest() {
   const { data } = await api.get<MeResponse>("/admin/auth/me")
-  return data.user
+  // `impersonation` is present only when a super-admin is acting as this user.
+  return { user: data.user, impersonation: data.impersonation ?? null }
 }
 
 export async function logoutRequest() {
   await api.post("/admin/auth/logout")
+}
+
+/**
+ * End the current impersonation session: the backend revokes it and clears its
+ * cookies. Only valid on an impersonation session (a normal HR session 400s).
+ * After this the caller is signed out, the operator returns to the super-admin
+ * console (the tab it opened from).
+ */
+export async function exitImpersonationRequest() {
+  await api.post("/admin/auth/impersonation/exit")
 }
 
 /**
@@ -71,4 +82,24 @@ export async function resetPasswordRequest(
   newPassword: string
 ) {
   await api.post("/admin/auth/reset-password", { email, code, newPassword })
+}
+
+/**
+ * Change the signed-in user's own password. Proves ownership with the CURRENT
+ * password (no email/code), so it only works while authenticated.
+ *
+ * A wrong current password comes back as a 401 with a specific message
+ * ("Your current password is incorrect."), and reusing the old password is a
+ * 400 — surface both to the user. On success the backend signs out this user's
+ * OTHER sessions but refreshes THIS device's cookies, so the caller stays
+ * logged in and does not need to re-authenticate.
+ */
+export async function changePasswordRequest(
+  currentPassword: string,
+  newPassword: string
+) {
+  await api.post("/admin/auth/change-password", {
+    currentPassword,
+    newPassword
+  })
 }
