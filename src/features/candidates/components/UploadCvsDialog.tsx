@@ -30,6 +30,7 @@ import {
   combinePhone,
   DIAL_BY_ISO,
   E164_MAX_DIGITS,
+  KEEPS_LEADING_ZERO,
   PHONE_COUNTRIES,
   PHONE_NATIONAL_MIN,
   splitPhone,
@@ -350,7 +351,7 @@ export function UploadCvsDialog({
       return "Digits only — the country code goes in the dropdown."
     if (!row.phoneIso) return "Pick a country code."
     const dial = DIAL_BY_ISO.get(row.phoneIso) ?? ""
-    if (dial !== "+39" && number.startsWith("0"))
+    if (!KEEPS_LEADING_ZERO.has(dial) && number.startsWith("0"))
       return "Drop the leading 0 — it's only used when dialling locally."
     if (number.length < PHONE_NATIONAL_MIN) return "That number looks too short."
     if (dial.length - 1 + number.length > E164_MAX_DIGITS)

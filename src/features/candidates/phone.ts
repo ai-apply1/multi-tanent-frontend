@@ -28,9 +28,11 @@ export const PHONE_COUNTRIES: PhoneCountry[] = [
   { iso: "DZ", name: "Algeria", dial: "+213" },
   { iso: "AD", name: "Andorra", dial: "+376" },
   { iso: "AO", name: "Angola", dial: "+244" },
+  { iso: "AI", name: "Anguilla", dial: "+1264" },
   { iso: "AG", name: "Antigua and Barbuda", dial: "+1268" },
   { iso: "AR", name: "Argentina", dial: "+54" },
   { iso: "AM", name: "Armenia", dial: "+374" },
+  { iso: "AW", name: "Aruba", dial: "+297" },
   { iso: "AU", name: "Australia", dial: "+61" },
   { iso: "AT", name: "Austria", dial: "+43" },
   { iso: "AZ", name: "Azerbaijan", dial: "+994" },
@@ -42,11 +44,13 @@ export const PHONE_COUNTRIES: PhoneCountry[] = [
   { iso: "BE", name: "Belgium", dial: "+32" },
   { iso: "BZ", name: "Belize", dial: "+501" },
   { iso: "BJ", name: "Benin", dial: "+229" },
+  { iso: "BM", name: "Bermuda", dial: "+1441" },
   { iso: "BT", name: "Bhutan", dial: "+975" },
   { iso: "BO", name: "Bolivia", dial: "+591" },
   { iso: "BA", name: "Bosnia and Herzegovina", dial: "+387" },
   { iso: "BW", name: "Botswana", dial: "+267" },
   { iso: "BR", name: "Brazil", dial: "+55" },
+  { iso: "VG", name: "British Virgin Islands", dial: "+1284" },
   { iso: "BN", name: "Brunei", dial: "+673" },
   { iso: "BG", name: "Bulgaria", dial: "+359" },
   { iso: "BF", name: "Burkina Faso", dial: "+226" },
@@ -55,6 +59,7 @@ export const PHONE_COUNTRIES: PhoneCountry[] = [
   { iso: "CM", name: "Cameroon", dial: "+237" },
   { iso: "CA", name: "Canada", dial: "+1" },
   { iso: "CV", name: "Cape Verde", dial: "+238" },
+  { iso: "KY", name: "Cayman Islands", dial: "+1345" },
   { iso: "CF", name: "Central African Republic", dial: "+236" },
   { iso: "TD", name: "Chad", dial: "+235" },
   { iso: "CL", name: "Chile", dial: "+56" },
@@ -67,6 +72,7 @@ export const PHONE_COUNTRIES: PhoneCountry[] = [
   { iso: "CI", name: "Côte d'Ivoire", dial: "+225" },
   { iso: "HR", name: "Croatia", dial: "+385" },
   { iso: "CU", name: "Cuba", dial: "+53" },
+  { iso: "CW", name: "Curaçao", dial: "+599" },
   { iso: "CY", name: "Cyprus", dial: "+357" },
   { iso: "CZ", name: "Czechia", dial: "+420" },
   { iso: "DK", name: "Denmark", dial: "+45" },
@@ -84,14 +90,19 @@ export const PHONE_COUNTRIES: PhoneCountry[] = [
   { iso: "FJ", name: "Fiji", dial: "+679" },
   { iso: "FI", name: "Finland", dial: "+358" },
   { iso: "FR", name: "France", dial: "+33" },
+  { iso: "GF", name: "French Guiana", dial: "+594" },
+  { iso: "PF", name: "French Polynesia", dial: "+689" },
   { iso: "GA", name: "Gabon", dial: "+241" },
   { iso: "GM", name: "Gambia", dial: "+220" },
   { iso: "GE", name: "Georgia", dial: "+995" },
   { iso: "DE", name: "Germany", dial: "+49" },
   { iso: "GH", name: "Ghana", dial: "+233" },
+  { iso: "GI", name: "Gibraltar", dial: "+350" },
   { iso: "GR", name: "Greece", dial: "+30" },
   { iso: "GD", name: "Grenada", dial: "+1473" },
+  { iso: "GP", name: "Guadeloupe", dial: "+590" },
   { iso: "GT", name: "Guatemala", dial: "+502" },
+  { iso: "GU", name: "Guam", dial: "+1671" },
   { iso: "GN", name: "Guinea", dial: "+224" },
   { iso: "GW", name: "Guinea-Bissau", dial: "+245" },
   { iso: "GY", name: "Guyana", dial: "+592" },
@@ -133,14 +144,17 @@ export const PHONE_COUNTRIES: PhoneCountry[] = [
   { iso: "ML", name: "Mali", dial: "+223" },
   { iso: "MT", name: "Malta", dial: "+356" },
   { iso: "MH", name: "Marshall Islands", dial: "+692" },
+  { iso: "MQ", name: "Martinique", dial: "+596" },
   { iso: "MR", name: "Mauritania", dial: "+222" },
   { iso: "MU", name: "Mauritius", dial: "+230" },
+  { iso: "YT", name: "Mayotte", dial: "+262" },
   { iso: "MX", name: "Mexico", dial: "+52" },
   { iso: "FM", name: "Micronesia", dial: "+691" },
   { iso: "MD", name: "Moldova", dial: "+373" },
   { iso: "MC", name: "Monaco", dial: "+377" },
   { iso: "MN", name: "Mongolia", dial: "+976" },
   { iso: "ME", name: "Montenegro", dial: "+382" },
+  { iso: "MS", name: "Montserrat", dial: "+1664" },
   { iso: "MA", name: "Morocco", dial: "+212" },
   { iso: "MZ", name: "Mozambique", dial: "+258" },
   { iso: "MM", name: "Myanmar", dial: "+95" },
@@ -148,6 +162,7 @@ export const PHONE_COUNTRIES: PhoneCountry[] = [
   { iso: "NR", name: "Nauru", dial: "+674" },
   { iso: "NP", name: "Nepal", dial: "+977" },
   { iso: "NL", name: "Netherlands", dial: "+31" },
+  { iso: "NC", name: "New Caledonia", dial: "+687" },
   { iso: "NZ", name: "New Zealand", dial: "+64" },
   { iso: "NI", name: "Nicaragua", dial: "+505" },
   { iso: "NE", name: "Niger", dial: "+227" },
@@ -168,6 +183,7 @@ export const PHONE_COUNTRIES: PhoneCountry[] = [
   { iso: "PT", name: "Portugal", dial: "+351" },
   { iso: "PR", name: "Puerto Rico", dial: "+1787" },
   { iso: "QA", name: "Qatar", dial: "+974" },
+  { iso: "RE", name: "Réunion", dial: "+262" },
   { iso: "RO", name: "Romania", dial: "+40" },
   { iso: "RU", name: "Russia", dial: "+7" },
   { iso: "RW", name: "Rwanda", dial: "+250" },
@@ -208,12 +224,14 @@ export const PHONE_COUNTRIES: PhoneCountry[] = [
   { iso: "TN", name: "Tunisia", dial: "+216" },
   { iso: "TR", name: "Turkey", dial: "+90" },
   { iso: "TM", name: "Turkmenistan", dial: "+993" },
+  { iso: "TC", name: "Turks and Caicos Islands", dial: "+1649" },
   { iso: "TV", name: "Tuvalu", dial: "+688" },
   { iso: "UG", name: "Uganda", dial: "+256" },
   { iso: "UA", name: "Ukraine", dial: "+380" },
   { iso: "AE", name: "United Arab Emirates", dial: "+971" },
   { iso: "GB", name: "United Kingdom", dial: "+44" },
   { iso: "US", name: "United States", dial: "+1" },
+  { iso: "VI", name: "U.S. Virgin Islands", dial: "+1340" },
   { iso: "UY", name: "Uruguay", dial: "+598" },
   { iso: "UZ", name: "Uzbekistan", dial: "+998" },
   { iso: "VU", name: "Vanuatu", dial: "+678" },
@@ -239,7 +257,24 @@ export const DIAL_BY_ISO: ReadonlyMap<string, string> = new Map(
 const PREFERRED_ISO_BY_DIAL: Record<string, string> = {
   "+1": "US",
   "+7": "RU",
+  "+262": "RE", // Réunion over Mayotte
 }
+
+/**
+ * Dial codes whose E.164 national number legitimately BEGINS with 0, so the
+ * trunk-zero strip and the "drop the leading 0" validation must both stand
+ * down: Italy and its plan-sharers (San Marino, Vatican), Côte d'Ivoire
+ * (10-digit numbers starting 01/05/07 since the 2021 renumbering), and Gabon
+ * (post-renumbering mobiles keep their 0). Everywhere else a 0 after the
+ * dial code is a local-dialling artefact that corrupts the stored value.
+ */
+export const KEEPS_LEADING_ZERO: ReadonlySet<string> = new Set([
+  "+39",
+  "+225",
+  "+241",
+  "+378",
+  "+379",
+])
 
 /** Dial codes longest-first, so prefix matching never stops at `+1` when `+1242` fits. */
 const DIALS_LONGEST_FIRST: string[] = [
@@ -275,8 +310,8 @@ export const PHONE_NATIONAL_MIN = 4
  * Anything else returns `iso: ""` so the reviewer picks the code themselves —
  * guessing a country here would quietly send an interview SMS to the wrong
  * continent. A trunk `0` left after the dial code (`+92 0316…`) is dropped,
- * except for Italy where the leading zero is genuinely part of the E.164
- * number.
+ * except for the `KEEPS_LEADING_ZERO` countries where the zero is genuinely
+ * part of the E.164 number.
  */
 export function splitPhone(raw: string): { iso: string; number: string } {
   const trimmed = raw.trim()
@@ -297,7 +332,8 @@ export function splitPhone(raw: string): { iso: string; number: string } {
         const dialDigits = dial.slice(1)
         if (dialDigits.length < 2 || !digits.startsWith(dialDigits)) continue
         let rest = digits.slice(dialDigits.length)
-        if (dial !== "+39" && rest.startsWith("0")) rest = rest.slice(1)
+        if (!KEEPS_LEADING_ZERO.has(dial) && rest.startsWith("0"))
+          rest = rest.slice(1)
         // The remainder must still look like a national number, or the
         // "dial code" was just the number's own first digits.
         if (rest.length >= 6 && rest.length <= 12) {
@@ -312,7 +348,8 @@ export function splitPhone(raw: string): { iso: string; number: string } {
     const dialDigits = dial.slice(1)
     if (!intl.startsWith(dialDigits)) continue
     let rest = intl.slice(dialDigits.length)
-    if (dial !== "+39" && rest.startsWith("0")) rest = rest.slice(1)
+    if (!KEEPS_LEADING_ZERO.has(dial) && rest.startsWith("0"))
+      rest = rest.slice(1)
     return { iso: ISO_FOR_DIAL.get(dial) as string, number: rest }
   }
   // A `+` number whose code we don't carry: keep the digits, let the human sort it.
