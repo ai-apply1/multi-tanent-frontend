@@ -261,15 +261,22 @@ export const PHONE_NATIONAL_MIN = 4
 
 /**
  * Split a phone string as extracted from a CV — `(+92) 3164763739`,
- * `+92-316-4763739`, `00923164763739`, `03164763739` — into the dropdown's
- * country + the national number.
+ * `+92-316-4763739`, `00923164763739`, `923134856792`, `03164763739` — into
+ * the dropdown's country + the national number.
  *
- * Only an INTERNATIONAL prefix (`+` or `00`) identifies a country; a bare
- * national number returns `iso: ""` so the reviewer must pick the code
- * themselves — guessing a country here would quietly send an interview SMS
- * to the wrong continent. A trunk `0` left after the dial code (`+92 0316…`)
- * is dropped, except for Italy where the leading zero is genuinely part of
- * the E.164 number.
+ * Two ways a country is recognised, in order of trust:
+ *  1. An INTERNATIONAL prefix (`+` or `00`) — explicit, always honoured.
+ *  2. An EMBEDDED dial code: CVs often write the code without the `+`
+ *     (`923134856792`). Inferred only when the string cannot be a national
+ *     number anyway (11+ digits, no trunk `0`) and the dial code has 2+
+ *     digits — an 11-digit Chinese mobile also starts with `1`, so the
+ *     single-digit `+1`/`+7` codes are never guessed from bare digits.
+ *
+ * Anything else returns `iso: ""` so the reviewer picks the code themselves —
+ * guessing a country here would quietly send an interview SMS to the wrong
+ * continent. A trunk `0` left after the dial code (`+92 0316…`) is dropped,
+ * except for Italy where the leading zero is genuinely part of the E.164
+ * number.
  */
 export function splitPhone(raw: string): { iso: string; number: string } {
   const trimmed = raw.trim()
@@ -280,7 +287,26 @@ export function splitPhone(raw: string): { iso: string; number: string } {
   if (trimmed.startsWith("+")) intl = digits
   else if (digits.startsWith("00")) intl = digits.slice(2)
 
-  if (intl === null) return { iso: "", number: digits }
+  if (intl === null) {
+    if (
+      !digits.startsWith("0") &&
+      digits.length >= 11 &&
+      digits.length <= E164_MAX_DIGITS
+    ) {
+      for (const dial of DIALS_LONGEST_FIRST) {
+        const dialDigits = dial.slice(1)
+        if (dialDigits.length < 2 || !digits.startsWith(dialDigits)) continue
+        let rest = digits.slice(dialDigits.length)
+        if (dial !== "+39" && rest.startsWith("0")) rest = rest.slice(1)
+        // The remainder must still look like a national number, or the
+        // "dial code" was just the number's own first digits.
+        if (rest.length >= 6 && rest.length <= 12) {
+          return { iso: ISO_FOR_DIAL.get(dial) as string, number: rest }
+        }
+      }
+    }
+    return { iso: "", number: digits }
+  }
 
   for (const dial of DIALS_LONGEST_FIRST) {
     const dialDigits = dial.slice(1)

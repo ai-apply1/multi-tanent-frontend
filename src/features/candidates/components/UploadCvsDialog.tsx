@@ -437,9 +437,10 @@ export function UploadCvsDialog({
             prev.map((r) => {
               const got = r.cvKey ? byKey.get(r.cvKey) : undefined
               if (!got) return r
-              // splitPhone only picks a country off an international prefix
-              // (+92 / 0092); a bare national number leaves the dropdown
-              // empty so the reviewer chooses — not the software.
+              // splitPhone picks a country off an international prefix
+              // (+92 / 0092) or an unambiguous embedded dial code
+              // (923134856792); anything it can't be sure of leaves the
+              // dropdown empty so the reviewer chooses — not the software.
               const parsedPhone = splitPhone(got.phone)
               return {
                 ...r,
