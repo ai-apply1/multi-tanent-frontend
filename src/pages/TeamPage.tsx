@@ -16,6 +16,7 @@ import {
   RotateCw,
   Search,
   ShieldCheck,
+  Trash2,
   UserSquare2,
 } from "lucide-react";
 import toast from "react-hot-toast";
@@ -37,7 +38,7 @@ import {
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UserFormDialog } from "@/features/users/components/UserFormDialog";
-import { listUsers, updateUser } from "@/features/users/usersApi";
+import { deleteUser, listUsers, updateUser } from "@/features/users/usersApi";
 import { USER_ROLE_LABELS, type OrgUser } from "@/features/users/types";
 import { useAuth } from "@/features/auth/AuthContext";
 import { useOrgTimezone } from "@/features/organization/useOrgTimezone";
@@ -66,6 +67,7 @@ export function TeamPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<OrgUser | null>(null);
   const [activationTarget, setActivationTarget] = useState<OrgUser | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<OrgUser | null>(null);
 
   const isOrgAdmin = user?.role === "org_admin";
   const debouncedSearch = useDebouncedValue(search);
@@ -109,6 +111,19 @@ export function TeamPage() {
     onError: (err) => {
       toast.error(apiError(err, "Could not update member."));
       setActivationTarget(null);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (row: OrgUser) => deleteUser(row._id),
+    onSuccess: () => {
+      toast.success("Member deleted.");
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      setDeleteTarget(null);
+    },
+    onError: (err) => {
+      toast.error(apiError(err, "Could not delete member."));
+      setDeleteTarget(null);
     },
   });
 
@@ -385,6 +400,18 @@ export function TeamPage() {
                         >
                           {row.isActive ? "Deactivate" : "Reactivate"}
                         </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        {/* Permanent delete — org_admin only (the whole page
+                            is), and never on your own row: the backend 403s
+                            self-deletion, so we disable it here to match. */}
+                        <DropdownMenuItem
+                          disabled={isSelf}
+                          onSelect={() => setDeleteTarget(row)}
+                          className="text-[var(--danger)] focus:bg-[var(--danger-soft)] focus:text-[var(--danger)]"
+                        >
+                          <Trash2 className="h-4 w-4" strokeWidth={1.8} />
+                          Delete
+                        </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
@@ -483,6 +510,19 @@ export function TeamPage() {
         onConfirm={() =>
           activationTarget && activationMutation.mutate(activationTarget)
         }
+      />
+
+      {/* Delete is permanent and irreversible — destructive confirm. */}
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title={`Delete ${deleteTarget?.fullName ?? "member"}?`}
+        description="This permanently removes their account and signs them out everywhere. This cannot be undone — deactivate instead if you might want them back."
+        destructive
+        confirmLabel="Delete"
+        loadingLabel="Deleting…"
+        loading={deleteMutation.isPending}
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget)}
       />
     </div>
   );

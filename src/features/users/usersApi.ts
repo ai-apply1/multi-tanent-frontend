@@ -55,6 +55,18 @@ export async function updateUser(id: string, payload: UpdateUserPayload) {
   return data;
 }
 
+/**
+ * Permanently delete a team member. `org_admin` only, and the backend 403s an
+ * admin who targets their own row — so the UI never offers Delete on your own
+ * row. Distinct from deactivation: this removes the user entirely.
+ */
+export async function deleteUser(id: string) {
+  const { data } = await api.delete<{ deleted: boolean; userId: string }>(
+    `/admin/users/${id}`,
+  );
+  return data;
+}
+
 /** Self-scoped, so `hr` reaches it too (it lives on the settings page). */
 export async function getNotificationPrefs() {
   const { data } = await api.get<NotificationPrefs>(
