@@ -230,6 +230,58 @@ export interface CandidateProfile {
 
 export type PaginatedCandidates = Paginated<CandidateListItem>
 
+// ── the activity timeline ─────────────────────────────────────────────
+
+export type CandidateActivityType =
+  | "applied"
+  | "status_changed"
+  | "interview_started"
+  | "interview_submitted"
+  | "scored"
+  | "note_added"
+  | "email_sent"
+
+export type CandidateActivityActor = "user" | "system" | "ai"
+
+/**
+ * A status ref resolved SERVER-SIDE for the timeline. Null when the column
+ * was deleted after the move (custom columns can be removed once empty) —
+ * render that as "Deleted status", never hide the row.
+ */
+export interface ActivityStatusRef {
+  key: string
+  label: string
+  color: string | null
+}
+
+/**
+ * One row of `GET /admin/candidates/:id/activities` — the append-only
+ * audit feed. Unlike the raw documents above this IS a mapped shape
+ * (`id`, not `_id`): the backend resolves status refs and drops internal
+ * ids before it ships.
+ */
+export interface CandidateActivity {
+  id: string
+  type: CandidateActivityType
+  /** Interview attempt the event belongs to; null = pre-attempt lifecycle. */
+  attemptNumber: number | null
+  actorType: CandidateActivityActor
+  /** Frozen at write time (an email for users), so renames/deletes don't blank history. */
+  actorName: string | null
+  note: string | null
+  meta: Record<string, unknown> | null
+  /**
+   * Three states: ABSENT = the row never referenced a status (first move /
+   * non-move event); NULL = it did, but that column was deleted since
+   * (render "Deleted status"); object = still resolvable.
+   */
+  fromStatus?: ActivityStatusRef | null
+  toStatus?: ActivityStatusRef | null
+  createdAt: string
+}
+
+export type PaginatedActivities = Paginated<CandidateActivity>
+
 // ── the kanban board ──────────────────────────────────────────────────
 
 /**

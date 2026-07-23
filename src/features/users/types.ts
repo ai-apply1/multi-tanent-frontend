@@ -52,8 +52,8 @@ export interface CreateUserResponse {
 }
 
 /**
- * There is no DELETE for users — `isActive: false` is the only removal, and it
- * is reversible.
+ * Two removal paths: reversible deactivation (`isActive: false`, this payload)
+ * and a permanent org_admin delete (`deleteUser`). Neither may target yourself.
  */
 export interface UpdateUserPayload {
   fullName?: string;

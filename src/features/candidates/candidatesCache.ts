@@ -23,6 +23,10 @@ export function invalidateCandidateData(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ["candidateKanban"] })
   queryClient.invalidateQueries({ queryKey: ["awaiting-decision"] })
   queryClient.invalidateQueries({ queryKey: ["overviewStats"] })
+  // The drawer's Activity timeline — every mutation above also appends an
+  // audit row, so the feed must refetch with the rest or the admin's own
+  // action won't appear until reopen.
+  queryClient.invalidateQueries({ queryKey: ["candidateActivities"] })
 }
 
 /**

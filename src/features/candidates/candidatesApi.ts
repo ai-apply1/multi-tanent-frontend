@@ -11,6 +11,7 @@ import type {
   InviteResult,
   KanbanBoard,
   ListCandidatesParams,
+  PaginatedActivities,
   PaginatedCandidates,
   PresignedCvUpload,
   SendCandidateEmailPayload,
@@ -35,6 +36,33 @@ export async function listCandidates(params: ListCandidatesParams = {}) {
 
 export async function getCandidate(candidateId: string) {
   const { data } = await api.get<CandidateDetail>(`/admin/candidates/${candidateId}`)
+  return data
+}
+
+/**
+ * The candidate's append-only activity feed, newest first, paginated.
+ *
+ * `attemptNumber` narrows it to ONE interview attempt — the interview
+ * drawer's view. The match is strict: rows written before any attempt
+ * existed (applied, CV vetting) are stamped null and only appear in the
+ * unscoped feed, by design — no fallback.
+ */
+export async function getCandidateActivities(
+  candidateId: string,
+  params: { attemptNumber?: number; page?: number; limit?: number } = {}
+) {
+  const { data } = await api.get<PaginatedActivities>(
+    `/admin/candidates/${candidateId}/activities`,
+    {
+      params: {
+        page: params.page ?? 1,
+        limit: params.limit ?? 25,
+        ...(params.attemptNumber != null
+          ? { attemptNumber: params.attemptNumber }
+          : {}),
+      },
+    }
+  )
   return data
 }
 

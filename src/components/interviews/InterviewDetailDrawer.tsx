@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import axios from "axios";
 import {
@@ -86,6 +91,7 @@ import {
 import {
   deleteCandidate,
   getCandidate,
+  getCandidateActivities,
   listCandidateStatuses,
   sendCandidateInvite,
   updateCandidateStatus,
@@ -101,6 +107,7 @@ import {
   POST_INTERVIEW_REJECT_STATUS_KEY,
   REJECTED_STATUS_KEYS,
   type BuiltinCandidateStatusKey,
+  type CandidateActivity,
   type CandidateDetail,
   type CandidateProfile,
   type CandidateStatus,
@@ -1552,6 +1559,8 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                   {/* ── Activity: the event timeline. ── */}
                   <TabsContent value="activity" className="mt-0">
                     <ActivityTab
+                      candidateId={data.candidateId}
+                      attemptNumber={data.attemptNumber}
                       createdAt={data.createdAt}
                       startedAt={data.startedAt}
                       submittedAt={data.submittedAt}
@@ -2058,7 +2067,134 @@ function timelineTime(iso: string, timeZone?: string): string {
   return new Date(iso).toLocaleString();
 }
 
+/** How many feed rows each "Load earlier activity" click fetches. */
+const ACTIVITY_PAGE_SIZE = 25;
+
+/** One rendered timeline entry, from either source (milestone or feed). */
+type TimelineEvent = {
+  title: string;
+  sub: string;
+  time: string;
+  at: number;
+  seq: number;
+  kind: "score" | "submit" | "start" | "create" | "status" | "note" | "email";
+};
+
+/** Who did it, for a feed row's byline. `actorName` is frozen at write time
+ *  (an email for dashboard users), so renames/deletes don't blank history. */
+function activityActorLabel(row: CandidateActivity): string {
+  if (row.actorType === "user") return row.actorName || "an admin";
+  if (row.actorType === "ai") return "AI";
+  return row.actorName || "System";
+}
+
+/**
+ * Feed rows that would DUPLICATE a synthesized milestone. The four
+ * milestones (invited / started / submitted / scored) are rebuilt from the
+ * interview document because they carry subtitles the feed doesn't know
+ * (answered counts, the score); the feed contributes everything else. So:
+ *   - started/submitted/scored feed rows mirror the milestones 1:1 — drop;
+ *   - the automation's invite email mirrors "Invite link emailed" — drop;
+ *   - the automation's kanban moves into invited/interviewing/scored are
+ *     the status shadows of those same milestones — drop.
+ * Rows a PERSON produced are never dropped — surfacing manual actions is
+ * the whole point of merging the feed in.
+ */
+function isMilestoneDuplicate(row: CandidateActivity): boolean {
+  if (
+    row.type === "interview_started" ||
+    row.type === "interview_submitted" ||
+    row.type === "scored"
+  ) {
+    return true;
+  }
+  if (row.actorType === "user") return false;
+  if (row.type === "email_sent" && row.meta?.emailType === "invite") {
+    return true;
+  }
+  if (
+    row.type === "status_changed" &&
+    (row.toStatus?.key === "invited" ||
+      row.toStatus?.key === "interviewing" ||
+      row.toStatus?.key === "scored")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+const EMAIL_TITLES: Record<string, string> = {
+  invite: "Invite email sent",
+  followup: "Follow-up email sent",
+  shortlist: "Shortlist email sent",
+  rejection: "Rejection email sent",
+  offer: "Offer email sent",
+};
+
+/**
+ * One feed row → the timeline's render shape. Feed rows get `seq: 5` so an
+ * entry sharing a milestone's second sorts AFTER it — the milestone caused
+ * it (scored → decision move → result email).
+ */
+function feedEvent(row: CandidateActivity, timeZone: string): TimelineEvent {
+  const time = timelineTime(row.createdAt, timeZone);
+  const at = new Date(row.createdAt).getTime();
+  const by = `by ${activityActorLabel(row)}`;
+  if (row.type === "status_changed") {
+    // Status refs are three-state (see `CandidateActivity`): object = live
+    // column, null = deleted since the move, absent = never referenced one.
+    const to =
+      row.toStatus === null
+        ? "Deleted status"
+        : (row.toStatus?.label ?? "unknown");
+    const from =
+      row.fromStatus === undefined
+        ? null
+        : row.fromStatus === null
+          ? "Deleted status"
+          : row.fromStatus.label;
+    const path = from ? `From ${from} · ${by}` : `By ${activityActorLabel(row)}`;
+    return {
+      title: `Moved to ${to}`,
+      sub: row.note ? `${path} — ${row.note}` : path,
+      time,
+      at,
+      seq: 5,
+      kind: "status",
+    };
+  }
+  if (row.type === "note_added") {
+    return {
+      title: `Note ${by}`,
+      sub: row.note || "",
+      time,
+      at,
+      seq: 5,
+      kind: "note",
+    };
+  }
+  if (row.type === "email_sent") {
+    const emailType =
+      typeof row.meta?.emailType === "string" ? row.meta.emailType : "";
+    return {
+      // The writer's note already names the recipient (and the sender when
+      // manual), so it IS the subtitle.
+      title: EMAIL_TITLES[emailType] ?? "Email sent",
+      sub: row.note || "",
+      time,
+      at,
+      seq: 5,
+      kind: "email",
+    };
+  }
+  // `applied` never carries an attemptNumber so it can't reach an
+  // attempt-scoped feed — this is a future-proofing fallback, not a path.
+  return { title: "Activity", sub: row.note || "", time, at, seq: 5, kind: "note" };
+}
+
 function ActivityTab({
+  candidateId,
+  attemptNumber,
   createdAt,
   startedAt,
   submittedAt,
@@ -2069,6 +2205,9 @@ function ActivityTab({
   answeredCount,
   emptyFallback,
 }: {
+  /** Scopes the real feed: this candidate's rows stamped with this attempt. */
+  candidateId: string;
+  attemptNumber: number;
   createdAt: string | null;
   startedAt: string | null;
   submittedAt: string | null;
@@ -2081,6 +2220,24 @@ function ActivityTab({
    *  "No activity yet" line if omitted, so existing call-sites keep working. */
   emptyFallback?: React.ReactNode;
 }) {
+  // The append-only audit feed for THIS attempt — manual kanban moves,
+  // notes, follow-up and manual emails, with actor attribution. Strictly
+  // attempt-scoped: rows stamped with another attempt (or none at all —
+  // the pre-attempt lifecycle) never appear here, by design.
+  const feed = useInfiniteQuery({
+    queryKey: ["candidateActivities", candidateId, attemptNumber],
+    queryFn: ({ pageParam }) =>
+      getCandidateActivities(candidateId, {
+        attemptNumber,
+        page: pageParam,
+        limit: ACTIVITY_PAGE_SIZE,
+      }),
+    initialPageParam: 1,
+    getNextPageParam: (last) => last.nextPage ?? undefined,
+    enabled: Boolean(candidateId),
+  });
+  const feedRows = (feed.data?.pages ?? []).flatMap((p) => p.data);
+
   /*
    * OLDEST FIRST — the invite at the top, the score at the bottom, read down
    * the way the interview actually happened.
@@ -2089,18 +2246,12 @@ function ActivityTab({
    * `submittedAt` (there is no separate `scoredAt` on this payload), so
    * "submitted" and "scored" tie to the second. Sorting on time alone would
    * let them swap and show the interview scored before it was submitted, so
-   * `seq` breaks the tie in causal order. Sorting rather than relying on push
-   * order also keeps this correct if a future event is added in the wrong
-   * place.
+   * `seq` breaks the tie in causal order (feed rows sort after a milestone
+   * sharing their second — see `feedEvent`). Sorting rather than relying on
+   * push order also keeps this correct if a future event is added in the
+   * wrong place.
    */
-  const events: Array<{
-    title: string;
-    sub: string;
-    time: string;
-    at: number;
-    seq: number;
-    kind: "score" | "submit" | "start" | "create";
-  }> = [];
+  const events: TimelineEvent[] = [];
   if (createdAt) {
     events.push({
       title: "Interview invited",
@@ -2146,6 +2297,10 @@ function ActivityTab({
       kind: "score",
     });
   }
+  for (const row of feedRows) {
+    if (isMilestoneDuplicate(row)) continue;
+    events.push(feedEvent(row, timeZone));
+  }
   events.sort((a, b) => a.at - b.at || a.seq - b.seq);
   if (!events.length) {
     return (
@@ -2158,15 +2313,38 @@ function ActivityTab({
       </>
     );
   }
-  const kindColor: Record<typeof events[number]["kind"], string> = {
+  const kindColor: Record<TimelineEvent["kind"], string> = {
     score: "var(--primary)",
     submit: "var(--info)",
     start: "var(--warning)",
     create: "var(--ink-muted)",
+    status: "var(--primary)",
+    note: "var(--ink-muted)",
+    email: "var(--info)",
   };
   return (
     <div className="rounded-2xl border border-line bg-surface p-5">
       <div className="mb-3.5 text-[14px] font-semibold">Activity timeline</div>
+      {feed.isError ? (
+        <div className="mb-3 rounded-lg border border-line bg-surface-2 px-3 py-2 text-[12px] text-ink-muted">
+          Could not load the full activity feed, showing the interview
+          milestones only.
+        </div>
+      ) : null}
+      {/* Older rows load ABOVE — the list reads oldest-first, so "earlier"
+          belongs at the top. */}
+      {feed.hasNextPage ? (
+        <button
+          type="button"
+          onClick={() => feed.fetchNextPage()}
+          disabled={feed.isFetchingNextPage}
+          className="mb-3 w-full rounded-lg border border-line bg-surface-2 px-3 py-1.5 text-[12px] font-semibold text-ink-muted hover:bg-surface-3 disabled:opacity-60"
+        >
+          {feed.isFetchingNextPage
+            ? "Loading earlier activity…"
+            : "Load earlier activity"}
+        </button>
+      ) : null}
       <div className="grid gap-0.5">
         {events.map((e, i) => {
           const c = kindColor[e.kind];
@@ -2187,6 +2365,12 @@ function ActivityTab({
                     <CheckCircle2 className="h-3.5 w-3.5" strokeWidth={1.7} />
                   ) : e.kind === "start" ? (
                     <Play className="h-3.5 w-3.5" strokeWidth={1.7} />
+                  ) : e.kind === "status" ? (
+                    <History className="h-3.5 w-3.5" strokeWidth={1.7} />
+                  ) : e.kind === "note" ? (
+                    <MessageSquare className="h-3.5 w-3.5" strokeWidth={1.7} />
+                  ) : e.kind === "email" ? (
+                    <Mail className="h-3.5 w-3.5" strokeWidth={1.7} />
                   ) : (
                     <User className="h-3.5 w-3.5" strokeWidth={1.7} />
                   )}
