@@ -1,6 +1,7 @@
 import { Outlet } from "react-router-dom"
 import { Sidebar } from "@/components/layout/Sidebar"
 import { TopBar } from "@/components/layout/TopBar"
+import { ImpersonationBanner } from "@/components/layout/ImpersonationBanner"
 
 /**
  * DevExcel-style app shell: 236px fixed sidebar (branded, white), 60px
@@ -10,24 +11,29 @@ import { TopBar } from "@/components/layout/TopBar"
  */
 export function DashboardLayout() {
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-[var(--surface-2)] text-[var(--ink)]">
-      <Sidebar />
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <TopBar />
-        {/* THIS element is the app's scroll container — the window never
-            scrolls, because the shell above is `h-screen overflow-hidden`.
-            `scrollbar-gutter: stable` reserves the scrollbar's width whether or
-            not one is drawn, so moving between a tall page and a short one
-            can't add/remove the bar, change this box's content width, and jerk
-            the centred page sideways. Most obvious on Settings, where switching
-            tabs swaps a one-field pane for a stack of cards.
-            Deliberately `overflow-y-auto`, not `scroll`: forcing the track does
-            reserve the width too, but it paints a scrollbar on every short page
-            where there is nothing to scroll, which is worse than the problem it
-            solves. */}
-        <main className="scroll min-h-0 min-w-0 flex-1 overflow-y-auto scrollbar-gutter-stable">
-          <Outlet />
-        </main>
+    <div className="flex h-screen w-full flex-col overflow-hidden bg-[var(--surface-2)] text-[var(--ink)]">
+      {/* Full-width, above the sidebar and header, so an impersonation session
+          is unmissable from any page. Renders nothing on a normal session. */}
+      <ImpersonationBanner />
+      <div className="flex min-h-0 w-full flex-1 overflow-hidden">
+        <Sidebar />
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <TopBar />
+          {/* THIS element is the app's scroll container — the window never
+              scrolls, because the shell above is `h-screen overflow-hidden`.
+              `scrollbar-gutter: stable` reserves the scrollbar's width whether or
+              not one is drawn, so moving between a tall page and a short one
+              can't add/remove the bar, change this box's content width, and jerk
+              the centred page sideways. Most obvious on Settings, where switching
+              tabs swaps a one-field pane for a stack of cards.
+              Deliberately `overflow-y-auto`, not `scroll`: forcing the track does
+              reserve the width too, but it paints a scrollbar on every short page
+              where there is nothing to scroll, which is worse than the problem it
+              solves. */}
+          <main className="scroll min-h-0 min-w-0 flex-1 overflow-y-auto scrollbar-gutter-stable">
+            <Outlet />
+          </main>
+        </div>
       </div>
     </div>
   )
