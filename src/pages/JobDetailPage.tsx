@@ -334,6 +334,17 @@ export function JobDetailPage() {
         >
           Questions
         </TabButton>
+        {/* Not an in-page tab: navigates to the org-wide Candidates list
+            pre-filtered to THIS job (`?job=<id>`), which is exactly what
+            CandidatesPage reads to scope its rows. This is the destination the
+            retired per-job board route now redirects to, so we go there
+            directly and skip the redirect hop. */}
+        <TabButton
+          active={false}
+          onClick={() => navigate(`${ROUTES.CANDIDATES}?job=${job._id}`)}
+        >
+          Candidates
+        </TabButton>
       </div>
 
       {tab === "overview" ? (
