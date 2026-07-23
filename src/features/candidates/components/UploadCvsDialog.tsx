@@ -995,7 +995,10 @@ function ReviewRow({
                 aria-label="Country code"
                 aria-invalid={Boolean(phoneMsg)}
                 onBlur={onTouch}
-                className="w-[92px] shrink-0"
+                // h-11 matches the Input beside it (the trigger's own default
+                // is h-10, which reads as a broken baseline in the same row);
+                // the width fits the widest dial code (+1868) without ellipsis.
+                className="h-11 w-[100px] shrink-0"
               >
                 <SelectValue placeholder="Code">
                   {row.phoneIso ? DIAL_BY_ISO.get(row.phoneIso) : null}
@@ -1139,7 +1142,7 @@ function CityField({
             id={`city-${rowId}`}
             aria-invalid={invalid}
             onBlur={onTouch}
-            className="w-full"
+            className="h-11 w-full"
           >
             <SelectValue placeholder="Select a city" />
           </SelectTrigger>
