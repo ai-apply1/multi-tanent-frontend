@@ -6,6 +6,7 @@ import type {
   ListInterviewsParams,
   PaginatedResponse,
   ScoringStatus,
+  TopCandidate,
   WebcamHlsStatus
 } from "@/features/interviews/types"
 
@@ -28,6 +29,19 @@ export async function listInterviews(params: ListInterviewsParams = {}) {
         ...(params.latestOnly === false ? { latestOnly: false } : {})
       }
     }
+  )
+  return data
+}
+
+/**
+ * The job's top candidates by interview score (completed + scored only, highest
+ * first). Powers the job overview's "Top ranked candidates" card. `overall` is
+ * already on the 0-100 scale the rest of the UI shows.
+ */
+export async function getJobTopCandidates(jobId: string, limit = 5) {
+  const { data } = await api.get<TopCandidate[]>(
+    "/admin/interviews/top-candidates",
+    { params: { jobId, limit } }
   )
   return data
 }

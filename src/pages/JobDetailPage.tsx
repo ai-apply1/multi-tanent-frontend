@@ -40,6 +40,8 @@ import { UploadCvsDialog } from "@/features/candidates/components/UploadCvsDialo
 import { getCandidateKanban } from "@/features/candidates/candidatesApi";
 import { invalidateCandidateDataAndJobCounts } from "@/features/candidates/candidatesCache";
 import type { KanbanColumn } from "@/features/candidates/types";
+import { getJobTopCandidates } from "@/features/interviews/interviewsApi";
+import { formatRecommendation } from "@/features/interviews/helpers";
 import { ROUTES, jobEdit } from "@/routes";
 import { errorMessage } from "@/lib/errors";
 import { JobStatusBadge } from "./JobsPage";
@@ -379,6 +381,16 @@ function OverviewTab({
   const { data: organization } = useOrganization();
   const requiredSkills = job.eligibility.requiredSkills;
 
+  // The job's leaderboard: candidates who COMPLETED and were scored, ranked by
+  // overall score. Ranked server-side (the score lives on the interview, and
+  // the kanban board is truncated by recency, not score) so the true top
+  // scorers surface even on a busy job.
+  const topQuery = useQuery({
+    queryKey: ["jobTopCandidates", job._id],
+    queryFn: () => getJobTopCandidates(job._id),
+    enabled: Boolean(job._id),
+  });
+
   return (
     <div className="grid gap-4 lg:grid-cols-[1.55fr_1fr] lg:items-start">
       {/* Left column */}
@@ -468,18 +480,65 @@ function OverviewTab({
               Top ranked candidates
             </h2>
           </div>
-          <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-line-2 px-6 py-10 text-center">
-            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-accent text-primary">
-              <Users className="h-5 w-5" strokeWidth={1.7} />
-            </span>
-            <p className="text-[13.5px] font-semibold text-ink">
-              No candidates have completed their interview yet
-            </p>
-            <p className="max-w-[340px] text-[12.5px] text-ink-muted">
-              Share the invite link and completed interviews will be ranked
-              here.
-            </p>
-          </div>
+          {topQuery.isPending ? (
+            <div className="flex items-center justify-center gap-2 py-10 text-[13px] text-ink-muted">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading
+            </div>
+          ) : topQuery.isError ? (
+            <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-line-2 px-6 py-10 text-center">
+              <p className="text-[13.5px] font-semibold text-ink">
+                Could not load ranked candidates
+              </p>
+              <button
+                type="button"
+                onClick={() => void topQuery.refetch()}
+                className="text-[12.5px] font-medium text-primary hover:underline"
+              >
+                Try again
+              </button>
+            </div>
+          ) : (topQuery.data?.length ?? 0) === 0 ? (
+            <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-line-2 px-6 py-10 text-center">
+              <span className="flex h-11 w-11 items-center justify-center rounded-full bg-accent text-primary">
+                <Users className="h-5 w-5" strokeWidth={1.7} />
+              </span>
+              <p className="text-[13.5px] font-semibold text-ink">
+                No candidates have completed their interview yet
+              </p>
+              <p className="max-w-[340px] text-[12.5px] text-ink-muted">
+                Share the invite link and completed interviews will be ranked
+                here.
+              </p>
+            </div>
+          ) : (
+            <ol className="flex flex-col gap-1.5">
+              {topQuery.data!.map((c, i) => (
+                <li
+                  key={c.sessionId}
+                  className="flex items-center gap-3 rounded-xl border border-line px-3 py-2.5"
+                >
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent text-[12px] font-semibold text-primary">
+                    {i + 1}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13.5px] font-semibold text-ink">
+                      {c.candidateName || c.email}
+                    </p>
+                    <p className="truncate text-[12px] text-ink-muted">
+                      {formatRecommendation(c.recommendation)}
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-[15px] font-semibold text-ink">
+                    {c.overall}
+                    <span className="text-[11px] font-normal text-ink-muted">
+                      /100
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ol>
+          )}
         </SectionCard>
       </div>
     </div>
