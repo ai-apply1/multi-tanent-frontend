@@ -60,6 +60,7 @@ export function StatusDialog({
    */
   const [label, setLabel] = useState(status?.label ?? "");
   const [key, setKey] = useState(status?.key ?? "");
+  const [description, setDescription] = useState(status?.description ?? "");
   const [color, setColor] = useState<string>(
     status?.color ?? STATUS_COLORS[0]!.hex,
   );
@@ -72,6 +73,9 @@ export function StatusDialog({
       if (isEdit) {
         return updateStatusColumn(status!._id, {
           label: label.trim(),
+          // Always sent, even when empty — an emptied field is a deliberate
+          // clear, and omitting it would leave the old text in place.
+          description: description.trim(),
           color,
           // Only custom columns may change terminality — the server ignores
           // the flag on protected built-ins, so don't send it for those.
@@ -81,6 +85,7 @@ export function StatusDialog({
       return createStatusColumn({
         key: key.trim(),
         label: label.trim(),
+        description: description.trim(),
         color,
         isTerminal,
       });
@@ -187,6 +192,31 @@ export function StatusDialog({
                   with a letter or digit.
                 </p>
               ) : null}
+            </div>
+
+            {/* Description — optional, editable on built-ins and customs
+                alike (display-only, like the name and colour). Shown under
+                the row on the pipeline page so teammates know what the
+                column is for. */}
+            <div>
+              <label
+                htmlFor="status-description"
+                className="mb-1.5 flex items-center gap-1.5 text-[13px] font-semibold text-ink"
+              >
+                Description
+                <span className="text-[11.5px] font-normal text-ink-subtle">
+                  optional
+                </span>
+              </label>
+              <textarea
+                id="status-description"
+                value={description}
+                maxLength={500}
+                rows={3}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="What is this column for? e.g. Candidates whose references are being called."
+                className="w-full resize-none rounded-lg border border-[var(--field-border)] bg-surface px-3.5 py-2.5 text-[14px] leading-relaxed text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)]"
+              />
             </div>
 
             {/* Color pills */}
