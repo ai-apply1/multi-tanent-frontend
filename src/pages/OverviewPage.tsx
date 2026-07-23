@@ -511,7 +511,11 @@ export function OverviewPage() {
             onDragEnd={handleDragEnd}
           >
             <SortableContext items={combinedIds} strategy={rectSortingStrategy}>
-              <div className="mb-4 grid min-w-0 grid-cols-1 gap-3 overflow-hidden sm:grid-cols-2 md:[grid-template-columns:repeat(auto-fit,minmax(210px,1fr))]">
+              {/* auto-FILL (not auto-fit) + a capped max track: a single card
+                  stays one column wide instead of stretching across the whole
+                  row, and every card gets the SAME width (210–260px) whether
+                  there's one or many. */}
+              <div className="mb-4 grid min-w-0 grid-cols-1 gap-3 overflow-hidden sm:grid-cols-2 md:[grid-template-columns:repeat(auto-fill,minmax(210px,260px))]">
                 {metricStats.map((stat) => (
                   <SortableStatCard
                     key={stat.id}
@@ -748,7 +752,7 @@ function OverviewSkeleton() {
   return (
     <div>
       {/* KPI card grid — same responsive columns as the real grid. */}
-      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 md:[grid-template-columns:repeat(auto-fit,minmax(210px,1fr))]">
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 md:[grid-template-columns:repeat(auto-fill,minmax(210px,260px))]">
         {Array.from({ length: 5 }).map((_, i) => (
           <div
             key={i}
