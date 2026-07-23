@@ -10,6 +10,7 @@ import {
   Bell,
   Briefcase,
   CheckCircle2,
+  KeyRound,
   Loader2,
   LogOut,
   // Moon, — dark/light toggle commented out
@@ -32,6 +33,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetClose, SheetContent } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ChangePasswordDialog } from "@/features/auth/components/ChangePasswordDialog";
 import { useAuth } from "@/features/auth/AuthContext";
 import { useOrgTimezone } from "@/features/organization/useOrgTimezone";
 // import { useTheme } from "@/features/theme/ThemeContext" — dark/light toggle commented out
@@ -184,6 +186,7 @@ export function TopBar() {
 
   const [notifOpen, setNotifOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
 
   const refreshNotifs = () => {
     void queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_UNREAD_KEY });
@@ -524,6 +527,11 @@ export function TopBar() {
               ) : null}
             </div>
             <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => setChangePasswordOpen(true)}>
+              <KeyRound strokeWidth={1.8} />
+              Change password
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={handleLogout}
               className="text-[var(--danger)] focus:bg-[var(--danger-soft)] focus:text-[var(--danger)]"
@@ -534,6 +542,11 @@ export function TopBar() {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      <ChangePasswordDialog
+        open={changePasswordOpen}
+        onOpenChange={setChangePasswordOpen}
+      />
     </header>
   );
 }

@@ -83,3 +83,23 @@ export async function resetPasswordRequest(
 ) {
   await api.post("/admin/auth/reset-password", { email, code, newPassword })
 }
+
+/**
+ * Change the signed-in user's own password. Proves ownership with the CURRENT
+ * password (no email/code), so it only works while authenticated.
+ *
+ * A wrong current password comes back as a 401 with a specific message
+ * ("Your current password is incorrect."), and reusing the old password is a
+ * 400 — surface both to the user. On success the backend signs out this user's
+ * OTHER sessions but refreshes THIS device's cookies, so the caller stays
+ * logged in and does not need to re-authenticate.
+ */
+export async function changePasswordRequest(
+  currentPassword: string,
+  newPassword: string
+) {
+  await api.post("/admin/auth/change-password", {
+    currentPassword,
+    newPassword
+  })
+}
