@@ -40,6 +40,7 @@ import { UserFormDialog } from "@/features/users/components/UserFormDialog";
 import { listUsers, updateUser } from "@/features/users/usersApi";
 import { USER_ROLE_LABELS, type OrgUser } from "@/features/users/types";
 import { useAuth } from "@/features/auth/AuthContext";
+import { useOrgTimezone } from "@/features/organization/useOrgTimezone";
 import type { UserRole } from "@/features/auth/types";
 import { formatDateTime } from "@/lib/date";
 import { errorMessage as apiError } from "@/lib/errors";
@@ -68,6 +69,7 @@ export function TeamPage() {
 
   const isOrgAdmin = user?.role === "org_admin";
   const debouncedSearch = useDebouncedValue(search);
+  const tz = useOrgTimezone();
 
   const { data, isLoading, isFetching, isError, refetch } = useQuery({
     queryKey: [
@@ -355,7 +357,7 @@ export function TeamPage() {
                     )}
                   </div>
                   <div className="text-[12.5px] text-ink-muted">
-                    {formatDateTime(row.lastLoginAt)}
+                    {formatDateTime(row.lastLoginAt, tz)}
                   </div>
                   <div className="flex justify-end">
                     <DropdownMenu>
