@@ -1617,7 +1617,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
         open={confirmDeleteInterview}
         onOpenChange={setConfirmDeleteInterview}
         title="Delete this interview?"
-        description="This removes the recording, transcript, and scores for this attempt. The candidate keeps their row and can be re-invited."
+        description="This removes this attempt entirely — recording, transcript, scores, and its emails and activity. The candidate keeps their row, an earlier attempt (if any) becomes the latest again, and they can be re-invited."
         destructive
         confirmLabel="Delete interview"
         loadingLabel="Deleting…"

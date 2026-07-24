@@ -999,9 +999,10 @@ export function CandidatesPage() {
         title={`Delete ${deleteTarget?.fullName || "this candidate"}?`}
         description={
           <>
-            This permanently removes <strong>{deleteTarget?.fullName}</strong>, their
-            CV, and their interview recordings. Any live invite link stops working
-            immediately. The activity timeline is kept as an audit trail.{" "}
+            This permanently removes <strong>{deleteTarget?.fullName}</strong>{" "}
+            and everything about them: their CV, every interview attempt and
+            recording, their email history, and their activity timeline. Any
+            live invite link stops working immediately.{" "}
             <strong>This can&apos;t be undone.</strong>
           </>
         }
@@ -1023,8 +1024,9 @@ export function CandidatesPage() {
         description={
           <>
             This permanently removes the <strong>{selectedCount}</strong> selected
-            candidate{selectedCount === 1 ? "" : "s"}, each one&apos;s CV, and their
-            interview recordings. Live invite links stop working immediately.{" "}
+            candidate{selectedCount === 1 ? "" : "s"} and everything about them:
+            CVs, every interview attempt and recording, email history, and
+            activity timelines. Live invite links stop working immediately.{" "}
             <strong>This can&apos;t be undone.</strong>
           </>
         }
