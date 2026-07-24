@@ -16,19 +16,19 @@ import { HlsPlayer } from "@/components/interviews/HlsPlayer"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { errorMessage as apiError } from "@/lib/errors"
 import {
-  completeApplyVideoUpload,
-  getApplyVideoStatus,
-  initApplyVideoUpload,
-  removeApplyVideo,
-  retryApplyVideoTranscode,
-  uploadApplyVideoToPresignedUrl,
-} from "@/features/organization/applyVideoApi"
+  completeDemoVideoUpload,
+  getDemoVideoStatus,
+  initDemoVideoUpload,
+  removeDemoVideo,
+  retryDemoVideoTranscode,
+  uploadDemoVideoToPresignedUrl,
+} from "@/features/organization/demoVideoApi"
 import type {
-  ApplyVideoStatus,
-  OrgApplyVideo,
+  DemoVideoStatus,
+  OrgDemoVideo,
 } from "@/features/organization/types"
 
-// Mirrors the backend `APPLY_VIDEO` config. The size cap is picker-only
+// Mirrors the backend `DEMO_VIDEO` config. The size cap is picker-only
 // courtesy; the server enforces it again against the object's real length.
 const MAX_BYTES = 500 * 1024 * 1024
 const ACCEPT_TYPES = [
@@ -41,7 +41,7 @@ const ACCEPT_TYPES = [
 const ACCEPT = `${ACCEPT_TYPES.join(",")},.mp4,.mov,.m4v,.webm,.mkv,.avi`
 
 const STATUS_BADGE: Record<
-  ApplyVideoStatus,
+  DemoVideoStatus,
   { label: string; className: string; Icon: typeof Clock }
 > = {
   draft: { label: "No video", className: "bg-surface-3 text-ink-muted", Icon: Video },
@@ -79,9 +79,9 @@ function formatBytes(n: number): string {
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`
 }
 
-interface ApplyVideoCardProps {
+interface DemoVideoCardProps {
   /** The video block from the org profile — the initial cache seed. */
-  initial: OrgApplyVideo
+  initial: OrgDemoVideo
   canWrite: boolean
 }
 
@@ -89,7 +89,7 @@ interface ApplyVideoCardProps {
  * The apply intro video: upload / replace / remove, live transcode status, and
  * an inline preview of the finished bundle.
  *
- * State lives SERVER-side; this polls `getApplyVideoStatus` and re-arms the
+ * State lives SERVER-side; this polls `getDemoVideoStatus` and re-arms the
  * poll while a transcode runs, so navigating away and back recovers with no
  * local state. The one thing local is the S3 PUT progress, which the server
  * can't observe. Two-tier lock: `localBusy` (init → PUT → complete) hard-locks
@@ -97,15 +97,15 @@ interface ApplyVideoCardProps {
  * processing) only disables re-upload so you can't double-enqueue, and the page
  * stays usable while ffmpeg runs.
  */
-export function ApplyVideoCard({ initial, canWrite }: ApplyVideoCardProps) {
+export function DemoVideoCard({ initial, canWrite }: DemoVideoCardProps) {
   const queryClient = useQueryClient()
   const inputRef = useRef<HTMLInputElement>(null)
   const [local, setLocal] = useState<LocalPhase>({ phase: "idle" })
   const [removeOpen, setRemoveOpen] = useState(false)
 
   const statusQuery = useQuery({
-    queryKey: ["applyVideoStatus"],
-    queryFn: getApplyVideoStatus,
+    queryKey: ["demoVideoStatus"],
+    queryFn: getDemoVideoStatus,
     initialData: initial,
     refetchInterval: (query) => {
       const s = query.state.data?.status
@@ -119,22 +119,22 @@ export function ApplyVideoCard({ initial, canWrite }: ApplyVideoCardProps) {
 
   const uploadMutation = useMutation({
     mutationFn: async (file: File) => {
-      const init = await initApplyVideoUpload({
+      const init = await initDemoVideoUpload({
         contentType: file.type,
         fileName: file.name,
         sizeBytes: file.size,
       })
-      await uploadApplyVideoToPresignedUrl(
+      await uploadDemoVideoToPresignedUrl(
         init.uploadUrl,
         file,
         init.contentType,
         (pct) => setLocal({ phase: "uploading", pct })
       )
       setLocal({ phase: "finalising" })
-      return completeApplyVideoUpload({ mediaId: init.mediaId, key: init.key })
+      return completeDemoVideoUpload({ mediaId: init.mediaId, key: init.key })
     },
     onSuccess: (data) => {
-      queryClient.setQueryData<OrgApplyVideo>(["applyVideoStatus"], data)
+      queryClient.setQueryData<OrgDemoVideo>(["demoVideoStatus"], data)
       toast.success("Upload complete. Transcoding your video now.")
     },
     onError: (err) => toast.error(apiError(err, "Could not upload that video.")),
@@ -145,17 +145,17 @@ export function ApplyVideoCard({ initial, canWrite }: ApplyVideoCardProps) {
   })
 
   const retryMutation = useMutation({
-    mutationFn: retryApplyVideoTranscode,
+    mutationFn: retryDemoVideoTranscode,
     onSuccess: (data) => {
-      queryClient.setQueryData<OrgApplyVideo>(["applyVideoStatus"], data)
+      queryClient.setQueryData<OrgDemoVideo>(["demoVideoStatus"], data)
     },
     onError: (err) => toast.error(apiError(err, "Could not retry.")),
   })
 
   const removeMutation = useMutation({
-    mutationFn: removeApplyVideo,
+    mutationFn: removeDemoVideo,
     onSuccess: (data) => {
-      queryClient.setQueryData<OrgApplyVideo>(["applyVideoStatus"], data)
+      queryClient.setQueryData<OrgDemoVideo>(["demoVideoStatus"], data)
       // Close HERE, not in `onConfirm`. The dialog stays up through the request
       // so it can show its "Removing…" state, which means something has to
       // dismiss it when that finishes — otherwise the video disappears from the
@@ -269,7 +269,7 @@ export function ApplyVideoCard({ initial, canWrite }: ApplyVideoCardProps) {
                  (queued, or a phase that can't be measured). A sliding bar
                  says "busy" honestly; a frozen "0%" reads as hung, which is
                  exactly how a stalled job used to look. */
-              <div className="h-full w-1/3 animate-[apply-video-indeterminate_1.2s_ease-in-out_infinite] rounded-full bg-primary" />
+              <div className="h-full w-1/3 animate-[demo-video-indeterminate_1.2s_ease-in-out_infinite] rounded-full bg-primary" />
             ) : (
               <div
                 className="h-full rounded-full bg-primary transition-[width] duration-300"
@@ -361,7 +361,7 @@ export function ApplyVideoCard({ initial, canWrite }: ApplyVideoCardProps) {
       <ConfirmDialog
         open={removeOpen}
         onOpenChange={setRemoveOpen}
-        title="Remove apply video?"
+        title="Remove demo video?"
         description="Candidates will no longer see a video step in the application. You can upload a new one any time."
         confirmLabel="Remove video"
         loadingLabel="Removing…"

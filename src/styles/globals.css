@@ -383,7 +383,7 @@
 /* Indeterminate progress: a sliding segment for work whose percentage isn't
    knowable yet (a queued/unmeasurable transcode phase). Honest "busy" motion
    instead of a bar frozen at 0%, which reads as hung. */
-@keyframes apply-video-indeterminate {
+@keyframes demo-video-indeterminate {
   0%   { transform: translateX(-100%); }
   100% { transform: translateX(300%); }
 }

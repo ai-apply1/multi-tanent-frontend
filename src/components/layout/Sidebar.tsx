@@ -58,7 +58,7 @@ export const navSections: NavSection[] = [
  * Children of the collapsible Settings dropdown. A curated subset, NOT every
  * Settings tab: "General" is the entry into the Settings page and "Email
  * templates" deep-links its email tab (the remaining tabs, branding, domains,
- * apply video..., are reached from the in-page tab bar), then the Hiring
+ * demo video..., are reached from the in-page tab bar), then the Hiring
  * Pipeline and Team, which were top-level Workspace items before. Team stays
  * org_admin-only, so it carries `requiresRole` and is filtered out for everyone
  * else.
@@ -154,7 +154,7 @@ function SettingsNav({
     if (to === ROUTES.EMAIL_TEMPLATES) return onEmailTemplates;
     // The only Settings-page child listed is "General", and it stands in for the
     // whole Settings page in the nav. So it stays active on EVERY settings tab
-    // (Branding, Domains, Apply video, and the rest), which are reached from the
+    // (Branding, Domains, Demo video, and the rest), which are reached from the
     // in-page tab bar, rather than only when its own `?tab=general` is selected.
     // This is what keeps the highlight on General instead of falling back to the
     // Settings group header when you switch tabs inside the page.

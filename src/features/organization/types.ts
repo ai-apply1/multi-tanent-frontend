@@ -117,8 +117,8 @@ export interface OrgDomain {
   error: string
 }
 
-/** Lifecycle of the apply intro video, mirroring the backend `ApplyVideoStatus`. */
-export type ApplyVideoStatus =
+/** Lifecycle of the apply intro video, mirroring the backend `DemoVideoStatus`. */
+export type DemoVideoStatus =
   | "draft"
   | "uploading"
   | "processing"
@@ -135,8 +135,8 @@ export type ApplyVideoStatus =
  * status is `processing`/`failed` while a previously-transcoded bundle stays
  * live.
  */
-export interface OrgApplyVideo {
-  status: ApplyVideoStatus
+export interface OrgDemoVideo {
+  status: DemoVideoStatus
   /** Transcode progress 0-100. A number, never a parsed string. */
   progressPct: number
   /** Short current-phase label for display (e.g. "Transcoding"). */
@@ -306,7 +306,7 @@ export interface OrgProfile {
    */
   theme: OrganizationTheme
   /** The apply funnel's intro video. `url: ""` means the funnel skips it. */
-  applyVideo: OrgApplyVideo
+  demoVideo: OrgDemoVideo
   /**
    * The org's own sending domain + the DNS records to publish. Read-only:
    * the domain is registered by the backend at provisioning; the only action
@@ -349,8 +349,8 @@ export interface UpdateOrganizationPayload {
    */
   theme?: Partial<OrganizationTheme>
   /*
-   * No `applyVideo` here: it is an ingested asset with its own upload/transcode
-   * routes (`applyVideoApi.ts`), not a profile field. The backend rejects it on
+   * No `demoVideo` here: it is an ingested asset with its own upload/transcode
+   * routes (`demoVideoApi.ts`), not a profile field. The backend rejects it on
    * this PATCH (`forbidNonWhitelisted`).
    */
 }
