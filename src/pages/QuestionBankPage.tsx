@@ -6,6 +6,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import {
+  Briefcase,
   ChevronLeft,
   ChevronRight,
   Library,
@@ -323,6 +324,10 @@ export function QuestionBankPage() {
                   ? categoryById.get(row.categoryId)?.label ?? null
                   : null;
                 const otherTags = row.tags;
+                // Jobs currently embedding this question — the delete-guard's
+                // set, sent on list rows by the backend. Gates the Delete item
+                // up front; the server's 409 stays the backstop for staleness.
+                const usedByJobs = row.usedByJobCount ?? 0;
                 return (
                   <div
                     key={row._id}
@@ -377,6 +382,24 @@ export function QuestionBankPage() {
                               : `Each candidate is asked one of ${askable} wordings, picked at random.`}
                           </TooltipContent>
                         </Tooltip>
+                        {usedByJobs > 0 ? (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-3 px-2.5 py-0.5 text-[11.5px] font-semibold text-ink-2">
+                                <Briefcase
+                                  className="h-[11px] w-[11px]"
+                                  strokeWidth={1.8}
+                                />
+                                {usedByJobs} job{usedByJobs === 1 ? "" : "s"}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              Attached to {usedByJobs} job
+                              {usedByJobs === 1 ? "" : "s"}. Detach it from
+                              every job before it can be deleted.
+                            </TooltipContent>
+                          </Tooltip>
+                        ) : null}
                         {otherTags.slice(0, 3).map((tag) => (
                           <span
                             key={tag}
@@ -440,12 +463,24 @@ export function QuestionBankPage() {
                             Edit
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
+                          {/* Disabled while jobs embed the question — same
+                              rule the backend's 409 enforces, surfaced before
+                              the click instead of after. A stale count can
+                              still let a click through; the 409 handling in
+                              the confirm dialog remains the backstop. */}
                           <DropdownMenuItem
+                            disabled={usedByJobs > 0}
                             onSelect={() => openDelete(row)}
                             className="text-[var(--danger)] focus:bg-[var(--danger-soft)] focus:text-[var(--danger)]"
                           >
                             <Trash2 className="h-4 w-4" />
                             Delete
+                            {usedByJobs > 0 ? (
+                              <span className="ml-auto pl-3 text-[11px] font-normal text-ink-subtle">
+                                in {usedByJobs} job
+                                {usedByJobs === 1 ? "" : "s"}
+                              </span>
+                            ) : null}
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
