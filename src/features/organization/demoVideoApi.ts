@@ -3,7 +3,7 @@ import api from "@/lib/api"
 import type { OrgDemoVideo } from "@/features/organization/types"
 
 /**
- * The apply intro video upload/transcode lifecycle: init → S3 PUT → complete →
+ * The demo video upload/transcode lifecycle: init → S3 PUT → complete →
  * poll status, plus retry and remove. The status shape is `OrgDemoVideo` (the
  * same block returned on the org profile), so the settings card can poll this
  * one lightweight endpoint while a transcode runs instead of refetching the
@@ -90,7 +90,7 @@ export async function retryDemoVideoTranscode() {
   return data
 }
 
-/** Remove the video: reset to `draft` (funnel skips the step) + delete S3 objects. */
+/** Remove the video: reset to `draft` (pre-interview flow skips the step) + delete S3 objects. */
 export async function removeDemoVideo() {
   const { data } = await api.delete<OrgDemoVideo>(
     "/admin/organization/demo-video"

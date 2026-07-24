@@ -86,7 +86,7 @@ interface DemoVideoCardProps {
 }
 
 /**
- * The apply intro video: upload / replace / remove, live transcode status, and
+ * The demo video: upload / replace / remove, live transcode status, and
  * an inline preview of the finished bundle.
  *
  * State lives SERVER-side; this polls `getDemoVideoStatus` and re-arms the
@@ -216,10 +216,10 @@ export function DemoVideoCard({ initial, canWrite }: DemoVideoCardProps) {
     <div className="rounded-2xl border border-line bg-surface p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="text-[15px] font-semibold text-ink">Apply intro video</h3>
+          <h3 className="text-[15px] font-semibold text-ink">Demo video</h3>
           <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-muted">
-            Played to candidates part-way through their application, while their CV
-            uploads in the background. No video, no video step, the funnel just
+            Shown to candidates before their interview begins — they can watch it
+            or skip straight ahead. No video, no step: the pre-interview flow just
             skips it.
           </p>
         </div>
@@ -362,7 +362,7 @@ export function DemoVideoCard({ initial, canWrite }: DemoVideoCardProps) {
         open={removeOpen}
         onOpenChange={setRemoveOpen}
         title="Remove demo video?"
-        description="Candidates will no longer see a video step in the application. You can upload a new one any time."
+        description="Candidates will no longer see the intro video before their interview. You can upload a new one any time."
         confirmLabel="Remove video"
         loadingLabel="Removing…"
         destructive

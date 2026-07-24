@@ -117,7 +117,7 @@ export interface OrgDomain {
   error: string
 }
 
-/** Lifecycle of the apply intro video, mirroring the backend `DemoVideoStatus`. */
+/** Lifecycle of the demo video, mirroring the backend `DemoVideoStatus`. */
 export type DemoVideoStatus =
   | "draft"
   | "uploading"
@@ -126,10 +126,10 @@ export type DemoVideoStatus =
   | "failed"
 
 /**
- * The apply intro video as the OWNER sees it: full pipeline state.
+ * The demo video as the OWNER sees it: full pipeline state.
  *
  * An INGESTED ASSET now, not a link the org hosts. HR uploads a file, a worker
- * transcodes it to HLS, and the funnel streams it back. `status` drives the
+ * transcodes it to HLS, and the screening portal streams it back. `status` drives the
  * progress/failure UI; `hasVideo` (a live bundle exists) drives Replace-vs-
  * Choose and whether the preview can render. The two differ during a replace:
  * status is `processing`/`failed` while a previously-transcoded bundle stays
@@ -305,7 +305,7 @@ export interface OrgProfile {
    * one, so this is never partial and never absent.
    */
   theme: OrganizationTheme
-  /** The apply funnel's intro video. `url: ""` means the funnel skips it. */
+  /** The org's demo video, shown before the interview. Empty means no video. */
   demoVideo: OrgDemoVideo
   /**
    * The org's own sending domain + the DNS records to publish. Read-only:
