@@ -218,13 +218,19 @@ export interface CandidateProfile {
   seniority?: "junior" | "mid" | "senior" | "lead" | "unknown"
   yearsOfExperience?: number
   summary?: string
+  /** Advisory AI read on how the CV fits the job — informational only. */
+  jobFit?: {
+    rating: "strong" | "moderate" | "weak" | "unclear"
+    summary: string
+  }
   technologies?: Array<{ name: string; category: string; isCoreProgramming: boolean }>
   workHistory?: Array<{
     title: string
     company: string
     start: string
     end: string
-    isTechRole?: boolean
+    /** Relevant to the applied job. */
+    isRelevantRole?: boolean
   }>
 }
 
