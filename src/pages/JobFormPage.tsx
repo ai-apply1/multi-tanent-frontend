@@ -1017,8 +1017,10 @@ function EligibilityStep({
             placeholder="Type a skill and press Enter"
           />
           <p className={HELP_CLASS}>
-            A hard gate: every skill listed must appear in the CV, or the
-            candidate is rejected before any scoring happens.
+            A hard gate: the AI checks the CV for every skill listed — any
+            spelling counts (Node = NodeJS = Node.js). A skill it finds no
+            evidence of rejects the candidate; an unsure call goes to review
+            instead.
           </p>
         </div>
       </div>
