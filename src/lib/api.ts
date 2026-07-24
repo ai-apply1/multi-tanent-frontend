@@ -124,6 +124,10 @@ export const api = axios.create({
  */
 const AUTH_ENDPOINTS_NO_REFRESH = [
   "/admin/auth/login",
+  // The MFA second step: a 401 means "wrong code", not "expired session", and
+  // there is no session cookie yet to refresh. (The matcher is exact/`?`-prefix,
+  // so the `/login` entry above does NOT cover this sub-path.)
+  "/admin/auth/login/mfa",
   "/admin/auth/refresh",
   "/admin/auth/logout",
   "/admin/auth/forgot-password",

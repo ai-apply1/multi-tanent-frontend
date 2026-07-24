@@ -17,9 +17,19 @@ export interface SessionUser {
   lastLoginAt: string | null
 }
 
+/**
+ * `POST /admin/auth/login` (and `/login/mfa`).
+ *
+ * Two outcomes share this shape: a normal login carries `user`; a login for an
+ * MFA-enrolled account carries `mfaRequired: true` + a short-lived
+ * `challengeToken` and NO session (the second factor is collected at
+ * `/login/mfa`, which then returns `user`).
+ */
 export interface LoginResponse {
   success: boolean
-  user: SessionUser
+  user?: SessionUser
+  mfaRequired?: boolean
+  challengeToken?: string
 }
 
 /**

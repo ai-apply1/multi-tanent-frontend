@@ -6,11 +6,13 @@ import * as yup from "yup";
 import toast from "react-hot-toast";
 import {
   AlertCircle,
+  ArrowLeft,
   Eye,
   EyeOff,
   Loader2,
   Mail,
   Lock,
+  ShieldCheck,
   Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -38,7 +40,7 @@ interface FormValues {
 }
 
 export function LoginPage() {
-  const { login, isAuthenticating, user } = useAuth();
+  const { login, verifyMfa, isAuthenticating, user } = useAuth();
   /**
    * The PUBLIC, host-resolved branding, not `useOrganization()`.
    *
@@ -53,6 +55,13 @@ export function LoginPage() {
   const location = useLocation();
   const [showPassword, setShowPassword] = useState(false);
 
+  // Two-step login. `challengeToken` is set when the password step reports MFA
+  // is required; the panel then swaps to the code step. Held only in memory for
+  // the duration of this login (never persisted).
+  const [challengeToken, setChallengeToken] = useState<string | null>(null);
+  const [code, setCode] = useState("");
+  const [useRecovery, setUseRecovery] = useState(false);
+
   const {
     register,
     handleSubmit,
@@ -66,13 +75,21 @@ export function LoginPage() {
     return <Navigate to={ROUTES.OVERVIEW} replace />;
   }
 
+  const redirect = () => {
+    const dest =
+      (location.state as { from?: { pathname?: string } } | null)?.from
+        ?.pathname || ROUTES.OVERVIEW;
+    navigate(dest, { replace: true });
+  };
+
   const onSubmit = handleSubmit(async ({ identifier, password }) => {
     try {
-      await login(identifier, password);
-      const dest =
-        (location.state as { from?: { pathname?: string } } | null)?.from
-          ?.pathname || ROUTES.OVERVIEW;
-      navigate(dest, { replace: true });
+      const outcome = await login(identifier, password);
+      if (outcome.status === "mfa_required") {
+        setChallengeToken(outcome.challengeToken);
+        return;
+      }
+      redirect();
     } catch (err) {
       toast.error(
         errorMessage(
@@ -82,6 +99,23 @@ export function LoginPage() {
       );
     }
   });
+
+  const onSubmitCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!challengeToken || isAuthenticating) return;
+    try {
+      await verifyMfa(challengeToken, code.trim());
+      redirect();
+    } catch (err) {
+      toast.error(errorMessage(err, "Incorrect code. Please try again."));
+    }
+  };
+
+  const backToPassword = () => {
+    setChallengeToken(null);
+    setCode("");
+    setUseRecovery(false);
+  };
 
   // Never a hardcoded org name: shipping one customer's name to every other
   // customer's login page is the white-label failure this all exists to stop.
@@ -108,6 +142,84 @@ export function LoginPage() {
             )}
           </div>
 
+          {challengeToken ? (
+            <>
+              <h1 className="mb-1.5 text-[30px] font-semibold tracking-tight text-[var(--ink)]">
+                Two-factor authentication
+              </h1>
+              <p className="mb-7 text-[14.5px] text-[var(--ink-muted)]">
+                {useRecovery
+                  ? "Enter one of your recovery codes to continue."
+                  : "Enter the 6-digit code from your authenticator app."}
+              </p>
+
+              <form noValidate onSubmit={onSubmitCode}>
+                <label
+                  htmlFor="mfa-code"
+                  className="mb-1.5 block text-[13px] font-medium text-[var(--ink)]"
+                >
+                  {useRecovery ? "Recovery code" : "Authenticator code"}
+                </label>
+                <div className="relative mb-2">
+                  <ShieldCheck
+                    className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ink-subtle)]"
+                    aria-hidden
+                  />
+                  <input
+                    id="mfa-code"
+                    type="text"
+                    inputMode={useRecovery ? "text" : "numeric"}
+                    autoComplete="one-time-code"
+                    autoFocus
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    placeholder={useRecovery ? "XXXXX-XXXXX" : "123456"}
+                    className="h-[46px] w-full rounded-lg border border-[var(--field-border)] bg-[var(--surface)] px-3 pl-10 text-center text-[15px] tracking-[0.3em] text-[var(--ink)] outline-none placeholder:tracking-normal placeholder:text-[var(--ink-subtle)] focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)]"
+                  />
+                </div>
+
+                <Button
+                  type="submit"
+                  disabled={isAuthenticating || code.trim().length < 6}
+                  size="lg"
+                  className="mt-3 h-[46px] w-full text-[15px]"
+                >
+                  {isAuthenticating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Verifying…
+                    </>
+                  ) : (
+                    "Verify and sign in"
+                  )}
+                </Button>
+
+                <div className="mt-4 flex items-center justify-between text-[12.5px]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUseRecovery((v) => !v);
+                      setCode("");
+                    }}
+                    className="font-semibold text-primary hover:underline"
+                  >
+                    {useRecovery
+                      ? "Use an authenticator code"
+                      : "Use a recovery code"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={backToPassword}
+                    className="inline-flex items-center gap-1 text-[var(--ink-muted)] hover:text-[var(--ink)]"
+                  >
+                    <ArrowLeft className="h-3.5 w-3.5" />
+                    Back
+                  </button>
+                </div>
+              </form>
+            </>
+          ) : (
+            <>
           <h1 className="mb-1.5 text-[30px] font-semibold tracking-tight text-[var(--ink)]">
             Welcome back
           </h1>
@@ -211,6 +323,8 @@ export function LoginPage() {
           <p className="mt-5 text-center text-xs text-[var(--ink-subtle)]">
             Recruiter accounts are provisioned by your org admin.
           </p>
+            </>
+          )}
         </div>
       </div>
 
