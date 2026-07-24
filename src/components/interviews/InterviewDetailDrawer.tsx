@@ -712,10 +712,19 @@ function PipelineCard({
   );
 }
 
+/** Advisory AI job-fit badge palette — theme tokens, matches score badges. */
+const JOB_FIT_BADGE_CLASS: Record<string, string> = {
+  strong: "bg-[var(--success-soft)] text-[color:var(--success)]",
+  moderate: "bg-[var(--warning-soft)] text-[color:var(--warning)]",
+  weak: "bg-[var(--danger-soft)] text-[color:var(--danger)]",
+  unclear: "bg-surface-2 text-ink-muted",
+};
+
 /**
- * The candidate's parsed-CV profile (summary + top skills). Candidate-level, so
- * it renders both alongside a scored interview AND on its own when the candidate
- * hasn't interviewed yet. Returns null when the CV wasn't parsed.
+ * The candidate's parsed-CV profile (summary + AI job fit + top skills).
+ * Candidate-level, so it renders both alongside a scored interview AND on its
+ * own when the candidate hasn't interviewed yet. Returns null when the CV
+ * wasn't parsed.
  */
 function ProfileCard({ profile }: { profile: CandidateProfile | null }) {
   if (!profile) return null;
@@ -734,6 +743,28 @@ function ProfileCard({ profile }: { profile: CandidateProfile | null }) {
           No summary parsed from this candidate&apos;s CV.
         </p>
       )}
+      {profile.jobFit?.rating ? (
+        <div className="mt-3 rounded-xl border border-line bg-surface-2 p-2.5">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-bold uppercase tracking-wide text-ink-muted">
+              AI job fit
+            </span>
+            <span
+              className={`rounded-full px-2 py-0.5 text-[11px] font-bold capitalize ${
+                JOB_FIT_BADGE_CLASS[profile.jobFit.rating] ??
+                JOB_FIT_BADGE_CLASS.unclear
+              }`}
+            >
+              {profile.jobFit.rating}
+            </span>
+          </div>
+          {profile.jobFit.summary ? (
+            <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-2">
+              {profile.jobFit.summary}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       {profile.technologies?.length ? (
         <div className="mt-3 flex flex-wrap gap-1.5">
           {profile.technologies.slice(0, 12).map((t) => (
