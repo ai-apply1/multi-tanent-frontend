@@ -153,6 +153,14 @@ export interface ScreeningQuestion {
   updatedBy: string | null
   createdAt: string
   updatedAt: string
+  /**
+   * How many jobs currently embed this question — the exact set the
+   * delete-guard checks (any status, archived included), so 0 means Delete
+   * would succeed. LIST rows only; detail/update/audio responses omit it,
+   * hence optional. May be stale until the next refetch — the backend's 409
+   * remains the authority.
+   */
+  usedByJobCount?: number
 }
 
 /**

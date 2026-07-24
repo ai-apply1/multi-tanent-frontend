@@ -117,8 +117,8 @@ export interface OrgDomain {
   error: string
 }
 
-/** Lifecycle of the apply intro video, mirroring the backend `ApplyVideoStatus`. */
-export type ApplyVideoStatus =
+/** Lifecycle of the demo video, mirroring the backend `DemoVideoStatus`. */
+export type DemoVideoStatus =
   | "draft"
   | "uploading"
   | "processing"
@@ -126,17 +126,17 @@ export type ApplyVideoStatus =
   | "failed"
 
 /**
- * The apply intro video as the OWNER sees it: full pipeline state.
+ * The demo video as the OWNER sees it: full pipeline state.
  *
  * An INGESTED ASSET now, not a link the org hosts. HR uploads a file, a worker
- * transcodes it to HLS, and the funnel streams it back. `status` drives the
+ * transcodes it to HLS, and the screening portal streams it back. `status` drives the
  * progress/failure UI; `hasVideo` (a live bundle exists) drives Replace-vs-
  * Choose and whether the preview can render. The two differ during a replace:
  * status is `processing`/`failed` while a previously-transcoded bundle stays
  * live.
  */
-export interface OrgApplyVideo {
-  status: ApplyVideoStatus
+export interface OrgDemoVideo {
+  status: DemoVideoStatus
   /** Transcode progress 0-100. A number, never a parsed string. */
   progressPct: number
   /** Short current-phase label for display (e.g. "Transcoding"). */
@@ -305,8 +305,8 @@ export interface OrgProfile {
    * one, so this is never partial and never absent.
    */
   theme: OrganizationTheme
-  /** The apply funnel's intro video. `url: ""` means the funnel skips it. */
-  applyVideo: OrgApplyVideo
+  /** The org's demo video, shown before the interview. Empty means no video. */
+  demoVideo: OrgDemoVideo
   /**
    * The org's own sending domain + the DNS records to publish. Read-only:
    * the domain is registered by the backend at provisioning; the only action
@@ -349,8 +349,8 @@ export interface UpdateOrganizationPayload {
    */
   theme?: Partial<OrganizationTheme>
   /*
-   * No `applyVideo` here: it is an ingested asset with its own upload/transcode
-   * routes (`applyVideoApi.ts`), not a profile field. The backend rejects it on
+   * No `demoVideo` here: it is an ingested asset with its own upload/transcode
+   * routes (`demoVideoApi.ts`), not a profile field. The backend rejects it on
    * this PATCH (`forbidNonWhitelisted`).
    */
 }

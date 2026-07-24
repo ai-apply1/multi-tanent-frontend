@@ -115,6 +115,9 @@ export function JobsPage() {
     onSuccess: () => {
       toast.success("Job deleted.");
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      // Deleting a job implicitly detaches its questions — the bank's
+      // "Used by N jobs" counts (which gate Delete there) must drop.
+      queryClient.invalidateQueries({ queryKey: ["screeningQuestions"] });
       setDeleteTarget(null);
     },
     onError: (err) => {

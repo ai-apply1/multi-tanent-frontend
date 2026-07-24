@@ -1,16 +1,16 @@
 import axios from "axios"
 import api from "@/lib/api"
-import type { OrgApplyVideo } from "@/features/organization/types"
+import type { OrgDemoVideo } from "@/features/organization/types"
 
 /**
- * The apply intro video upload/transcode lifecycle: init → S3 PUT → complete →
- * poll status, plus retry and remove. The status shape is `OrgApplyVideo` (the
+ * The demo video upload/transcode lifecycle: init → S3 PUT → complete →
+ * poll status, plus retry and remove. The status shape is `OrgDemoVideo` (the
  * same block returned on the org profile), so the settings card can poll this
  * one lightweight endpoint while a transcode runs instead of refetching the
  * whole profile.
  */
 
-export interface ApplyVideoUploadInit {
+export interface DemoVideoUploadInit {
   mediaId: string
   uploadUrl: string
   key: string
@@ -18,8 +18,8 @@ export interface ApplyVideoUploadInit {
   expiresIn: number
 }
 
-export async function getApplyVideoStatus() {
-  const { data } = await api.get<OrgApplyVideo>("/admin/organization/apply-video")
+export async function getDemoVideoStatus() {
+  const { data } = await api.get<OrgDemoVideo>("/admin/organization/demo-video")
   return data
 }
 
@@ -28,13 +28,13 @@ export async function getApplyVideoStatus() {
  * Content-type and size are validated here server-side, so a rejected file
  * never gets an upload URL.
  */
-export async function initApplyVideoUpload(payload: {
+export async function initDemoVideoUpload(payload: {
   contentType: string
   fileName: string
   sizeBytes: number
 }) {
-  const { data } = await api.post<ApplyVideoUploadInit>(
-    "/admin/organization/apply-video/upload-init",
+  const { data } = await api.post<DemoVideoUploadInit>(
+    "/admin/organization/demo-video/upload-init",
     payload
   )
   return data
@@ -46,7 +46,7 @@ export async function initApplyVideoUpload(payload: {
  * would 403. Same contract as the logo/CV uploads — explicit AES256,
  * `Content-Type` matching the signed value, `withCredentials: false`.
  */
-export async function uploadApplyVideoToPresignedUrl(
+export async function uploadDemoVideoToPresignedUrl(
   uploadUrl: string,
   file: File,
   contentType: string,
@@ -71,29 +71,29 @@ export async function uploadApplyVideoToPresignedUrl(
  * object and re-validates the echoed `key` against the org+generation prefix.
  * Returns the (now `processing`) status.
  */
-export async function completeApplyVideoUpload(payload: {
+export async function completeDemoVideoUpload(payload: {
   mediaId: string
   key: string
 }) {
-  const { data } = await api.post<OrgApplyVideo>(
-    "/admin/organization/apply-video/upload-complete",
+  const { data } = await api.post<OrgDemoVideo>(
+    "/admin/organization/demo-video/upload-complete",
     payload
   )
   return data
 }
 
 /** Re-run a failed transcode against the kept source — no re-upload needed. */
-export async function retryApplyVideoTranscode() {
-  const { data } = await api.post<OrgApplyVideo>(
-    "/admin/organization/apply-video/retry"
+export async function retryDemoVideoTranscode() {
+  const { data } = await api.post<OrgDemoVideo>(
+    "/admin/organization/demo-video/retry"
   )
   return data
 }
 
-/** Remove the video: reset to `draft` (funnel skips the step) + delete S3 objects. */
-export async function removeApplyVideo() {
-  const { data } = await api.delete<OrgApplyVideo>(
-    "/admin/organization/apply-video"
+/** Remove the video: reset to `draft` (pre-interview flow skips the step) + delete S3 objects. */
+export async function removeDemoVideo() {
+  const { data } = await api.delete<OrgDemoVideo>(
+    "/admin/organization/demo-video"
   )
   return data
 }

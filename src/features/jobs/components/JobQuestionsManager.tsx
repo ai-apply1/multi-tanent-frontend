@@ -136,6 +136,9 @@ export function JobQuestionsManager({ job }: JobQuestionsManagerProps) {
       queryClient.setQueryData(["job", saved._id], saved)
       // The list page shows questionCount.
       queryClient.invalidateQueries({ queryKey: ["jobs"] })
+      // The bank shows each question's "Used by N jobs" (and gates Delete on
+      // it) — attaching/detaching here is exactly what moves that count.
+      queryClient.invalidateQueries({ queryKey: ["screeningQuestions"] })
       setAddOpen(false)
       toast.success("Questions saved.")
     },
