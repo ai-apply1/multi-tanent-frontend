@@ -46,7 +46,7 @@ export const SETTINGS_TABS: ReadonlyArray<{ id: SettingsTabId; label: string }> 
     { id: "general", label: "General" },
     { id: "branding", label: "Branding" },
     { id: "domains", label: "Domains" },
-    { id: "video", label: "Apply video" },
+    { id: "video", label: "Demo video" },
     { id: "defaults", label: "Interview defaults" },
     { id: "platform", label: "Platform" },
     { id: "notifications", label: "My notifications" },

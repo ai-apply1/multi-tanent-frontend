@@ -99,7 +99,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       { id: "go-candidates", icon: Users2, title: "Candidates", sub: "Every applicant", to: ROUTES.CANDIDATES },
       { id: "go-questions", icon: Library, title: "Questions", sub: "Screening questions", to: ROUTES.QUESTIONS },
       { id: "go-pipeline", icon: GitBranch, title: "Hiring Pipeline", sub: "Candidate statuses", to: ROUTES.PIPELINE },
-      { id: "go-settings", icon: Settings, title: "Settings", sub: "Branding, domains, apply video & email", to: ROUTES.SETTINGS },
+      { id: "go-settings", icon: Settings, title: "Settings", sub: "Branding, domains, demo video & email", to: ROUTES.SETTINGS },
     ]
     if (isOrgAdmin) {
       raw.push({ id: "go-team", icon: UserSquare2, title: "Manage Team", sub: "Manage members", to: ROUTES.TEAM })

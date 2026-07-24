@@ -40,7 +40,7 @@ import type {
   OrgProfile,
   UpdateOrganizationPayload,
 } from "@/features/organization/types";
-import { ApplyVideoCard } from "@/features/organization/components/ApplyVideoCard";
+import { DemoVideoCard } from "@/features/organization/components/DemoVideoCard";
 import { ThemeCard } from "@/features/organization/components/ThemeCard";
 import { LogoVariantNotice } from "@/features/organization/components/LogoVariantNotice";
 import { PortalDomainsCard } from "@/features/organization/components/PortalDomainsCard";
@@ -149,7 +149,7 @@ const toInt = (value: string) => {
 /**
  * One tab per THING BEING CONFIGURED, not one per storage mechanism.
  *
- * "Identity" used to hold the name, the logo, the favicon, the apply video, the
+ * "Identity" used to hold the name, the logo, the favicon, the demo video, the
  * portal domains and the email domain — six unrelated concerns that shared a tab
  * only because they happened to live on the same Mongo document. It had become
  * the page's dumping ground, and a reader looking for "where do I set the DNS"
@@ -697,8 +697,8 @@ export function OrgSettingsPage() {
       if (Object.keys(themePatch).length > 0) patch.theme = themePatch;
     }
 
-    // The apply video is NOT part of this PATCH — it has its own routes and
-    // manages its own state in `ApplyVideoCard`.
+    // The demo video is NOT part of this PATCH — it has its own routes and
+    // manages its own state in `DemoVideoCard`.
     return patch;
   };
 
@@ -990,7 +990,7 @@ export function OrgSettingsPage() {
    */
   const videoBody = (
     <div className="grid gap-5">
-      <ApplyVideoCard initial={org.applyVideo} canWrite={canWrite} />
+      <DemoVideoCard initial={org.demoVideo} canWrite={canWrite} />
     </div>
   );
 
