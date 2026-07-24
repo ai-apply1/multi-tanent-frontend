@@ -1,5 +1,18 @@
 import api from "@/lib/api"
-import type { LoginResponse, MeResponse } from "@/features/auth/types"
+import type {
+  LoginResponse,
+  MeResponse,
+  SessionUser
+} from "@/features/auth/types"
+
+/**
+ * The two-outcome result of the password step: a full session, or "password
+ * OK, now complete MFA" carrying the short-lived challenge token to replay to
+ * `loginMfaRequest`.
+ */
+export type LoginOutcome =
+  | { status: "ok"; user: SessionUser }
+  | { status: "mfa_required"; challengeToken: string }
 
 /**
  * `identifier` is an email or a userName — the backend resolves which.
@@ -18,12 +31,34 @@ import type { LoginResponse, MeResponse } from "@/features/auth/types"
  * fallback — it needs `DEV_LOGIN_ORG_SLUG=<an org slug>` AND
  * `NODE_ENV=development` in the API's `.env`, and it is impossible in prod.
  */
-export async function loginRequest(identifier: string, password: string) {
+export async function loginRequest(
+  identifier: string,
+  password: string
+): Promise<LoginOutcome> {
   const { data } = await api.post<LoginResponse>("/admin/auth/login", {
     identifier,
     password
   })
-  return data.user
+  if (data.mfaRequired && data.challengeToken) {
+    return { status: "mfa_required", challengeToken: data.challengeToken }
+  }
+  return { status: "ok", user: data.user as SessionUser }
+}
+
+/**
+ * Second login step: exchange the challenge token + a code (authenticator or
+ * recovery) for the session. A 401 here means "wrong code", not "expired
+ * session", so this path is excluded from the axios refresh-retry.
+ */
+export async function loginMfaRequest(
+  challengeToken: string,
+  code: string
+): Promise<SessionUser> {
+  const { data } = await api.post<LoginResponse>("/admin/auth/login/mfa", {
+    challengeToken,
+    code
+  })
+  return data.user as SessionUser
 }
 
 export async function meRequest() {

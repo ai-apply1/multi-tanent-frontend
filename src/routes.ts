@@ -24,6 +24,9 @@ export const ROUTES = {
    */
   SETTINGS: "/dashboard/settings",
   TEAM: "/dashboard/team",
+  /** Per-user account security (two-factor authentication). Self-scoped, so
+   *  available to every role, not just org_admin. */
+  SECURITY: "/dashboard/security",
 } as const;
 
 /**

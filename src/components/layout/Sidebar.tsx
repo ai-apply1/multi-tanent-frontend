@@ -72,6 +72,8 @@ const SETTINGS_CHILDREN: Array<{
   { label: "Email templates", to: ROUTES.EMAIL_TEMPLATES },
   { label: "Hiring Pipeline", to: ROUTES.PIPELINE },
   { label: "Manage Team", to: ROUTES.TEAM, requiresRole: "org_admin" },
+  // Per-user, so no `requiresRole` — every role manages their own MFA.
+  { label: "Security", to: ROUTES.SECURITY },
 ];
 
 export function visibleSections(
@@ -130,7 +132,9 @@ function SettingsNav({
   const onEmailTemplates = location.pathname.startsWith(
     ROUTES.EMAIL_TEMPLATES,
   );
-  const groupActive = onSettings || onPipeline || onTeam || onEmailTemplates;
+  const onSecurity = location.pathname.startsWith(ROUTES.SECURITY);
+  const groupActive =
+    onSettings || onPipeline || onTeam || onEmailTemplates || onSecurity;
 
   const children = SETTINGS_CHILDREN.filter(
     (c) => !c.requiresRole || c.requiresRole === user?.role,
@@ -152,6 +156,7 @@ function SettingsNav({
     if (to === ROUTES.PIPELINE) return onPipeline;
     if (to === ROUTES.TEAM) return onTeam;
     if (to === ROUTES.EMAIL_TEMPLATES) return onEmailTemplates;
+    if (to === ROUTES.SECURITY) return onSecurity;
     // The only Settings-page child listed is "General", and it stands in for the
     // whole Settings page in the nav. So it stays active on EVERY settings tab
     // (Branding, Domains, Demo video, and the rest), which are reached from the

@@ -4,9 +4,11 @@ import { useQueryClient } from "@tanstack/react-query"
 import { subscribeToAuthFailure } from "@/lib/api"
 import {
   exitImpersonationRequest,
+  loginMfaRequest,
   loginRequest,
   logoutRequest,
-  meRequest
+  meRequest,
+  type LoginOutcome
 } from "@/features/auth/authApi"
 import type { Impersonation, SessionUser } from "@/features/auth/types"
 
@@ -20,8 +22,15 @@ interface AuthContextValue {
   impersonation: Impersonation | null
   isInitializing: boolean
   isAuthenticating: boolean
-  /** `identifier` is an email or a userName — either authenticates. */
-  login: (identifier: string, password: string) => Promise<void>
+  /**
+   * Password step. `identifier` is an email or a userName. Resolves the session
+   * directly (`status: "ok"`) OR signals a second factor is required
+   * (`status: "mfa_required"` + challenge token), in which case the session is
+   * NOT set until `verifyMfa` succeeds.
+   */
+  login: (identifier: string, password: string) => Promise<LoginOutcome>
+  /** Second login step: challenge token + authenticator/recovery code. */
+  verifyMfa: (challengeToken: string, code: string) => Promise<void>
   logout: () => Promise<void>
   /** End impersonation: revoke the session server-side and clear local state. */
   exitImpersonation: () => Promise<void>
@@ -75,9 +84,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Clear before `setUser` so no render of the shell can ever observe
         // the previous tenant's entries under the new identity.
         queryClient.clear()
-        const next = await loginRequest(identifier, password)
+        const outcome = await loginRequest(identifier, password)
+        // Only a completed login sets the session. An `mfa_required` outcome
+        // leaves `user` null so the login page can render the code step without
+        // ProtectedRoute treating the caller as authenticated.
+        if (outcome.status === "ok") {
+          setUser(outcome.user)
+          setImpersonation(null)
+        }
+        return outcome
+      } finally {
+        setIsAuthenticating(false)
+      }
+    },
+    [queryClient]
+  )
+
+  const verifyMfa = useCallback(
+    async (challengeToken: string, code: string) => {
+      setIsAuthenticating(true)
+      try {
+        queryClient.clear()
+        const next = await loginMfaRequest(challengeToken, code)
         setUser(next)
-        // A real login is never an impersonation session.
         setImpersonation(null)
       } finally {
         setIsAuthenticating(false)
@@ -117,6 +146,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isInitializing,
       isAuthenticating,
       login,
+      verifyMfa,
       logout,
       exitImpersonation,
       refreshMe
@@ -127,6 +157,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isInitializing,
       isAuthenticating,
       login,
+      verifyMfa,
       logout,
       exitImpersonation,
       refreshMe
