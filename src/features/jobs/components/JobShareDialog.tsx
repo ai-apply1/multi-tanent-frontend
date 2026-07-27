@@ -50,6 +50,13 @@ export function JobShareDialog({ jobId, open, onOpenChange }: JobShareDialogProp
     queryKey: ["jobShareLink", jobId],
     queryFn: () => getJobShareLink(jobId),
     enabled: open,
+    // The payload embeds the job's STATUS, which gates this whole dialog
+    // (archived banner, send button, copy affordance). The app-wide 30s
+    // staleTime would replay a pre-transition status on reopen — e.g. still
+    // "archived" right after the user reopened the job. staleTime 0 makes
+    // every open revalidate (cached data still paints instantly), and status
+    // changes from elsewhere are caught even without an invalidation.
+    staleTime: 0,
   })
 
   const sendMutation = useMutation({
@@ -63,6 +70,19 @@ export function JobShareDialog({ jobId, open, onOpenChange }: JobShareDialogProp
 
   const [emails, setEmails] = useState<string[]>([])
   const [draft, setDraft] = useState("")
+
+  // The dialog stays MOUNTED while closed (Radix just hides it), so local
+  // state would leak into the next open — typed chips, half-typed draft, a
+  // stale error/pending flag on the mutation. Reset everything on close so
+  // each open starts fresh.
+  const handleOpenChange = (next: boolean) => {
+    if (!next) {
+      setEmails([])
+      setDraft("")
+      sendMutation.reset()
+    }
+    onOpenChange(next)
+  }
 
   const commitDraft = () => {
     const raw = draft.split(/[,;\s]+/).map((v) => v.trim()).filter(Boolean)
@@ -117,7 +137,7 @@ export function JobShareDialog({ jobId, open, onOpenChange }: JobShareDialogProp
   const isNonOpen = status !== undefined && status !== "open"
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent hideCloseButton className="sm:max-w-3xl">
         <div className="mb-1 flex items-start justify-between gap-4">
           <div>
@@ -142,7 +162,7 @@ export function JobShareDialog({ jobId, open, onOpenChange }: JobShareDialogProp
           <button
             type="button"
             aria-label="Close"
-            onClick={() => onOpenChange(false)}
+            onClick={() => handleOpenChange(false)}
             className="rounded-md p-1 text-ink-muted transition hover:bg-surface-3 hover:text-ink"
           >
             <X className="h-4 w-4" strokeWidth={1.9} />
@@ -220,7 +240,13 @@ export function JobShareDialog({ jobId, open, onOpenChange }: JobShareDialogProp
               className="mt-3 w-full"
               onClick={handleSend}
               disabled={
-                sendMutation.isPending || emails.length === 0 || isNonOpen
+                // `linkQuery.isLoading` covers the window where `status` hasn't
+                // arrived yet: `isNonOpen` is still false then, which would
+                // briefly enable sending invites for an archived/closed job.
+                sendMutation.isPending ||
+                emails.length === 0 ||
+                isNonOpen ||
+                linkQuery.isLoading
               }
             >
               {sendMutation.isPending ? (

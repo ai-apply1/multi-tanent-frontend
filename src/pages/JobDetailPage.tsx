@@ -92,6 +92,10 @@ export function JobDetailPage() {
       toast.success(`Job ${JOB_STATUS_LABELS[saved.status].toLowerCase()}.`);
       queryClient.setQueryData(["job", saved._id], saved);
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      // The share dialog's payload embeds the job's status (it gates the
+      // archived banner and the send/copy affordances) — drop it so the
+      // dialog can't replay the pre-transition status from cache.
+      queryClient.invalidateQueries({ queryKey: ["jobShareLink", saved._id] });
     },
     onError: (err) => {
       toast.error(errorMessage(err, "Could not change the job status."));
@@ -103,6 +107,7 @@ export function JobDetailPage() {
       // job's real status.
       void queryClient.invalidateQueries({ queryKey: ["job", jobId] });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      void queryClient.invalidateQueries({ queryKey: ["jobShareLink", jobId] });
     },
   });
 
