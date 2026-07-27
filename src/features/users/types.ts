@@ -52,6 +52,22 @@ export interface CreateUserResponse {
 }
 
 /**
+ * `POST /admin/users/:id/reset-password`. The backend mints a fresh temporary
+ * password, stores only its hash, signs the member out everywhere, and returns
+ * the plaintext HERE exactly once — it cannot be fetched again, so the reveal
+ * modal is the admin's one chance to copy it.
+ *
+ * `emailSent` reports whether the member was also emailed the new password from
+ * the org's address; `false` means the mail never went out and the admin must
+ * hand it over some other way (mirrors `credentialsEmailSent` on create).
+ */
+export interface ResetPasswordResponse {
+  user: OrgUser;
+  tempPassword: string;
+  emailSent: boolean;
+}
+
+/**
  * Two removal paths: reversible deactivation (`isActive: false`, this payload)
  * and a permanent org_admin delete (`deleteUser`). Neither may target yourself.
  */

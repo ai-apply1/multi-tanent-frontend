@@ -10,6 +10,7 @@ import axios from "axios";
 import {
   Activity,
   AlertTriangle,
+  Ban,
   Briefcase,
   Calculator,
   Check,
@@ -103,6 +104,7 @@ import {
 import { toDisplayScore } from "@/features/candidates/aiScore";
 import { useOrgTimezone } from "@/features/organization/useOrgTimezone";
 import {
+  INITIAL_REJECT_STATUS_KEY,
   INVITABLE_STATUS_KEY,
   POST_INTERVIEW_REJECT_STATUS_KEY,
   REJECTED_STATUS_KEYS,
@@ -111,6 +113,8 @@ import {
   type CandidateDetail,
   type CandidateProfile,
   type CandidateStatus,
+  type VettingCheck,
+  type VettingCheckStatus,
 } from "@/features/candidates/types";
 import {
   formatClock,
@@ -783,6 +787,119 @@ function ProfileCard({ profile }: { profile: CandidateProfile | null }) {
 
 // ── Main drawer ────────────────────────────────────────────────────────
 
+/**
+ * Read the pre-screen checklist off a rejection activity's `meta`. New rows
+ * store a structured `checks` array (each gate + pass/fail/unknown status);
+ * older rows only have `reasons: string[]` (the failing reasons), rendered as
+ * failed checks. Anything malformed is dropped.
+ */
+function extractVettingChecks(
+  meta: Record<string, unknown> | null | undefined,
+): VettingCheck[] {
+  if (!meta) return [];
+  const raw = meta.checks;
+  if (Array.isArray(raw)) {
+    return raw
+      .map((c): VettingCheck | null => {
+        if (typeof c !== "object" || c === null) return null;
+        const text = (c as { text?: unknown }).text;
+        const status = (c as { status?: unknown }).status;
+        if (typeof text !== "string" || !text) return null;
+        const s: VettingCheckStatus =
+          status === "pass" || status === "unknown" ? status : "fail";
+        return { text, status: s };
+      })
+      .filter((c): c is VettingCheck => c !== null);
+  }
+  // Fallback for pre-checklist rows: the stored `reasons` are all failures.
+  const reasons = meta.reasons;
+  if (Array.isArray(reasons)) {
+    return reasons
+      .filter((r): r is string => typeof r === "string" && r.length > 0)
+      .map((text) => ({ text, status: "fail" as const }));
+  }
+  return [];
+}
+
+/** One row of the pre-screen checklist: a status icon plus the check text. */
+function VettingCheckRow({ check }: { check: VettingCheck }) {
+  return (
+    <div className="flex gap-2.5 text-[13px] leading-snug text-ink-2">
+      {check.status === "pass" ? (
+        <Check
+          className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--success)]"
+          strokeWidth={2.2}
+        />
+      ) : check.status === "unknown" ? (
+        <AlertTriangle
+          className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--warning)]"
+          strokeWidth={2}
+        />
+      ) : (
+        <span
+          className="mt-0.5 flex h-[15px] w-[15px] shrink-0 items-center justify-center rounded-full border-[1.6px] text-[10px] font-bold text-[color:var(--danger)]"
+          style={{ borderColor: "var(--danger)" }}
+        >
+          !
+        </span>
+      )}
+      {check.text}
+    </div>
+  );
+}
+
+/**
+ * CV-stage eligibility checklist, shown in the drawer's no-interview branch
+ * when a candidate sits in the initial `rejected` status. Renders every gate
+ * the vetting engine ran, a tick for a passed check, a red mark for a failed
+ * one (the reason for rejection), an amber warning for one it couldn't verify.
+ * Falls back to a generic line when nothing was recorded, or while it loads.
+ */
+function InitialRejectionCard({
+  checks,
+  loading,
+}: {
+  checks: VettingCheck[];
+  loading: boolean;
+}) {
+  return (
+    <div className="rounded-2xl border border-line bg-surface p-[18px]">
+      <div className="mb-1.5 flex items-center gap-2">
+        <span
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-[color:var(--danger)]"
+          style={{ background: "var(--danger-soft)" }}
+        >
+          <Ban className="h-3.5 w-3.5" strokeWidth={2} />
+        </span>
+        <span className="text-[14px] font-bold">
+          Why this candidate was rejected
+        </span>
+      </div>
+      <p className="mb-3.5 text-[12.5px] leading-relaxed text-ink-muted">
+        Rejected automatically at the CV pre-screen stage, before any interview.
+        Here is how they measured against the job&apos;s hard requirements. The
+        red item(s) are what caused the rejection.
+      </p>
+      {loading ? (
+        <div className="flex items-center gap-2 text-[13px] text-ink-muted">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading checks…
+        </div>
+      ) : checks.length ? (
+        <div className="grid gap-2.5">
+          {checks.map((check, i) => (
+            <VettingCheckRow key={`${i}-${check.text}`} check={check} />
+          ))}
+        </div>
+      ) : (
+        <p className="text-[13px] text-ink-muted">
+          No specific checks were recorded for this rejection.
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp, onOpenChange }: Props) {
   // Reattempt history: `selectedSessionId` overrides which attempt's detail
   // we load; null = follow the prop. Reset whenever the entry point changes.
@@ -797,10 +914,30 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   const queryClient = useQueryClient();
   const orgTimezone = useOrgTimezone();
 
+  /*
+   * `staleTime: 0` on every query in this drawer — it overrides the global 30s
+   * (main.tsx), and it is load-bearing rather than a tuning preference.
+   *
+   * This component is mounted PERMANENTLY by its host page; opening the drawer
+   * only flips `sessionId`/`candidateId` from null to an id, it does NOT
+   * remount. So "open the drawer" is not a mount that refetches — React Query
+   * simply re-enables the query for that key, and under the global staleTime it
+   * replays a cached entry with NO request. Everything this drawer shows (score,
+   * verdict, funnel status, pre-screen checks) is written by things OUTSIDE this
+   * tab: the scoring worker, the vetting engine, "Re-apply threshold", another
+   * reviewer. So closing and reopening a candidate showed the same stale card
+   * and a status pill that could disagree with the score beside it.
+   *
+   * Zero means every open revalidates. The cached data still paints instantly
+   * (React Query serves it while refetching in the background), so this costs a
+   * request per open, not a loading flash. Same reasoning, and the same fix, as
+   * the candidates table's own `staleTime: 0`.
+   */
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["interview", activeSessionId],
     queryFn: () => getInterview(activeSessionId!),
     enabled: Boolean(activeSessionId),
+    staleTime: 0,
     refetchInterval: (query) =>
       isTranscoding(query.state.data?.recording?.hlsStatus) ? 5000 : false,
   });
@@ -847,6 +984,8 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
     queryKey: ["interviewAttempts", sessionId],
     queryFn: () => getInterviewAttempts(sessionId!),
     enabled: Boolean(sessionId),
+    // See the staleTime note on the interview query above.
+    staleTime: 0,
   });
   const attempts = attemptsQuery.data ?? [];
   const hasAttempts = attempts.length >= 1;
@@ -861,6 +1000,10 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
     queryKey: ["candidate", candidateId],
     queryFn: () => getCandidate(candidateId!),
     enabled: Boolean(candidateId),
+    // See the staleTime note on the interview query above. This one carries the
+    // funnel status pill, so a stale read is what let the header say one thing
+    // ("Final Rejection") while the score card beside it said another.
+    staleTime: 0,
   });
 
   /*
@@ -879,6 +1022,32 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   const statuses = statusesQuery.data ?? [];
   const candidate = candidateQuery.data ?? null;
   const profile = candidate?.profile ?? null;
+
+  // "Initial rejection" = the CV-stage auto-reject column (`rejected`), NOT a
+  // post-interview `final_rejected`. The vetting engine records the WHY on the
+  // rejection ACTIVITY (`meta.reasons`), never on the candidate doc, so we read
+  // it from the unscoped activity feed. Fetched only when the candidate is in
+  // that state and has no interview (the one branch that renders it).
+  const isInitialRejected =
+    candidate?.currentStatusId?.key === INITIAL_REJECT_STATUS_KEY;
+  const rejectionActivitiesQuery = useQuery({
+    queryKey: ["candidateActivities", candidateId, "initial-rejection"],
+    queryFn: () => getCandidateActivities(candidateId!),
+    enabled: Boolean(candidateId) && isInitialRejected && !activeSessionId,
+    // See the staleTime note on the interview query above. A re-vet rewrites
+    // these checks, so a cached read would keep showing the old reasons.
+    staleTime: 0,
+  });
+  // Newest-first feed, so the first transition INTO `rejected` is the current
+  // one; its `meta.reasons` is the vetting engine's verbatim explanation.
+  const initialRejectionRow = rejectionActivitiesQuery.data?.data.find(
+    (a) =>
+      a.type === "status_changed" &&
+      a.toStatus?.key === INITIAL_REJECT_STATUS_KEY,
+  );
+  const initialRejectionChecks = extractVettingChecks(
+    initialRejectionRow?.meta,
+  );
 
   // Local mutation flags
   const [retranscoding, setRetranscoding] = useState(false);
@@ -1396,13 +1565,22 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                     just the parsed-CV profile and a note. */}
                 <ProfileCard profile={profile} />
 
-                <div className="flex items-center gap-3 rounded-2xl border border-dashed border-line bg-surface px-5 py-4 text-[13px] text-ink-muted">
-                  <MicOff className="h-5 w-5 shrink-0 text-ink-subtle" />
-                  <p>
-                    No interview yet. Once this candidate completes one, the
-                    score, video and evaluation appear here.
-                  </p>
-                </div>
+                {isInitialRejected ? (
+                  // Rejected at the CV pre-screen, no interview will ever exist,
+                  // so show WHY here instead of a "no interview yet" note.
+                  <InitialRejectionCard
+                    checks={initialRejectionChecks}
+                    loading={rejectionActivitiesQuery.isLoading}
+                  />
+                ) : (
+                  <div className="flex items-center gap-3 rounded-2xl border border-dashed border-line bg-surface px-5 py-4 text-[13px] text-ink-muted">
+                    <MicOff className="h-5 w-5 shrink-0 text-ink-subtle" />
+                    <p>
+                      No interview yet. Once this candidate completes one, the
+                      score, video and evaluation appear here.
+                    </p>
+                  </div>
+                )}
               </div>
             ) : is404 ? (
               <div className="flex h-72 flex-col items-center justify-center gap-3 px-6 text-center text-sm text-ink-muted">

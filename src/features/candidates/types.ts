@@ -56,6 +56,14 @@ export const INVITABLE_STATUS_KEY: BuiltinCandidateStatusKey = "needs_review"
 export const POST_INTERVIEW_REJECT_STATUS_KEY: BuiltinCandidateStatusKey =
   "final_rejected"
 
+/**
+ * The CV-stage auto-rejection column: the vetting engine files a candidate here
+ * when their CV fails a job's hard eligibility gates, BEFORE any interview. The
+ * counterpart to {@link POST_INTERVIEW_REJECT_STATUS_KEY}; use it to detect an
+ * "initial rejection" and surface its reasons.
+ */
+export const INITIAL_REJECT_STATUS_KEY: BuiltinCandidateStatusKey = "rejected"
+
 /** Both terminal rejection columns — for read paths that treat them alike. */
 export const REJECTED_STATUS_KEYS: readonly BuiltinCandidateStatusKey[] = [
   "rejected",
@@ -258,6 +266,18 @@ export interface ActivityStatusRef {
   key: string
   label: string
   color: string | null
+}
+
+/**
+ * One eligibility gate's outcome on the CV pre-screen, for the drawer's
+ * checklist: `pass` (green tick), `fail` (red, a reason for rejection),
+ * `unknown` (amber, the gate could not be verified). Written by the vetting
+ * engine onto the rejection activity's `meta.checks`.
+ */
+export type VettingCheckStatus = "pass" | "fail" | "unknown"
+export interface VettingCheck {
+  text: string
+  status: VettingCheckStatus
 }
 
 /**

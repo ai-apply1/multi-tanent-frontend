@@ -5,6 +5,7 @@ import type {
   CreateUserResponse,
   NotificationPrefs,
   OrgUser,
+  ResetPasswordResponse,
   UpdateUserPayload,
   UserListResponse,
 } from "@/features/users/types";
@@ -63,6 +64,20 @@ export async function updateUser(id: string, payload: UpdateUserPayload) {
 export async function deleteUser(id: string) {
   const { data } = await api.delete<{ deleted: boolean; userId: string }>(
     `/admin/users/${id}`,
+  );
+  return data;
+}
+
+/**
+ * Reset a team member's password (`org_admin` only). Returns a freshly
+ * generated temporary password ONCE — the backend stores only its hash and
+ * signs the member out everywhere, so an admin who loses this value has to reset
+ * again. The backend 403s an admin who targets their own row (self-service is
+ * the change-password flow), so the UI never offers this on your own row.
+ */
+export async function resetUserPassword(id: string) {
+  const { data } = await api.post<ResetPasswordResponse>(
+    `/admin/users/${id}/reset-password`,
   );
   return data;
 }

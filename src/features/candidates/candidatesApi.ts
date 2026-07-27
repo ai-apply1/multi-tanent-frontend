@@ -89,6 +89,39 @@ export async function getCandidateKanban(jobId: string) {
   return data
 }
 
+/** Outcome of re-applying the job's scoring threshold to its scored candidates. */
+export interface ReprocessThresholdResult {
+  jobId: string
+  threshold: number
+  /** How many scored candidates were compared to the threshold. */
+  evaluated: number
+  /** How many actually changed column (movedToShortlisted + movedToFinalRejected). */
+  moved: number
+  movedToShortlisted: number
+  movedToFinalRejected: number
+  /**
+   * How many stored AI recommendations were refreshed. The recommendation is
+   * defined relative to the threshold, so it goes stale with it — otherwise the
+   * score card keeps saying "Hire" on a candidate the new cut line rejects.
+   */
+  recommendationsUpdated: number
+  /** Terminal-rejected candidates with no score (abandoned) — left untouched. */
+  skippedNoScore: number
+}
+
+/**
+ * Re-apply the job's CURRENT scoring threshold to every already-scored
+ * candidate, moving them between `shortlisted` and `final_rejected` by
+ * re-comparing their STORED interview score. No AI re-scoring, and SILENT
+ * (no candidate emails). Use after editing the job's threshold.
+ */
+export async function reprocessJobThreshold(jobId: string) {
+  const { data } = await api.post<ReprocessThresholdResult>(
+    `/admin/jobs/${jobId}/candidates/reprocess-threshold`,
+  )
+  return data
+}
+
 /**
  * Mint a short-lived presigned GET for the candidate's CV. Required because
  * the bucket is private — the stored `cvKey` is a key, not a URL, and there

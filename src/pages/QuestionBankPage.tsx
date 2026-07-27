@@ -64,6 +64,7 @@ import {
 } from "@/features/screening-questions/types";
 import { errorMessage as apiError } from "@/lib/errors";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { ClearFiltersButton } from "@/components/common/ClearFiltersButton";
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 const DEFAULT_PAGE_SIZE = 20;
@@ -102,6 +103,17 @@ export function QuestionBankPage() {
   // lives in the dialog until dismissed rather than in a toast that vanishes.
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const debouncedSearch = useDebouncedValue(search);
+
+  const filtersActive = Boolean(
+    search || difficultyFilter || categoryFilter || tagFilter.length > 0,
+  );
+  const clearFilters = () => {
+    setSearch("");
+    setDifficultyFilter("");
+    setCategoryFilter("");
+    setTagFilter([]);
+    setPage(1);
+  };
 
   const { data, isLoading, isFetching, isError, refetch } = useQuery({
     queryKey: [
@@ -205,6 +217,7 @@ export function QuestionBankPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <ClearFiltersButton active={filtersActive} onClear={clearFilters} />
           <Button size="sm" onClick={openCreate}>
             <Plus className="h-4 w-4" />
             Add question
