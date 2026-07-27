@@ -226,6 +226,55 @@ export const SENIORITY_LABELS: Record<SeniorityLevel, string> = {
   director: "Director",
 }
 
+/**
+ * The experience band each seniority level implies, inclusive both ends, in
+ * MONTHS; `maxMonths: null` means "and above". Months because the bottom of the
+ * ladder is sub-annual (intern 0–3, junior from 6) — in years those are 0.25
+ * and 0.5, which print badly and invite rounding drift.
+ *
+ * Mirrors `SENIORITY_EXPERIENCE` in the backend's `utils/seniority-experience.ts`
+ * — the numbers there are what the CV pre-screen prompt actually rates against,
+ * so if you change one, change both. This copy exists only to SHOW the admin
+ * what picking a level commits them to; nothing here is sent to the API, and
+ * the band is never stored on the job (it's derived from `seniorityLevel`).
+ *
+ * Not to be confused with `eligibility.minYearsExperience`, which is a hard
+ * auto-reject gate the admin sets by hand.
+ */
+export const SENIORITY_EXPERIENCE: Record<
+  SeniorityLevel,
+  { minMonths: number; maxMonths: number | null }
+> = {
+  intern: { minMonths: 0, maxMonths: 3 },
+  junior: { minMonths: 6, maxMonths: 18 },
+  mid: { minMonths: 24, maxMonths: 36 },
+  senior: { minMonths: 36, maxMonths: 60 },
+  lead: { minMonths: 60, maxMonths: 96 },
+  manager: { minMonths: 108, maxMonths: 144 },
+  director: { minMonths: 144, maxMonths: null },
+}
+
+const MONTHS_PER_YEAR = 12
+
+/** Below this the band reads in months; at or above it, in years. */
+const YEARS_THRESHOLD_MONTHS = 24
+
+/**
+ * `"0–3 mos"` / `"6–18 mos"` / `"3–5 yrs"` / `"12+ yrs"` — the band as it reads
+ * in the dropdown. The unit comes from the TOP of the band so both bounds share
+ * one; "6–18 mos" beats "6 mos–1.5 yrs" in a narrow trigger.
+ */
+export const seniorityExperienceLabel = (level: SeniorityLevel): string => {
+  const { minMonths, maxMonths } = SENIORITY_EXPERIENCE[level]
+  const inMonths = maxMonths !== null && maxMonths < YEARS_THRESHOLD_MONTHS
+  const unit = inMonths ? "mos" : "yrs"
+  const value = (months: number) =>
+    String(Number((inMonths ? months : months / MONTHS_PER_YEAR).toFixed(1)))
+  return maxMonths === null
+    ? `${value(minMonths)}+ ${unit}`
+    : `${value(minMonths)}–${value(maxMonths)} ${unit}`
+}
+
 export const DIFFICULTY_LABELS: Record<DifficultyLevel, string> = {
   easy: "Easy",
   medium: "Medium",

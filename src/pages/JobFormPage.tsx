@@ -25,6 +25,7 @@ import {
   EMPLOYMENT_TYPE_LABELS,
   SENIORITY_LABELS,
   WORK_MODE_LABELS,
+  seniorityExperienceLabel,
   type CreateJobPayload,
   type EmploymentType,
   type Job,
@@ -805,15 +806,32 @@ function ClassificationStep({
             </SelectTrigger>
             <SelectContent>
               {SENIORITY_LEVELS.map((s) => (
+                // The band rides along inside `ItemText`, so the closed trigger
+                // shows it too — the number is the part that decides how the
+                // pre-screen rates a CV, so it shouldn't only be visible while
+                // the list happens to be open.
                 <SelectItem key={s} value={s}>
                   {SENIORITY_LABELS[s]}
+                  <span className="ml-2 font-normal text-ink-muted">
+                    {seniorityExperienceLabel(s)}
+                  </span>
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
           {seniorityError ? (
             <p className={ERROR_CLASS}>{seniorityError}</p>
-          ) : null}
+          ) : (
+            // Mutually exclusive with the error: one shows only when unset, the
+            // other only when set.
+            <p className={HELP_CLASS}>
+              {seniorityLevel
+                ? `Expecting ${seniorityExperienceLabel(
+                    seniorityLevel as SeniorityLevel,
+                  )} of relevant experience.`
+                : "Sets the experience band the CV pre-screen rates against."}
+            </p>
+          )}
         </div>
       </div>
     </div>
