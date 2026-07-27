@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { JobQuestionsManager } from "@/features/jobs/components/JobQuestionsManager";
 import { JobShareDialog } from "@/features/jobs/components/JobShareDialog";
+import { JobSwitcher } from "@/features/jobs/components/JobSwitcher";
 import { getJob, setJobStatus } from "@/features/jobs/jobsApi";
 import {
   EMPLOYMENT_TYPE_LABELS,
@@ -215,6 +216,11 @@ export function JobDetailPage() {
               {job.title}
             </h1>
             <JobStatusBadge status={job.status} />
+            <JobSwitcher
+              currentJobId={job._id}
+              currentTitle={job.title}
+              currentStatus={job.status}
+            />
           </div>
           {classification.length > 0 ? (
             <div className="mt-2.5 flex flex-wrap gap-1.5">
