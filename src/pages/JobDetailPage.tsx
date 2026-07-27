@@ -205,7 +205,16 @@ export function JobDetailPage() {
           Jobs
         </Link>
         <span className="text-ink-subtle">/</span>
-        <span className="truncate font-semibold text-ink">{job.title}</span>
+        {/* `min-w-0` so a long title truncates instead of pushing the switcher
+            off the row — the switcher is `shrink-0` and won't give ground. */}
+        <span className="min-w-0 truncate font-semibold text-ink">
+          {job.title}
+        </span>
+        <JobSwitcher
+          currentJobId={job._id}
+          currentTitle={job.title}
+          currentStatus={job.status}
+        />
       </div>
 
       {/* Header */}
@@ -216,11 +225,6 @@ export function JobDetailPage() {
               {job.title}
             </h1>
             <JobStatusBadge status={job.status} />
-            <JobSwitcher
-              currentJobId={job._id}
-              currentTitle={job.title}
-              currentStatus={job.status}
-            />
           </div>
           {classification.length > 0 ? (
             <div className="mt-2.5 flex flex-wrap gap-1.5">

@@ -271,13 +271,18 @@ export function JobSwitcher({
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          "inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--field-border)] bg-surface text-ink-muted transition-colors hover:bg-hover hover:text-ink focus-visible:outline-none focus-visible:border-primary focus-visible:shadow-[0_0_0_3px_var(--accent-ring)]",
+          // Sized for the 13px breadcrumb row it sits in: a 32px control would
+          // set the row's height on its own and read as a toolbar button.
+          "inline-flex h-6 w-6 items-center justify-center rounded-md border border-[var(--field-border)] bg-surface text-ink-muted transition-colors hover:bg-hover hover:text-ink focus-visible:outline-none focus-visible:border-primary focus-visible:shadow-[0_0_0_3px_var(--accent-ring)]",
           open && "bg-hover text-ink",
         )}
       >
         <ChevronDown
-          className={cn("h-4 w-4 transition-transform", open && "rotate-180")}
-          strokeWidth={1.9}
+          className={cn(
+            "h-3.5 w-3.5 transition-transform",
+            open && "rotate-180",
+          )}
+          strokeWidth={2}
         />
       </button>
 
