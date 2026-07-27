@@ -134,18 +134,22 @@ export interface JobEligibilityPayload {
 }
 
 /**
- * The nullable fields below are `T | null`, not just optional, because the
- * update path reads `undefined` as "leave unchanged" (`if (dto.x !== undefined)`).
- * Clearing a value therefore REQUIRES an explicit `null` — omitting it would
- * silently keep the old one. `@IsOptional()` accepts null, and create folds
- * it with `?? null`, so null is correct on both paths.
+ * `maxAttempts` is `number | null`, not just optional, because the update path
+ * reads `undefined` as "leave unchanged" (`if (dto.x !== undefined)`). Clearing
+ * it therefore REQUIRES an explicit `null` — omitting it would silently keep
+ * the old value.
+ *
+ * The three classification fields are required and NOT nullable: they feed the
+ * `JOB CONTEXT` block of the CV pre-screen prompt, so an unset one silently
+ * weakens every fit judgment made against the posting. The backend rejects a
+ * missing one on create and a null one on update.
  */
 export interface CreateJobPayload {
   title: string
   description?: string
-  employmentType?: EmploymentType | null
-  workMode?: WorkMode | null
-  seniorityLevel?: SeniorityLevel | null
+  employmentType: EmploymentType
+  workMode: WorkMode
+  seniorityLevel: SeniorityLevel
   /**
    * REPLACE semantics on PATCH: sending this swaps the WHOLE eligibility
    * block and every omitted sub-field resets to null. Always build it from

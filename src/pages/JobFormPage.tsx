@@ -36,8 +36,13 @@ import { useOrganization } from "@/features/organization/useOrganization";
 import { ROUTES, jobDetail } from "@/routes";
 import { errorMessage } from "@/lib/errors";
 
-/** Sentinel for the "Not specified" option (Radix Select forbids empty values). */
-const NONE = "none";
+/**
+ * The not-yet-chosen state for the classification Selects. Empty string, so
+ * Radix shows the trigger's `placeholder` — there is deliberately no
+ * "Not specified" SelectItem to pick, since all three are required (Radix
+ * forbids `value=""` on an *item*, but the root reads it as "no selection").
+ */
+const UNSET = "";
 
 /** The scoring split presets, as `technical` percentages. */
 const WEIGHT_PRESETS: Array<[number, string]> = [
@@ -142,14 +147,16 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
   const [titleTouched, setTitleTouched] = useState(false);
   const [description, setDescription] = useState(job?.description ?? "");
 
-  // ── Classification
+  // ── Classification. All three required. A job saved before that rule seeds
+  // `UNSET` and has to be classified before it can be saved again.
   const [employmentType, setEmploymentType] = useState<string>(
-    job?.employmentType ?? NONE,
+    job?.employmentType ?? UNSET,
   );
-  const [workMode, setWorkMode] = useState<string>(job?.workMode ?? NONE);
+  const [workMode, setWorkMode] = useState<string>(job?.workMode ?? UNSET);
   const [seniorityLevel, setSeniorityLevel] = useState<string>(
-    job?.seniorityLevel ?? NONE,
+    job?.seniorityLevel ?? UNSET,
   );
+  const [classificationTouched, setClassificationTouched] = useState(false);
 
   // ── Scoring. ONE number: communication is always `100 - technical`, so the
   // backend's "must sum to 100" invariant can't be violated from this form.
@@ -181,6 +188,15 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
   const titleError =
     titleTouched && trimmedTitle.length === 0 ? "A job title is required." : "";
 
+  // Shown only once the step has been left (or a save attempted), so a fresh
+  // form doesn't open pre-scolded — same rule as the title.
+  const employmentTypeError =
+    classificationTouched && !employmentType ? "Pick an employment type." : "";
+  const workModeError =
+    classificationTouched && !workMode ? "Pick a work mode." : "";
+  const seniorityError =
+    classificationTouched && !seniorityLevel ? "Pick a seniority level." : "";
+
   const parsedRejection = parseOptionalNumber(rejectionThreshold);
   const rejectionError =
     parsedRejection === undefined ||
@@ -206,20 +222,30 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
       : "";
 
   // Per-step validity — Continue is disabled when the current step has
-  // outstanding errors. Classification has no rules at all. The accept/
-  // reject threshold and vetting-metric checks that used to live here were
-  // dropped when main simplified the eligibility schema.
+  // outstanding errors. Validity only, NOT touched-ness: the errors above gate
+  // when a message is *shown*, this gates whether the step may be left. The
+  // accept/reject threshold and vetting-metric checks that used to live here
+  // were dropped when main simplified the eligibility schema.
   const stepValid = useMemo(
     () => [
       trimmedTitle.length > 0,
-      true,
+      Boolean(employmentType && workMode && seniorityLevel),
       !rejectionError && !maxAttemptsError,
       !minYearsError,
     ],
-    [trimmedTitle, rejectionError, maxAttemptsError, minYearsError],
+    [
+      trimmedTitle,
+      employmentType,
+      workMode,
+      seniorityLevel,
+      rejectionError,
+      maxAttemptsError,
+      minYearsError,
+    ],
   );
 
-  const hasErrors = stepValid.some((ok) => !ok);
+  /** The earliest step still holding an error, or -1 when all of them pass. */
+  const firstInvalidStep = stepValid.findIndex((ok) => !ok);
 
   // ── payload
   const buildEligibility = (): JobEligibilityPayload => {
@@ -237,13 +263,12 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
   const buildPayload = (): CreateJobPayload => ({
     title: trimmedTitle,
     description: description.trim(),
-    // `null`, not undefined: on PATCH undefined means "leave unchanged", so
-    // undefined could never clear a value back to Not specified.
-    employmentType:
-      employmentType === NONE ? null : (employmentType as EmploymentType),
-    workMode: workMode === NONE ? null : (workMode as WorkMode),
-    seniorityLevel:
-      seniorityLevel === NONE ? null : (seniorityLevel as SeniorityLevel),
+    // Narrowed, not folded: `stepValid[1]` gates every path that reaches the
+    // mutation, so none of these can still be `UNSET` here. There is no null
+    // branch any more — the backend rejects a null classification outright.
+    employmentType: employmentType as EmploymentType,
+    workMode: workMode as WorkMode,
+    seniorityLevel: seniorityLevel as SeniorityLevel,
     // ALWAYS sent, and always complete: eligibility is REPLACE-semantics, so
     // an omitted block leaves the old one intact (clearing the last gate would
     // silently no-op) and an omitted sub-field resets to null.
@@ -314,14 +339,25 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
 
   const onContinue = () => {
     if (step === 0) setTitleTouched(true);
+    if (step === 1) setClassificationTouched(true);
     if (!stepValid[step]) return;
     if (!isFinalStep) {
       goToStep(step + 1);
       return;
     }
-    // Final step → submit.
+    // Final step → submit. Reveal every deferred message first: EDIT mode lets
+    // the stepper jump straight here, so whatever is blocking the save may sit
+    // on a step that was never opened.
     setTitleTouched(true);
-    if (hasErrors || busy) return;
+    setClassificationTouched(true);
+    if (busy) return;
+    if (firstInvalidStep !== -1) {
+      // Navigate TO the problem instead of leaving Save inert with no reason
+      // given — a job created before classification was required lands here.
+      goToStep(firstInvalidStep);
+      toast.error("Fill in the highlighted fields before saving.");
+      return;
+    }
     mutation.mutate();
   };
 
@@ -461,10 +497,13 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
             <ClassificationStep
               employmentType={employmentType}
               setEmploymentType={setEmploymentType}
+              employmentTypeError={employmentTypeError}
               workMode={workMode}
               setWorkMode={setWorkMode}
+              workModeError={workModeError}
               seniorityLevel={seniorityLevel}
               setSeniorityLevel={setSeniorityLevel}
+              seniorityError={seniorityError}
             />
           ) : null}
 
@@ -521,7 +560,10 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
             <Button
               type="button"
               size="sm"
-              disabled={hasErrors || busy}
+              // Only `busy` — an outstanding error is handled by `onContinue`,
+              // which bounces to the offending step and says so. A disabled
+              // Save on a step whose own fields all look fine reads as broken.
+              disabled={busy}
               onClick={onContinue}
             >
               {busy ? (
@@ -676,17 +718,23 @@ function BasicsStep({
 function ClassificationStep({
   employmentType,
   setEmploymentType,
+  employmentTypeError,
   workMode,
   setWorkMode,
+  workModeError,
   seniorityLevel,
   setSeniorityLevel,
+  seniorityError,
 }: {
   employmentType: string;
   setEmploymentType: (v: string) => void;
+  employmentTypeError: string;
   workMode: string;
   setWorkMode: (v: string) => void;
+  workModeError: string;
   seniorityLevel: string;
   setSeniorityLevel: (v: string) => void;
+  seniorityError: string;
 }) {
   const triggerCls =
     "h-11 rounded-lg border-[var(--field-border)] bg-surface px-3.5 text-[14px]";
@@ -694,7 +742,7 @@ function ClassificationStep({
     <div>
       <StepHead
         title="Classification"
-        subtitle="Optional labels for the posting. Leave any of them unspecified."
+        subtitle="All three are required — they label the posting and give the CV pre-screen the role's context."
       />
       <div className="grid gap-4 sm:grid-cols-3">
         <div>
@@ -702,11 +750,14 @@ function ClassificationStep({
             Employment type
           </label>
           <Select value={employmentType} onValueChange={setEmploymentType}>
-            <SelectTrigger id="job-employment" className={triggerCls}>
-              <SelectValue />
+            <SelectTrigger
+              id="job-employment"
+              aria-invalid={Boolean(employmentTypeError)}
+              className={triggerCls}
+            >
+              <SelectValue placeholder="Select…" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={NONE}>Not specified</SelectItem>
               {EMPLOYMENT_TYPES.map((t) => (
                 <SelectItem key={t} value={t}>
                   {EMPLOYMENT_TYPE_LABELS[t]}
@@ -714,17 +765,23 @@ function ClassificationStep({
               ))}
             </SelectContent>
           </Select>
+          {employmentTypeError ? (
+            <p className={ERROR_CLASS}>{employmentTypeError}</p>
+          ) : null}
         </div>
         <div>
           <label htmlFor="job-mode" className={LABEL_CLASS}>
             Work mode
           </label>
           <Select value={workMode} onValueChange={setWorkMode}>
-            <SelectTrigger id="job-mode" className={triggerCls}>
-              <SelectValue />
+            <SelectTrigger
+              id="job-mode"
+              aria-invalid={Boolean(workModeError)}
+              className={triggerCls}
+            >
+              <SelectValue placeholder="Select…" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={NONE}>Not specified</SelectItem>
               {WORK_MODES.map((m) => (
                 <SelectItem key={m} value={m}>
                   {WORK_MODE_LABELS[m]}
@@ -732,17 +789,21 @@ function ClassificationStep({
               ))}
             </SelectContent>
           </Select>
+          {workModeError ? <p className={ERROR_CLASS}>{workModeError}</p> : null}
         </div>
         <div>
           <label htmlFor="job-seniority" className={LABEL_CLASS}>
             Seniority
           </label>
           <Select value={seniorityLevel} onValueChange={setSeniorityLevel}>
-            <SelectTrigger id="job-seniority" className={triggerCls}>
-              <SelectValue />
+            <SelectTrigger
+              id="job-seniority"
+              aria-invalid={Boolean(seniorityError)}
+              className={triggerCls}
+            >
+              <SelectValue placeholder="Select…" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={NONE}>Not specified</SelectItem>
               {SENIORITY_LEVELS.map((s) => (
                 <SelectItem key={s} value={s}>
                   {SENIORITY_LABELS[s]}
@@ -750,6 +811,9 @@ function ClassificationStep({
               ))}
             </SelectContent>
           </Select>
+          {seniorityError ? (
+            <p className={ERROR_CLASS}>{seniorityError}</p>
+          ) : null}
         </div>
       </div>
     </div>
