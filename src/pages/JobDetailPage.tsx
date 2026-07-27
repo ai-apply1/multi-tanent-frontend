@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { JobQuestionsManager } from "@/features/jobs/components/JobQuestionsManager";
 import { JobShareDialog } from "@/features/jobs/components/JobShareDialog";
+import { JobSwitcher } from "@/features/jobs/components/JobSwitcher";
 import { getJob, setJobStatus } from "@/features/jobs/jobsApi";
 import {
   EMPLOYMENT_TYPE_LABELS,
@@ -98,6 +99,10 @@ export function JobDetailPage() {
       toast.success(`Job ${JOB_STATUS_LABELS[saved.status].toLowerCase()}.`);
       queryClient.setQueryData(["job", saved._id], saved);
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      // The share dialog's payload embeds the job's status (it gates the
+      // archived banner and the send/copy affordances) — drop it so the
+      // dialog can't replay the pre-transition status from cache.
+      queryClient.invalidateQueries({ queryKey: ["jobShareLink", saved._id] });
     },
     onError: (err) => {
       toast.error(errorMessage(err, "Could not change the job status."));
@@ -109,6 +114,7 @@ export function JobDetailPage() {
       // job's real status.
       void queryClient.invalidateQueries({ queryKey: ["job", jobId] });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      void queryClient.invalidateQueries({ queryKey: ["jobShareLink", jobId] });
     },
   });
 
@@ -234,7 +240,16 @@ export function JobDetailPage() {
           Jobs
         </Link>
         <span className="text-ink-subtle">/</span>
-        <span className="truncate font-semibold text-ink">{job.title}</span>
+        {/* `min-w-0` so a long title truncates instead of pushing the switcher
+            off the row — the switcher is `shrink-0` and won't give ground. */}
+        <span className="min-w-0 truncate font-semibold text-ink">
+          {job.title}
+        </span>
+        <JobSwitcher
+          currentJobId={job._id}
+          currentTitle={job.title}
+          currentStatus={job.status}
+        />
       </div>
 
       {/* Header */}
