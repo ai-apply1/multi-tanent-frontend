@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, Briefcase, Check, Loader2 } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Briefcase,
+  Check,
+  Info,
+  Loader2,
+} from "lucide-react";
 import toast from "react-hot-toast";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,6 +19,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ChipInput } from "@/features/jobs/components/ChipInput";
 import { MarkdownEditor } from "@/features/jobs/components/MarkdownEditor";
 import {
@@ -36,6 +49,7 @@ import {
 import { useOrganization } from "@/features/organization/useOrganization";
 import { ROUTES, jobDetail } from "@/routes";
 import { errorMessage } from "@/lib/errors";
+import { cn } from "@/lib/utils";
 
 /**
  * The not-yet-chosen state for the classification Selects. Empty string, so
@@ -793,9 +807,35 @@ function ClassificationStep({
           {workModeError ? <p className={ERROR_CLASS}>{workModeError}</p> : null}
         </div>
         <div>
-          <label htmlFor="job-seniority" className={LABEL_CLASS}>
-            Seniority
-          </label>
+          <div className="mb-1.5 flex items-center gap-1.5">
+            <label htmlFor="job-seniority" className={cn(LABEL_CLASS, "mb-0")}>
+              Seniority
+            </label>
+            {/* Provider is local, matching QuestionBankPage — there is no global
+                one, and this is the page's only tooltip. */}
+            <TooltipProvider delayDuration={200}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  {/* `type="button"` is load-bearing: this sits inside the
+                      wizard's <form>, whose onSubmit advances the step, so a
+                      default-type button would move the user on when clicked. */}
+                  <button
+                    type="button"
+                    aria-label="How the experience band is used"
+                    className="inline-flex h-4 w-4 items-center justify-center rounded-full text-ink-subtle transition-colors hover:text-ink focus-visible:text-ink focus-visible:outline-none"
+                  >
+                    <Info className="h-3.5 w-3.5" strokeWidth={2} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  The band next to each level is sent to the AI too. When it
+                  rates a candidate, their experience is scored against this
+                  range — so the level you pick changes the scoring, not just
+                  the label on the posting.
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
           <Select value={seniorityLevel} onValueChange={setSeniorityLevel}>
             <SelectTrigger
               id="job-seniority"
