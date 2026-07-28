@@ -1,5 +1,6 @@
 import MDEditor from "@uiw/react-md-editor";
 import { Markdown } from "@/components/Markdown";
+import { htmlToMarkdown } from "@/lib/htmlToMarkdown";
 import { useTheme } from "@/features/theme/ThemeContext";
 
 interface MarkdownEditorProps {
@@ -36,6 +37,32 @@ export function MarkdownEditor({
 }: MarkdownEditorProps) {
   const { theme } = useTheme();
 
+  // A <textarea> only receives the clipboard's plain-text flavor, so pasting a
+  // formatted description (LinkedIn/Word/Google Docs — all `text/html`) drops
+  // every heading, bold run and bullet. When the clipboard carries HTML,
+  // convert it to Markdown and insert that instead of the flattened text.
+  const handlePaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const markdown = htmlToMarkdown(event.clipboardData.getData("text/html"));
+    // Nothing rich to convert (or a malformed payload) → let the browser paste
+    // plain text as usual.
+    if (!markdown) return;
+
+    event.preventDefault();
+    const textarea = event.currentTarget;
+
+    // `insertText` keeps the native undo stack and caret intact and honours the
+    // textarea's maxLength; fall back to a manual splice on the rare browser
+    // that rejects it. Either path fires MDEditor's onChange, which re-clamps
+    // to maxLength.
+    if (!document.execCommand("insertText", false, markdown)) {
+      const start = textarea.selectionStart ?? value.length;
+      const end = textarea.selectionEnd ?? value.length;
+      onChange(
+        (value.slice(0, start) + markdown + value.slice(end)).slice(0, maxLength),
+      );
+    }
+  };
+
   return (
     // `md-editor-themed` scopes the globals.css bridge that remaps the
     // library's GitHub palette onto the app's theme tokens.
@@ -56,7 +83,7 @@ export function MarkdownEditor({
         preview="edit"
         height={120 + rows * 30}
         data-color-mode={theme}
-        textareaProps={{ id, placeholder, maxLength, disabled }}
+        textareaProps={{ id, placeholder, maxLength, disabled, onPaste: handlePaste }}
         components={{
           preview: (source) =>
             source.trim().length > 0 ? (
