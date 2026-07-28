@@ -47,66 +47,27 @@ export interface JobEligibility {
   city: string | null
   minYearsExperience: number | null
   requiredSkills: string[]
-  customFields: JobCustomField[]
+  university: JobUniversityGate
+  expectedSalary: JobSalaryGate
 }
-
-/** The value type of a custom field. Picked once and immutable after that. */
-export type CustomFieldType = "text" | "number" | "boolean" | "select"
 
 /**
- * Where a custom field's answer comes from. HR never picks this directly: the
- * backend classifies it from the label, shows the answer, and stores whatever
- * HR accepted or flipped to.
+ * The university gate. `names` is an OR: any one of them clears it, because a
+ * candidate has one alma mater, not all of them. Read from the CV, never asked.
  */
-export type CustomFieldSource = "applicant" | "resume"
+export interface JobUniversityGate {
+  enabled: boolean
+  names: string[]
+}
 
 /**
- * Every operator names the BREACH, not the pass, so a rule reads as the
- * sentence in the editor: "Reject if [is more than] [150000]".
+ * The expected-salary gate. `maxSalary` is the most the JOB pays; the candidate
+ * is separately asked the LEAST they will accept, and only a candidate whose
+ * minimum sits above this fails. The candidate never sees this number.
  */
-export type CustomFieldOperator =
-  | "gt"
-  | "lt"
-  | "not_between"
-  | "is_true"
-  | "is_false"
-  | "not_in"
-
-/** What a breached gate does. Absent = collect only, decides nothing. */
-export type CustomFieldFailAction = "reject" | "review"
-
-export interface JobCustomFieldRule {
-  operator: CustomFieldOperator
-  /** Bound for gt/lt, LOW bound for not_between. */
-  number: number | null
-  /** HIGH bound for not_between only. */
-  numberMax: number | null
-  /** Accepted answers for not_in only. */
-  options: string[]
-}
-
-export interface JobCustomField {
-  /** Immutable storage key, derived server-side from the first label. */
-  key: string
-  label: string
-  type: CustomFieldType
-  options: string[]
-  source: CustomFieldSource
-  /** True once HR overrode the suggestion; the classifier then leaves it alone. */
-  sourcePinned: boolean
-  required: boolean
-  helpText: string
-  rule: JobCustomFieldRule | null
-  onFail: CustomFieldFailAction | null
-}
-
-/** `POST /admin/jobs/custom-fields/classify` — advice, nothing is stored. */
-export interface CustomFieldClassification {
-  label: string
-  source: CustomFieldSource
-  /** One sentence for the recruiter, rendered under the field. */
-  reason: string
-  basis: "lexicon" | "ai" | "fallback"
+export interface JobSalaryGate {
+  enabled: boolean
+  maxSalary: number | null
 }
 
 /**
@@ -211,27 +172,8 @@ export interface JobEligibilityPayload {
   city?: string
   minYearsExperience?: number
   requiredSkills?: string[]
-  customFields?: JobCustomFieldPayload[]
-}
-
-/**
- * One custom field on the way to the server. `source` is deliberately absent:
- * the backend owns it. `sourceOverride` is sent ONLY when HR flipped the
- * suggestion, and sending it pins the field against future re-classification.
- *
- * `key` is echoed back for a field that already exists so a renamed label
- * keeps its stored answers; it is omitted for a newly added one.
- */
-export interface JobCustomFieldPayload {
-  key?: string
-  label: string
-  type: CustomFieldType
-  options?: string[]
-  sourceOverride?: CustomFieldSource
-  required?: boolean
-  helpText?: string
-  rule?: JobCustomFieldRule
-  onFail?: CustomFieldFailAction
+  university?: JobUniversityGate
+  expectedSalary?: { enabled: boolean; maxSalary?: number }
 }
 
 /**

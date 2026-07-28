@@ -26,14 +26,12 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { ChipInput } from "@/features/jobs/components/ChipInput";
-import { CustomFieldsEditor } from "@/features/jobs/components/CustomFieldsEditor";
-import { CustomFieldsHelp } from "@/features/jobs/components/CustomFieldsHelp";
 import {
-  toDraft,
-  toPayload as toCustomFieldPayload,
-  validateDrafts,
-  type CustomFieldDraft,
-} from "@/features/jobs/customFieldDraft";
+  ExtraGatesEditor,
+  emptyExtraGates,
+  validateExtraGates,
+  type ExtraGatesValue,
+} from "@/features/jobs/components/ExtraGatesEditor";
 import { MarkdownEditor } from "@/features/jobs/components/MarkdownEditor";
 import {
   ANY_CITY_VALUE,
@@ -223,9 +221,16 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
   const [requiredSkills, setRequiredSkills] = useState<string[]>(
     job?.eligibility.requiredSkills ?? [],
   );
-  const [customFields, setCustomFields] = useState<CustomFieldDraft[]>(() =>
-    (job?.eligibility.customFields ?? []).map(toDraft),
-  );
+  const [extraGates, setExtraGates] = useState<ExtraGatesValue>(() => ({
+    ...emptyExtraGates(),
+    universityEnabled: job?.eligibility.university?.enabled ?? false,
+    universityNames: job?.eligibility.university?.names ?? [],
+    salaryEnabled: job?.eligibility.expectedSalary?.enabled ?? false,
+    salaryMax:
+      job?.eligibility.expectedSalary?.maxSalary == null
+        ? ""
+        : String(job.eligibility.expectedSalary.maxSalary),
+  }));
 
   const { data: organization } = useOrganization();
 
@@ -284,11 +289,11 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
   // when a message is *shown*, this gates whether the step may be left. The
   // accept/reject threshold and vetting-metric checks that used to live here
   // were dropped when main simplified the eligibility schema.
-  // Mirrors the server's 422 checks on the custom fields so the wizard blocks
-  // the step instead of bouncing the whole save. The server still re-checks.
-  const customFieldErrors = useMemo(
-    () => validateDrafts(customFields),
-    [customFields],
+  // Mirrors the server's 422 checks so the wizard blocks the step instead of
+  // bouncing the whole save. The server still re-checks.
+  const extraGateErrors = useMemo(
+    () => validateExtraGates(extraGates),
+    [extraGates],
   );
 
   const stepValid = useMemo(
@@ -296,7 +301,7 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
       trimmedTitle.length > 0,
       Boolean(employmentType && workMode && seniorityLevel),
       !rejectionError && !maxAttemptsError && !durationError,
-      !minYearsError && customFieldErrors.length === 0,
+      !minYearsError && extraGateErrors.length === 0,
     ],
     [
       trimmedTitle,
@@ -307,7 +312,7 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
       maxAttemptsError,
       durationError,
       minYearsError,
-      customFieldErrors,
+      extraGateErrors,
     ],
   );
 
@@ -324,9 +329,18 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
     if (requiredSkills.length > 0) {
       eligibility.requiredSkills = requiredSkills;
     }
-    if (customFields.length > 0) {
-      eligibility.customFields = toCustomFieldPayload(customFields);
-    }
+    // Always sent, both halves: eligibility is REPLACE-semantics, so omitting
+    // a switched-off gate would leave the previous one enabled on the server.
+    eligibility.university = {
+      enabled: extraGates.universityEnabled,
+      names: extraGates.universityNames,
+    };
+    eligibility.expectedSalary = {
+      enabled: extraGates.salaryEnabled,
+      ...(extraGates.salaryMax.trim()
+        ? { maxSalary: Number(extraGates.salaryMax.trim()) }
+        : {}),
+    };
     return eligibility;
   };
 
@@ -609,9 +623,8 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
               minYearsError={minYearsError}
               requiredSkills={requiredSkills}
               setRequiredSkills={setRequiredSkills}
-              customFields={customFields}
-              setCustomFields={setCustomFields}
-              customFieldErrors={customFieldErrors}
+              extraGates={extraGates}
+              setExtraGates={setExtraGates}
             />
           ) : null}
         </div>
@@ -1369,9 +1382,8 @@ function EligibilityStep({
   minYearsError,
   requiredSkills,
   setRequiredSkills,
-  customFields,
-  setCustomFields,
-  customFieldErrors,
+  extraGates,
+  setExtraGates,
 }: {
   city: string;
   setCity: (v: string) => void;
@@ -1380,9 +1392,8 @@ function EligibilityStep({
   minYearsError: string;
   requiredSkills: string[];
   setRequiredSkills: (v: string[]) => void;
-  customFields: CustomFieldDraft[];
-  setCustomFields: (v: CustomFieldDraft[]) => void;
-  customFieldErrors: string[];
+  extraGates: ExtraGatesValue;
+  setExtraGates: (v: ExtraGatesValue) => void;
 }) {
   // City is picked from a fixed list (shared with /apply so a job's required
   // city and an applicant's stored city are drawn from one vocabulary), with
@@ -1512,25 +1523,13 @@ function EligibilityStep({
         </div>
 
         <div className="border-t border-[var(--field-border)] pt-4">
-          <CustomFieldsHelp />
+          <label className={LABEL_CLASS}>Extra checks</label>
           <p className="mb-3 text-[12px] text-ink-muted">
-            Add anything else this role depends on. We work out whether each one
-            comes from the CV or has to be asked on the application form, and you
-            can change that with one click.
+            Two optional checks, off unless you switch them on. Each says where
+            its answer comes from, so there is nothing to configure beyond the
+            values themselves.
           </p>
-          <CustomFieldsEditor
-            drafts={customFields}
-            onChange={setCustomFields}
-          />
-          {customFieldErrors.length > 0 ? (
-            <ul className="mt-2 grid gap-1">
-              {customFieldErrors.map((message) => (
-                <li key={message} className={ERROR_CLASS}>
-                  {message}
-                </li>
-              ))}
-            </ul>
-          ) : null}
+          <ExtraGatesEditor value={extraGates} onChange={setExtraGates} />
         </div>
       </div>
     </div>

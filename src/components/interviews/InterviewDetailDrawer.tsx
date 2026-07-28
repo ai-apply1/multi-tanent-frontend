@@ -113,14 +113,11 @@ import {
   type BuiltinCandidateStatusKey,
   type CandidateActivity,
   type CandidateDetail,
-  type CandidateFieldAnswer,
   type CandidateProfile,
   type CandidateStatus,
   type VettingCheck,
   type VettingCheckStatus,
 } from "@/features/candidates/types";
-import { getJob } from "@/features/jobs/jobsApi";
-import type { JobCustomField } from "@/features/jobs/types";
 import {
   formatClock,
   formatScore,
@@ -854,66 +851,23 @@ function VettingCheckRow({ check }: { check: VettingCheck }) {
 }
 
 /**
- * The candidate's answers to the job's custom eligibility fields.
+ * What the job's two optional gates actually found for this candidate.
  *
- * Deliberately SEPARATE from the pre-screen checklist above. That card shows
- * gates, with a verdict per row; this one shows collected facts. A field HR
- * marked collect-only never produces a check at all, so without this card it
- * would be invisible, and a green tick against it would claim a check that
- * never ran. Each row says where the answer came from, and a resume-sourced
- * one carries the CV quote behind it so an automatic decision is auditable.
+ * Separate from the pre-screen checklist below on purpose: that card shows
+ * VERDICTS, this one shows the underlying facts, and a candidate who was
+ * accepted has no checklist at all but still has these.
  */
-function ApplicationAnswersCard({
-  answers,
-  fields,
+function ExtraGatesCard({
+  university,
+  expectedSalaryMin,
 }: {
-  answers: CandidateFieldAnswer[];
-  /** The job's configured fields, so one with no answer is still listed. */
-  fields: JobCustomField[];
+  university: CandidateProfile["universityCheck"] | null
+  expectedSalaryMin: number | null
 }) {
-  /*
-   * Driven by the JOB's field list, not by the stored answers.
-   *
-   * Rendering only what was answered made a configured field vanish from the
-   * drawer entirely whenever it had no value — which is the COMMON case for a
-   * resume-sourced field the CV happens not to mention. HR could not tell
-   * "nobody configured this" from "we looked and the CV was silent", and the
-   * second one is the one that explains why a candidate is sitting in review.
-   *
-   * Any answer whose field is no longer on the job is appended rather than
-   * dropped, so deleting a field never erases what a candidate already told us.
-   */
-  const byKey = new Map(answers.map((a) => [a.key, a]));
-  const rows: Array<{
-    key: string;
-    label: string;
-    answer: CandidateFieldAnswer | null;
-    source: "applicant" | "resume";
-  }> = fields.map((f) => ({
-    key: f.key,
-    label: f.label,
-    answer: byKey.get(f.key) ?? null,
-    source: f.source,
-  }));
-  const configured = new Set(fields.map((f) => f.key));
-  for (const a of answers) {
-    if (!configured.has(a.key)) {
-      rows.push({ key: a.key, label: a.label, answer: a, source: a.source });
-    }
-  }
+  if (!university && expectedSalaryMin == null) return null;
 
-  if (rows.length === 0) return null;
-  const render = (value: CandidateFieldAnswer["value"]): string => {
-    if (value === null || value === undefined) return "-";
-    if (typeof value === "boolean") return value ? "Yes" : "No";
-    // Grouped, and with the locale PINNED to match the backend's own
-    // `formatNumber` in the vetting engine. A salary shown as "150000" here and
-    // "150,000" in the gate check beside it reads as two different numbers.
-    if (typeof value === "number") {
-      return value.toLocaleString("en-US", { maximumFractionDigits: 2 });
-    }
-    return String(value);
-  };
+  const money = (n: number) =>
+    n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 
   return (
     <div className="rounded-2xl border border-line bg-surface p-[18px]">
@@ -921,54 +875,47 @@ function ApplicationAnswersCard({
         <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent text-primary">
           <ClipboardList className="h-3.5 w-3.5" strokeWidth={2} />
         </span>
-        <h4 className="text-[13.5px] font-bold text-ink">
-          Role requirements
-        </h4>
+        <h4 className="text-[13.5px] font-bold text-ink">Role requirements</h4>
       </div>
-      {/* Two up from `sm`, matching the contact card above. One field per row
-          wasted most of the width on a drawer this wide, and the list grows
-          with every requirement HR adds. */}
       <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
-        {rows.map((row) => (
-          <div key={row.key} className="grid gap-0.5">
-            {/* Wraps rather than overflows: a long label plus its source chip
-                does not fit a half-width column on one line. */}
+        {university ? (
+          <div className="grid gap-0.5">
             <dt className="flex flex-wrap items-center gap-x-1.5 text-[12px] text-ink-muted">
-              {row.label}
-              {/*
-               * Names the SOURCE, not the person. Both halves are parallel
-               * ("from the CV" / "from the application"), which is the actual
-               * distinction being drawn, and it needs no pronoun for a
-               * candidate whose gender this product has never been told.
-               */}
-              <span className="text-[11px] text-ink-subtle">
-                {row.source === "resume" ? "from the CV" : "from the application"}
-              </span>
+              University
+              <span className="text-[11px] text-ink-subtle">from the CV</span>
             </dt>
-            {row.answer ? (
-              <dd className="text-[13.5px] font-semibold text-ink">
-                {render(row.answer.value)}
-              </dd>
-            ) : (
-              /*
-               * Says WHICH kind of nothing this is. A resume field with no
-               * value means the CV was read and did not say; an applicant
-               * field means they were asked and skipped it. Both leave the
-               * candidate parked at review, and HR needs to know which.
-               */
-              <dd className="text-[13.5px] font-semibold text-ink-subtle">
-                {row.source === "resume"
-                  ? "Not found on the CV"
-                  : "Not answered"}
-              </dd>
-            )}
-            {row.answer?.evidence ? (
+            <dd
+              className={cn(
+                "text-[13.5px] font-semibold",
+                university.verdict === "unclear" ? "text-ink-subtle" : "text-ink",
+              )}
+            >
+              {university.verdict === "yes"
+                ? university.matched || "An accepted university"
+                : university.verdict === "no"
+                  ? "Not an accepted university"
+                  : "Could not be matched"}
+            </dd>
+            {university.evidence ? (
               <dd className="text-[12px] italic leading-snug text-ink-muted">
-                “{row.answer.evidence}”
+                “{university.evidence}”
               </dd>
             ) : null}
           </div>
-        ))}
+        ) : null}
+        {expectedSalaryMin != null ? (
+          <div className="grid gap-0.5">
+            <dt className="flex flex-wrap items-center gap-x-1.5 text-[12px] text-ink-muted">
+              Expected salary
+              <span className="text-[11px] text-ink-subtle">
+                from the application
+              </span>
+            </dt>
+            <dd className="text-[13.5px] font-semibold text-ink">
+              {money(expectedSalaryMin)}
+            </dd>
+          </div>
+        ) : null}
       </dl>
     </div>
   );
@@ -1148,21 +1095,9 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   const statuses = statusesQuery.data ?? [];
   const candidate = candidateQuery.data ?? null;
   const profile = candidate?.profile ?? null;
-  const customAnswers = candidate?.customAnswers ?? [];
+  const universityCheck = profile?.universityCheck ?? null;
+  const expectedSalaryMin = candidate?.expectedSalaryMin ?? null;
 
-  /*
-   * The job's CONFIGURED custom fields, so the answers card can list one that
-   * has no value instead of silently omitting it. Same `["job", id]` key the
-   * job pages use, so this is usually a cache hit rather than a request.
-   */
-  const jobId = candidate?.jobId ?? null;
-  const jobQuery = useQuery({
-    queryKey: ["job", jobId],
-    queryFn: () => getJob(jobId!),
-    enabled: Boolean(jobId),
-    staleTime: 60_000,
-  });
-  const customFields = jobQuery.data?.eligibility.customFields ?? [];
 
   // "Initial rejection" = the CV-stage auto-reject column (`rejected`), NOT a
   // post-interview `final_rejected`. The vetting engine records the WHY on the
@@ -1717,7 +1652,10 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                 {/* Contact + identity live in the header now, so this state is
                     just the parsed-CV profile and a note. */}
                 <ProfileCard profile={profile} />
-                <ApplicationAnswersCard answers={customAnswers} fields={customFields} />
+                <ExtraGatesCard
+                  university={universityCheck}
+                  expectedSalaryMin={expectedSalaryMin}
+                />
 
                 {isInitialRejected ? (
                   // Rejected at the CV pre-screen, no interview will ever exist,
@@ -1764,11 +1702,11 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                     <ProfileCard profile={profile} />
                   </div>
                 ) : null}
-                {customAnswers.length > 0 || customFields.length > 0 ? (
+                {universityCheck || expectedSalaryMin != null ? (
                   <div className="mb-4">
-                    <ApplicationAnswersCard
-                      answers={customAnswers}
-                      fields={customFields}
+                    <ExtraGatesCard
+                      university={universityCheck}
+                      expectedSalaryMin={expectedSalaryMin}
                     />
                   </div>
                 ) : null}
