@@ -1087,7 +1087,7 @@ function WeightSplitBar({
             key={seg.label}
             // Animate preset jumps, but NEVER while dragging — a transition
             // there makes the fill lag the cursor and feel soggy.
-            className={`absolute inset-y-0 flex items-center justify-center ${
+            className={`absolute inset-y-0 ${
               dragging ? "" : "transition-[left,width] duration-150 ease-out"
             }`}
             style={{
@@ -1095,24 +1095,53 @@ function WeightSplitBar({
               width: `${seg.value}%`,
               background: AXIS_FILL[i],
             }}
-          >
-            {/* The inline number is the fast read while dragging, but it
-                cannot fit in a narrow segment — below ~9% it would clip or
-                overflow onto its neighbour, so the legend carries it. */}
-            {seg.value >= 9 && (
+          />
+        ))}
+
+        {/*
+         * Percentages live in ONE layer above every segment, not inside them.
+         *
+         * Inside, a segment narrower than its own text pushed the number onto
+         * its neighbour — where the next segment's background painted straight
+         * over it. The old guard (`value >= 9`) hid the number to avoid that,
+         * but it measured PERCENT rather than pixels: at 6% of a 1600px bar
+         * there is ~96px of room and the number vanished anyway, which reads as
+         * a bug rather than as tidiness.
+         *
+         * On its own layer a narrow label simply overhangs its neighbour and
+         * stays legible (the shadow carries it over any fill), so every value
+         * can be shown at every width. Only an EMPTY segment is skipped — there
+         * is no band to label, and the number would sit on the divider claiming
+         * width that isn't there. The legend still spells that case out in full.
+         */}
+        <div aria-hidden className="pointer-events-none absolute inset-0">
+          {segments.map((seg, i) => {
+            if (seg.value === 0) return null;
+            const start = i === 0 ? 0 : positions[i - 1];
+            return (
               <span
-                className="text-[12px] font-semibold tabular-nums"
-                // Segment 3 is only 28% primary over the surface, so it stays
-                // light in both themes and needs ink, not primary-foreground.
+                key={seg.label}
+                className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap text-[12px] font-semibold tabular-nums ${
+                  dragging ? "" : "transition-[left] duration-150 ease-out"
+                }`}
                 style={{
+                  left: `${start + seg.value / 2}%`,
+                  // Segment 3 is only 28% primary over the surface, so it stays
+                  // light in both themes and needs ink, not primary-foreground.
                   color: i === 2 ? "var(--ink)" : "var(--primary-foreground)",
+                  // Keeps a label readable on the frames where it overhangs a
+                  // neighbouring fill of the opposite lightness.
+                  textShadow:
+                    i === 2
+                      ? "0 1px 2px var(--surface)"
+                      : "0 1px 2px rgb(0 0 0 / 0.45)",
                 }}
               >
                 {seg.value}%
               </span>
-            )}
-          </div>
-        ))}
+            );
+          })}
+        </div>
 
         {([1, 2] as const).map((which) => (
           <div
@@ -1247,8 +1276,18 @@ function ScoringStep({
                   key={label}
                   type="button"
                   title={hint}
+                  // Exactly one preset is applied at a time, so these behave as
+                  // a radio group. `aria-pressed` is what says so — without it
+                  // "which split is active" is carried by colour alone, and a
+                  // screen reader hears four identical buttons.
+                  aria-pressed={active}
                   onClick={() => applyPreset(correctness, depth)}
-                  className={`rounded-md border px-2.5 py-1 text-[12px] font-semibold transition-colors ${
+                  // The UA's default ring survives a mouse click and then sits
+                  // on a preset the user has since dragged away from, which
+                  // reads as "this preset is selected" when it isn't. Pinning
+                  // the ring to focus-VISIBLE keeps it for keyboard users only,
+                  // so the purple active fill is the one selection signal.
+                  className={`rounded-md border px-2.5 py-1 text-[12px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--ring)] ${
                     active
                       ? "border-primary bg-accent text-primary"
                       : "border-line-2 bg-surface text-ink-2 hover:bg-hover"
