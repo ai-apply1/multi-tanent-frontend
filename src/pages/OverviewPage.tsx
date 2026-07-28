@@ -144,7 +144,7 @@ function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return "?";
   const first = parts[0]![0] ?? "";
-  const second = parts.length > 1 ? parts[parts.length - 1]![0] ?? "" : "";
+  const second = parts.length > 1 ? (parts[parts.length - 1]![0] ?? "") : "";
   return (first + second).toUpperCase();
 }
 
@@ -751,8 +751,14 @@ export function OverviewPage() {
 function OverviewSkeleton() {
   return (
     <div>
-      {/* KPI card grid — same responsive columns as the real grid. */}
-      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 md:[grid-template-columns:repeat(auto-fill,minmax(210px,260px))]">
+      {/* KPI card grid. The live grid caps each track at 260px (auto-FILL) so
+          real cards keep a uniform width even when few — which leaves a trailing
+          gap on the right of a wide row. A placeholder shouldn't show that gap,
+          so the skeleton uses auto-FIT + `1fr`: empty tracks collapse and the
+          rendered cards stretch to fill the row edge-to-edge at every width.
+          Five cards fill the widest (lg) row; narrower widths wrap to a normal
+          partial row. */}
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 md:[grid-template-columns:repeat(auto-fit,minmax(210px,1fr))]">
         {Array.from({ length: 5 }).map((_, i) => (
           <div
             key={i}
