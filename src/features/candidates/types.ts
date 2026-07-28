@@ -213,6 +213,25 @@ export interface CandidateDetail extends CandidateBase {
   latestInterviewId: CandidateLatestInterview | null
   /** The parsed-CV cache. `null` until the cv-parse worker finishes. */
   profile: CandidateProfile | null
+  /**
+   * Answers to the job's custom eligibility fields, from both sources: the
+   * applicant-sourced ones written at creation, the resume-sourced ones by the
+   * CV-parse worker. Sparse, so a field the candidate skipped, or one added to
+   * the job after they applied, simply has no entry.
+   */
+  customAnswers?: CandidateFieldAnswer[]
+}
+
+/** One stored answer to one custom eligibility field. */
+export interface CandidateFieldAnswer {
+  /** FK into `job.eligibility.customFields[].key`. */
+  key: string
+  /** The label as it stood when the answer was collected, not as renamed since. */
+  label: string
+  value: string | number | boolean | null
+  source: "applicant" | "resume"
+  /** Resume-sourced only: the CV quote behind the value. '' otherwise. */
+  evidence: string
 }
 
 /**
@@ -400,6 +419,13 @@ export interface BulkConfirmRow {
   /** Required server-side: the job's city gate compares against it. */
   city: string
   cvKey: string
+  /**
+   * This row's answers to the job's applicant-sourced custom fields, keyed by
+   * field key. Strings on the wire; the server types them against the job's
+   * own field list. A row missing a REQUIRED answer is skipped server-side
+   * (`missing_custom_answer`), which is why the dialog blocks it first.
+   */
+  customAnswers?: Record<string, string>
 }
 
 /**

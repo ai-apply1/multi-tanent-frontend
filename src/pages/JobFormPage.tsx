@@ -26,6 +26,14 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { ChipInput } from "@/features/jobs/components/ChipInput";
+import { CustomFieldsEditor } from "@/features/jobs/components/CustomFieldsEditor";
+import { CustomFieldsHelp } from "@/features/jobs/components/CustomFieldsHelp";
+import {
+  toDraft,
+  toPayload as toCustomFieldPayload,
+  validateDrafts,
+  type CustomFieldDraft,
+} from "@/features/jobs/customFieldDraft";
 import { MarkdownEditor } from "@/features/jobs/components/MarkdownEditor";
 import {
   ANY_CITY_VALUE,
@@ -49,7 +57,7 @@ import {
 import { useOrganization } from "@/features/organization/useOrganization";
 import { ROUTES, jobDetail } from "@/routes";
 import { errorMessage } from "@/lib/errors";
-import { cn } from "@/lib/utils";
+import { blurOnWheel, cn } from "@/lib/utils";
 
 /**
  * The not-yet-chosen state for the classification Selects. Empty string, so
@@ -184,6 +192,12 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
   const [maxAttempts, setMaxAttempts] = useState(
     job?.maxAttempts == null ? "" : String(job.maxAttempts),
   );
+  // Empty = inherit the org default, exactly like maxAttempts above.
+  const [interviewDuration, setInterviewDuration] = useState(
+    job?.interviewDurationMinutes == null
+      ? ""
+      : String(job.interviewDurationMinutes),
+  );
 
   // ── Eligibility & vetting
   const [city, setCity] = useState(job?.eligibility.city ?? "");
@@ -194,6 +208,9 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
   );
   const [requiredSkills, setRequiredSkills] = useState<string[]>(
     job?.eligibility.requiredSkills ?? [],
+  );
+  const [customFields, setCustomFields] = useState<CustomFieldDraft[]>(() =>
+    (job?.eligibility.customFields ?? []).map(toDraft),
   );
 
   const { data: organization } = useOrganization();
@@ -229,6 +246,18 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
       ? "Enter a whole number of 1 or more, or leave it empty."
       : "";
 
+  // [2, 120] mirrors the schema bound on both the job and the org setting, so
+  // a value that would be clamped server-side is refused here instead.
+  const parsedDuration = parseOptionalNumber(interviewDuration);
+  const durationError =
+    interviewDuration.trim() &&
+    (parsedDuration === undefined ||
+      !Number.isInteger(parsedDuration) ||
+      parsedDuration < 2 ||
+      parsedDuration > 120)
+      ? "Enter a whole number of minutes between 2 and 120, or leave it empty."
+      : "";
+
   const parsedMinYears = parseOptionalNumber(minYearsExperience);
   const minYearsError =
     minYearsExperience.trim() &&
@@ -241,12 +270,19 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
   // when a message is *shown*, this gates whether the step may be left. The
   // accept/reject threshold and vetting-metric checks that used to live here
   // were dropped when main simplified the eligibility schema.
+  // Mirrors the server's 422 checks on the custom fields so the wizard blocks
+  // the step instead of bouncing the whole save. The server still re-checks.
+  const customFieldErrors = useMemo(
+    () => validateDrafts(customFields),
+    [customFields],
+  );
+
   const stepValid = useMemo(
     () => [
       trimmedTitle.length > 0,
       Boolean(employmentType && workMode && seniorityLevel),
-      !rejectionError && !maxAttemptsError,
-      !minYearsError,
+      !rejectionError && !maxAttemptsError && !durationError,
+      !minYearsError && customFieldErrors.length === 0,
     ],
     [
       trimmedTitle,
@@ -255,7 +291,9 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
       seniorityLevel,
       rejectionError,
       maxAttemptsError,
+      durationError,
       minYearsError,
+      customFieldErrors,
     ],
   );
 
@@ -271,6 +309,9 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
     }
     if (requiredSkills.length > 0) {
       eligibility.requiredSkills = requiredSkills;
+    }
+    if (customFields.length > 0) {
+      eligibility.customFields = toCustomFieldPayload(customFields);
     }
     return eligibility;
   };
@@ -295,6 +336,7 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
     rejectionThreshold: parsedRejection ?? 70,
     // `null` clears the per-job cap so the org default applies again.
     maxAttempts: parsedMaxAttempts ?? null,
+    interviewDurationMinutes: parsedDuration ?? null,
   });
 
   const mutation = useMutation({
@@ -533,6 +575,10 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
               setMaxAttempts={setMaxAttempts}
               maxAttemptsError={maxAttemptsError}
               defaultAttempts={organization?.settings.maxInterviewAttempts}
+              interviewDuration={interviewDuration}
+              setInterviewDuration={setInterviewDuration}
+              durationError={durationError}
+              defaultDuration={organization?.settings.interviewDurationMinutes}
             />
           ) : null}
 
@@ -545,6 +591,9 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
               minYearsError={minYearsError}
               requiredSkills={requiredSkills}
               setRequiredSkills={setRequiredSkills}
+              customFields={customFields}
+              setCustomFields={setCustomFields}
+              customFieldErrors={customFieldErrors}
             />
           ) : null}
         </div>
@@ -757,7 +806,7 @@ function ClassificationStep({
     <div>
       <StepHead
         title="Classification"
-        subtitle="All three are required — they label the posting and give the CV pre-screen the role's context."
+        subtitle="All three are required. They label the posting and give the CV pre-screen the role's context."
       />
       <div className="grid gap-4 sm:grid-cols-3">
         <div>
@@ -830,7 +879,7 @@ function ClassificationStep({
                 <TooltipContent side="top">
                   The band next to each level is sent to the AI too. When it
                   rates a candidate, their experience is scored against this
-                  range — so the level you pick changes the scoring, not just
+                  range, so the level you pick changes the scoring, not just
                   the label on the posting.
                 </TooltipContent>
               </Tooltip>
@@ -890,6 +939,10 @@ function ScoringStep({
   setMaxAttempts,
   maxAttemptsError,
   defaultAttempts,
+  interviewDuration,
+  setInterviewDuration,
+  durationError,
+  defaultDuration,
 }: {
   technicalWeight: number;
   setTechnicalWeight: (n: number) => void;
@@ -900,6 +953,10 @@ function ScoringStep({
   setMaxAttempts: (v: string) => void;
   maxAttemptsError: string;
   defaultAttempts: number | undefined;
+  interviewDuration: string;
+  setInterviewDuration: (v: string) => void;
+  durationError: string;
+  defaultDuration: number | undefined;
 }) {
   return (
     <div>
@@ -960,6 +1017,7 @@ function ScoringStep({
               max={100}
               value={rejectionThreshold}
               aria-invalid={Boolean(rejectionError)}
+              onWheel={blurOnWheel}
               onChange={(e) => setRejectionThreshold(e.target.value)}
               className={FIELD_CLASS}
             />
@@ -967,7 +1025,7 @@ function ScoringStep({
               <p className={ERROR_CLASS}>{rejectionError}</p>
             ) : (
               <p className={HELP_CLASS}>
-                At or above this (0–100) shortlists the candidate; below it
+                At or above this (0 to 100) shortlists the candidate; below it
                 rejects them.
               </p>
             )}
@@ -982,6 +1040,7 @@ function ScoringStep({
               min={1}
               value={maxAttempts}
               aria-invalid={Boolean(maxAttemptsError)}
+              onWheel={blurOnWheel}
               onChange={(e) => setMaxAttempts(e.target.value)}
               placeholder={defaultAttempts ? String(defaultAttempts) : ""}
               className={FIELD_CLASS}
@@ -992,6 +1051,34 @@ function ScoringStep({
               <p className={HELP_CLASS}>
                 Leave empty to inherit your org default
                 {defaultAttempts ? ` (${defaultAttempts})` : ""}.
+              </p>
+            )}
+          </div>
+          <div>
+            <label htmlFor="job-duration" className={LABEL_CLASS}>
+              Interview length (minutes)
+            </label>
+            <input
+              id="job-duration"
+              type="number"
+              min={2}
+              max={120}
+              value={interviewDuration}
+              aria-invalid={Boolean(durationError)}
+              onWheel={blurOnWheel}
+              onChange={(e) => setInterviewDuration(e.target.value)}
+              placeholder={defaultDuration ? String(defaultDuration) : ""}
+              className={FIELD_CLASS}
+            />
+            {durationError ? (
+              <p className={ERROR_CLASS}>{durationError}</p>
+            ) : (
+              <p className={HELP_CLASS}>
+                How long candidates get, counted down on their screen. Set it to
+                suit this job&apos;s question list. Leave empty to inherit your
+                org default
+                {defaultDuration ? ` (${defaultDuration})` : ""}. Changing it
+                only affects invites sent from now on.
               </p>
             )}
           </div>
@@ -1011,6 +1098,9 @@ function EligibilityStep({
   minYearsError,
   requiredSkills,
   setRequiredSkills,
+  customFields,
+  setCustomFields,
+  customFieldErrors,
 }: {
   city: string;
   setCity: (v: string) => void;
@@ -1019,6 +1109,9 @@ function EligibilityStep({
   minYearsError: string;
   requiredSkills: string[];
   setRequiredSkills: (v: string[]) => void;
+  customFields: CustomFieldDraft[];
+  setCustomFields: (v: CustomFieldDraft[]) => void;
+  customFieldErrors: string[];
 }) {
   // City is picked from a fixed list (shared with /apply so a job's required
   // city and an applicant's stored city are drawn from one vocabulary), with
@@ -1114,6 +1207,7 @@ function EligibilityStep({
               min={0}
               value={minYearsExperience}
               aria-invalid={Boolean(minYearsError)}
+              onWheel={blurOnWheel}
               onChange={(e) => setMinYearsExperience(e.target.value)}
               placeholder="No minimum"
               className={FIELD_CLASS}
@@ -1139,11 +1233,33 @@ function EligibilityStep({
             placeholder="Type a skill and press Enter"
           />
           <p className={HELP_CLASS}>
-            A hard gate: the AI checks the CV for every skill listed — any
+            A hard gate: the AI checks the CV for every skill listed. Any
             spelling counts (Node = NodeJS = Node.js). A skill it finds no
             evidence of rejects the candidate; an unsure call goes to review
             instead.
           </p>
+        </div>
+
+        <div className="border-t border-[var(--field-border)] pt-4">
+          <CustomFieldsHelp />
+          <p className="mb-3 text-[12px] text-ink-muted">
+            Add anything else this role depends on. We work out whether each one
+            comes from the CV or has to be asked on the application form, and you
+            can change that with one click.
+          </p>
+          <CustomFieldsEditor
+            drafts={customFields}
+            onChange={setCustomFields}
+          />
+          {customFieldErrors.length > 0 ? (
+            <ul className="mt-2 grid gap-1">
+              {customFieldErrors.map((message) => (
+                <li key={message} className={ERROR_CLASS}>
+                  {message}
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       </div>
     </div>

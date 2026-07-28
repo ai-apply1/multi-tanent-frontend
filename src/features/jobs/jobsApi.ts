@@ -1,6 +1,7 @@
 import api from "@/lib/api"
 import type {
   CreateJobPayload,
+  CustomFieldClassification,
   Job,
   JobListItem,
   JobQuestionItemPayload,
@@ -73,6 +74,22 @@ export async function createJob(payload: CreateJobPayload) {
  */
 export async function updateJob(id: string, payload: UpdateJobPayload) {
   const { data } = await api.patch<Job>(`/admin/jobs/${id}`, payload)
+  return data
+}
+
+/**
+ * Ask where a custom eligibility field's answer should come from, from its
+ * label alone.
+ *
+ * ADVICE ONLY. Nothing is stored until the job is saved, and the server
+ * re-derives the source there rather than trusting what the form echoes back,
+ * so a stale or tampered suggestion cannot change what a job actually does.
+ */
+export async function classifyCustomField(label: string) {
+  const { data } = await api.post<CustomFieldClassification>(
+    "/admin/jobs/custom-fields/classify",
+    { label }
+  )
   return data
 }
 
