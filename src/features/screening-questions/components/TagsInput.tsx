@@ -10,6 +10,13 @@ interface TagsInputProps {
   placeholder?: string
   disabled?: boolean
   className?: string
+  /**
+   * Merged onto the inner chip container (where the border/height live), so a
+   * caller can shrink it to line up with a sibling control — e.g. the Question
+   * bank filter row matches the search input's `h-[37px]`. Left off, the
+   * comfortable 44px form-field height stands.
+   */
+  containerClassName?: string
   "aria-invalid"?: boolean
 }
 
@@ -28,6 +35,7 @@ export function TagsInput({
   placeholder,
   disabled,
   className,
+  containerClassName,
   "aria-invalid": ariaInvalid
 }: TagsInputProps) {
   const [draft, setDraft] = React.useState("")
@@ -66,7 +74,8 @@ export function TagsInput({
         className={cn(
           "flex flex-wrap gap-1.5 items-center min-h-[44px] rounded-lg border border-[var(--field-border)] bg-surface px-2 py-1.5 focus-within:border-primary focus-within:shadow-[0_0_0_3px_var(--accent-ring)] transition-colors",
           disabled && "cursor-not-allowed opacity-50",
-          ariaInvalid && "border-[var(--danger)]"
+          ariaInvalid && "border-[var(--danger)]",
+          containerClassName
         )}
       >
         {value.map((tag, idx) => (

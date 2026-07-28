@@ -248,6 +248,16 @@ export function QuestionBankPage() {
               className="h-[37px] w-full rounded-[9px] border border-[var(--field-border)] bg-surface pl-9 pr-3 text-[13px] text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)]"
             />
           </div>
+          <TagsInput
+            value={tagFilter}
+            onChange={(next) => {
+              setTagFilter(next);
+              setPage(1);
+            }}
+            placeholder="Filter by tags…"
+            className="w-full max-w-[260px] flex-shrink"
+            containerClassName="min-h-[37px] rounded-[9px]"
+          />
           <Select
             value={categoryFilter || ALL}
             onValueChange={(v) => {
@@ -286,15 +296,6 @@ export function QuestionBankPage() {
               ))}
             </SelectContent>
           </Select>
-          <TagsInput
-            value={tagFilter}
-            onChange={(next) => {
-              setTagFilter(next);
-              setPage(1);
-            }}
-            placeholder="Filter by tags…"
-            className="min-w-[220px] flex-1 basis-[220px]"
-          />
         </div>
 
         {/* Rows */}
