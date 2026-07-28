@@ -387,3 +387,94 @@
   0%   { transform: translateX(-100%); }
   100% { transform: translateX(300%); }
 }
+
+/* --------- @uiw/react-md-editor theme bridge --------- */
+/* The editor ships GitHub's palette as `--color-*` vars declared on its own
+   root (`.wmde-markdown-var[data-color-mode]`, specificity 0,2,0). Re-declare
+   them here mapped onto the app tokens — which already flip with `.dark` and
+   org branding — so the editor always matches the surrounding fields. The
+   `.md-editor-themed` scope (set by MarkdownEditor.tsx) pushes specificity to
+   0,3,0 so these win regardless of CSS order in the bundle. */
+.md-editor-themed .w-md-editor.wmde-markdown-var {
+  /* Chrome: canvas, border/divider, text, font. */
+  --md-editor-background-color: var(--surface);
+  --md-editor-box-shadow-color: var(--field-border);
+  --md-editor-font-family: var(--font-sans);
+  --color-canvas-default: var(--surface);
+  --color-border-default: var(--field-border);
+  --color-fg-default: var(--ink);
+  /* Toolbar button hover/active states. */
+  --color-neutral-muted: var(--hover);
+  --color-accent-fg: var(--primary);
+  --color-danger-fg: var(--primary);
+  /* Write-pane markdown syntax tokens (the `**`/`#` marks, links, code). */
+  --color-prettylights-syntax-comment: var(--ink-subtle);
+  --color-prettylights-syntax-constant: var(--primary);
+  --color-prettylights-syntax-markup-bold: var(--ink);
+  --color-prettylights-syntax-entity: var(--primary);
+  --color-prettylights-syntax-markup-deleted-text: var(--ink-muted);
+  font-family: var(--font-sans);
+  border-radius: 0.5rem; /* match rounded-lg form fields */
+}
+.md-editor-themed .w-md-editor-toolbar {
+  border-radius: 0.5rem 0.5rem 0 0;
+  padding: 4px 6px;
+}
+/* Toolbar buttons sized like the app's icon buttons (old toolbar was h-8 w-8
+   with h-4 icons); rest color is the muted ink, hover goes primary via the
+   `--color-accent-fg` mapping above. */
+.md-editor-themed .w-md-editor-toolbar li > button {
+  height: 28px;
+  min-width: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-muted);
+}
+.md-editor-themed .w-md-editor-toolbar li > button svg {
+  width: 14px;
+  height: 14px;
+}
+.md-editor-themed .w-md-editor-text-input::placeholder {
+  color: var(--ink-subtle);
+}
+/* Field-style focus treatment — mirrors `focus:border-primary
+   focus:shadow-[0_0_0_3px_var(--accent-ring)]` on the app's inputs. */
+.md-editor-themed .w-md-editor:focus-within {
+  box-shadow: 0 0 0 1px var(--primary), 0 0 0 4px var(--accent-ring);
+}
+/* The textarea only grows to fit its content, so the empty space below a short
+   description is the content wrapper, not the textarea — and showed the default
+   arrow. Extend the text (I-beam) cursor across the whole edit surface so the
+   box reads as one field (pairs with the click-to-focus in MarkdownEditor.tsx). */
+.md-editor-themed .w-md-editor-content,
+.md-editor-themed .w-md-editor-area,
+.md-editor-themed .w-md-editor-text {
+  cursor: text;
+}
+/* Same slim pill scrollbars as `.scroll` for the editor's inner panes. */
+.md-editor-themed ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.md-editor-themed ::-webkit-scrollbar-track {
+  background: transparent;
+}
+.md-editor-themed ::-webkit-scrollbar-thumb {
+  background: rgba(13, 11, 11, 0.14);
+  border-radius: 99px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+.md-editor-themed ::-webkit-scrollbar-thumb:hover {
+  background: rgba(13, 11, 11, 0.26);
+  background-clip: padding-box;
+}
+.dark .md-editor-themed ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  background-clip: padding-box;
+}
+.dark .md-editor-themed ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.26);
+  background-clip: padding-box;
+}

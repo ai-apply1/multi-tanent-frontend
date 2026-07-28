@@ -62,10 +62,11 @@ import {
 import { extractCvsFromZip, isZipFile } from "@/features/candidates/unzipCvs"
 import {
   JOB_OPTIONS_QUERY_KEY,
+  getJob,
   listJobOptions,
 } from "@/features/jobs/jobsApi"
 import { errorMessage } from "@/lib/errors"
-import { cn } from "@/lib/utils"
+import { blurOnWheel, cn } from "@/lib/utils"
 
 /**
  * Extension → mime, for the browsers that hand us an empty (or plain
@@ -140,6 +141,11 @@ interface UploadRow {
   phoneIso: string
   phoneNumber: string
   city: string
+  /**
+   * The minimum salary this candidate would accept. A raw string so a
+   * half-typed number is a legal editing state; parsed at confirm.
+   */
+  expectedSalaryMin: string
   status: RowStatus
   progress: number
   /** Why the direct S3 PUT failed — shown inline, not toasted. */
@@ -225,6 +231,25 @@ export function UploadCvsDialog({
     staleTime: 60_000,
   })
 
+  /**
+   * The TARGET job's own custom fields. Keyed on `selectedJobId`, not the
+   * `jobId` prop, because the dialog lets the admin re-point the import at a
+   * different job mid-flow and the columns must follow it.
+   */
+  const targetJobQuery = useQuery({
+    queryKey: ["job", selectedJobId],
+    queryFn: () => getJob(selectedJobId),
+    enabled: open && Boolean(selectedJobId),
+  })
+
+  /**
+   * Does the TARGET job ask for an expected salary? Keyed on `selectedJobId`,
+   * not the `jobId` prop, because the dialog lets the admin re-point the import
+   * at a different job mid-flow and the column must follow it.
+   */
+  const asksSalary =
+    targetJobQuery.data?.eligibility.expectedSalary?.enabled === true
+
   const jobOptions = useMemo(() => {
     const all = jobsQuery.data ?? []
     const openJobs = all.filter((j) => j.status === "open")
@@ -256,6 +281,7 @@ export function UploadCvsDialog({
         phoneIso: "",
         phoneNumber: "",
         city: "",
+        expectedSalaryMin: "",
         status: "idle",
         progress: 0,
         error: null,
@@ -367,8 +393,32 @@ export function UploadCvsDialog({
   const cityError = (row: UploadRow): string | null =>
     row.city.trim() ? null : "City is required. Pick one from the list."
 
+  /**
+   * The same rule as `cityError`, generalised: a REQUIRED custom field the
+   * job gates on has to be filled before the row can become a candidate.
+   *
+   * Blocking here rather than letting the server skip the row is deliberate.
+   * The server does refuse it (`missing_custom_answer`), but it can only say
+   * so after the whole batch has been sent, on the summary screen, with no way
+   * to fix it in place. Only fields the CANDIDATE answers appear at all; the
+   * resume-sourced ones are the CV parser's job.
+   */
+  const salaryError = (row: UploadRow): string | null => {
+    if (!asksSalary) return null
+    const raw = row.expectedSalaryMin.trim()
+    if (!raw) return "Expected salary is required for this job."
+    const n = Number(raw)
+    return Number.isFinite(n) && n >= 0 ? null : "Enter a number."
+  }
+
   const rowIncomplete = (row: UploadRow): boolean =>
-    Boolean(emailError(row) || nameError(row) || phoneError(row) || cityError(row))
+    Boolean(
+      emailError(row) ||
+        nameError(row) ||
+        phoneError(row) ||
+        cityError(row) ||
+        salaryError(row)
+    )
 
   /** Only uploaded rows can become candidates — a failed PUT has no key. */
   const importable = rows.filter((r) => r.status === "uploaded" && r.cvKey)
@@ -492,6 +542,11 @@ export function UploadCvsDialog({
           phone: combinePhone(row.phoneIso, row.phoneNumber.trim()),
           city: row.city.trim(),
           cvKey: row.cvKey as string,
+          // Only when this job asks, so a stale answer left behind by
+          // re-pointing the import at another job is never sent.
+          ...(asksSalary && row.expectedSalaryMin.trim()
+            ? { expectedSalaryMin: Number(row.expectedSalaryMin.trim()) }
+            : {}),
         }))
       ),
     onSuccess: (res) => {
@@ -718,6 +773,8 @@ export function UploadCvsDialog({
                           nameMsg={touched.has(row.id) ? nameError(row) : null}
                           phoneMsg={touched.has(row.id) ? phoneError(row) : null}
                           cityMsg={touched.has(row.id) ? cityError(row) : null}
+                          asksSalary={asksSalary}
+                          salaryMsg={touched.has(row.id) ? salaryError(row) : null}
                           onPatch={(patch) => patchRow(row.id, patch)}
                           onTouch={() => setTouched((prev) => new Set(prev).add(row.id))}
                           onRemove={() => removeRow(row.id)}
@@ -894,6 +951,8 @@ function ReviewRow({
   nameMsg,
   phoneMsg,
   cityMsg,
+  asksSalary,
+  salaryMsg,
   onPatch,
   onTouch,
   onRemove,
@@ -905,6 +964,9 @@ function ReviewRow({
   nameMsg: string | null
   phoneMsg: string | null
   cityMsg: string | null
+  /** Does the target job ask for an expected salary? */
+  asksSalary: boolean
+  salaryMsg: string | null
   onPatch: (patch: Partial<UploadRow>) => void
   onTouch: () => void
   onRemove: () => void
@@ -1041,6 +1103,33 @@ function ReviewRow({
           onChange={(city) => onPatch({ city })}
           onTouch={onTouch}
         />
+        {/*
+         * Only when the job asks. The candidate states a MINIMUM; the job's
+         * maximum stays server-side, so nothing here reveals the ceiling.
+         */}
+        {asksSalary ? (
+          <div className="space-y-1.5">
+            <Label htmlFor={`salary-${row.id}`} className="text-xs text-ink">
+              Expected salary<span className="text-[var(--danger)]"> *</span>
+            </Label>
+            <Input
+              id={`salary-${row.id}`}
+              type="number"
+              inputMode="numeric"
+              min={0}
+              value={row.expectedSalaryMin}
+              disabled={busy}
+              aria-invalid={Boolean(salaryMsg)}
+              placeholder="Minimum they would accept"
+              onWheel={blurOnWheel}
+              onChange={(e) => onPatch({ expectedSalaryMin: e.target.value })}
+              onBlur={onTouch}
+            />
+            {salaryMsg ? (
+              <p className="text-xs text-[var(--danger)]">{salaryMsg}</p>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </div>
   )

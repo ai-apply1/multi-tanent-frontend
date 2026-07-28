@@ -29,7 +29,11 @@ import type {
  * (`scores.scoringWeights`). Mirrors the backend's
  * `SCORING_WEIGHT_DEFAULTS` — 0–100, summing to 100.
  */
-const WEIGHT_DEFAULTS: ScoringWeights = { technical: 60, communication: 40 }
+const WEIGHT_DEFAULTS: ScoringWeights = {
+  correctness: 40,
+  depth: 20,
+  communication: 40,
+}
 
 /**
  * The communication-fold + fluency weights, shown only as LABELS next to the
@@ -293,9 +297,10 @@ export function ScoringDetailsDialog({
                 result={scores.overall}
                 formula={
                   <>
-                    {weights.technical}% × Technical ({s1(scores.technical)}) +{" "}
-                    {weights.communication}% × Communication (
-                    {s1(scores.communication)})
+                    {weights.correctness}% × Correctness (
+                    {s1(scores.correctness)}) + {weights.depth}% × Depth (
+                    {s1(scores.depth)}) + {weights.communication}% ×
+                    Communication ({s1(scores.communication)})
                   </>
                 }
                 note={
@@ -330,7 +335,21 @@ export function ScoringDetailsDialog({
                   }
                 />
                 <div className="grid grid-cols-2 gap-2">
-                  <ScoreBar label="Technical" value={scores.technical} />
+                  <ScoreBar
+                    label="Correctness"
+                    value={scores.correctness}
+                    hint="did they land the expected point"
+                  />
+                  <ScoreBar
+                    label="Depth"
+                    value={scores.depth}
+                    hint={
+                      typeof scores.depthRaw === "number" &&
+                      scores.depthRaw !== scores.depth
+                        ? `raw ${s1(scores.depthRaw)}, normalised for question difficulty`
+                        : "trade-offs · specifics · judgment"
+                    }
+                  />
                   <ScoreBar
                     label="Substance"
                     value={substance}

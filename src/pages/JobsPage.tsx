@@ -51,6 +51,7 @@ import { ROUTES, jobDetail, jobEdit } from "@/routes";
 import { formatDate } from "@/lib/date";
 import { errorMessage } from "@/lib/errors";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { ClearFiltersButton } from "@/components/common/ClearFiltersButton";
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 const DEFAULT_PAGE_SIZE = 20;
@@ -134,6 +135,13 @@ export function JobsPage() {
   const showingFrom = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const showingTo = Math.min(page * pageSize, total);
 
+  const filtersActive = Boolean(search || statusFilter);
+  const clearFilters = () => {
+    setSearch("");
+    setStatusFilter("");
+    setPage(1);
+  };
+
   return (
     <div className="mx-auto max-w-[1240px] px-6 py-6 lg:px-8 lg:py-8">
       <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
@@ -152,6 +160,7 @@ export function JobsPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <ClearFiltersButton active={filtersActive} onClear={clearFilters} />
           <Button size="sm" onClick={() => navigate(ROUTES.JOB_NEW)}>
             <Plus className="h-4 w-4" strokeWidth={2.2} />
             Create job

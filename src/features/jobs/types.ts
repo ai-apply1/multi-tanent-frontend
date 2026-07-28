@@ -44,14 +44,58 @@ export interface Paginated<T> {
  * There is no scoring layer, so there is nothing else to configure here.
  */
 export interface JobEligibility {
+  /**
+   * IGNORED ENTIRELY when `workMode` is `remote`, and the value is kept rather
+   * than cleared so switching back to onsite restores it. Read it through
+   * `cityGateApplies(job)`, never bare, or a remote job looks like it filters
+   * on location when the server has already decided it does not.
+   */
   city: string | null
+  /**
+   * Does a wrong-city candidate who says they would MOVE still get looked at?
+   * On (the default) turns that mismatch into an HR review instead of an
+   * auto-reject. Never an auto-pass: willingness is an unverifiable claim.
+   */
+  considerRelocators: boolean
   minYearsExperience: number | null
   requiredSkills: string[]
+  university: JobUniversityGate
+  expectedSalary: JobSalaryGate
 }
 
-/** Fold weights for `scores.overall`. Always sum to exactly 100. */
+/**
+ * The university gate. `names` is an OR: any one of them clears it, because a
+ * candidate has one alma mater, not all of them. Read from the CV, never asked.
+ */
+export interface JobUniversityGate {
+  enabled: boolean
+  names: string[]
+}
+
+/**
+ * The expected-salary gate. `maxSalary` is the most the JOB pays; the candidate
+ * is separately asked the LEAST they will accept, and only a candidate whose
+ * minimum sits above this fails. The candidate never sees this number.
+ */
+export interface JobSalaryGate {
+  enabled: boolean
+  maxSalary: number | null
+}
+
+/**
+ * Fold weights for `scores.overall`. The three ALWAYS sum to exactly 100
+ * (backend-validated, 422 otherwise).
+ *
+ * The axes are non-overlapping by design, so a job weights what the ROLE
+ * needs. Any single axis may be 0 — 0/0/100 is a legitimate "can they hold a
+ * conversation" screen — only an all-zero triple is rejected.
+ */
 export interface JobScoringWeights {
-  technical: number
+  /** Did they answer the question asked and land the expected point? */
+  correctness: number
+  /** Have they lived it — trade-offs, specifics, judgment? */
+  depth: number
+  /** Could a listener follow them — substance + spoken fluency? */
   communication: number
 }
 
@@ -70,6 +114,15 @@ export interface JobBase {
   rejectionThreshold: number
   /** `null` = inherit `organization.settings.maxInterviewAttempts`. */
   maxAttempts: number | null
+  /**
+   * Soft screening length in minutes. `null` = inherit
+   * `organization.settings.interviewDurationMinutes`.
+   *
+   * Only affects invites sent from now on: each interview freezes its own
+   * value at invite time, so changing this never shortens a screen a
+   * candidate has already been emailed about.
+   */
+  interviewDurationMinutes: number | null
   createdBy: string | null
   updatedBy: string | null
   createdAt: string
@@ -129,23 +182,30 @@ export interface Job extends JobBase {
  */
 export interface JobEligibilityPayload {
   city?: string
+  considerRelocators?: boolean
   minYearsExperience?: number
   requiredSkills?: string[]
+  university?: JobUniversityGate
+  expectedSalary?: { enabled: boolean; maxSalary?: number }
 }
 
 /**
- * The nullable fields below are `T | null`, not just optional, because the
- * update path reads `undefined` as "leave unchanged" (`if (dto.x !== undefined)`).
- * Clearing a value therefore REQUIRES an explicit `null` — omitting it would
- * silently keep the old one. `@IsOptional()` accepts null, and create folds
- * it with `?? null`, so null is correct on both paths.
+ * `maxAttempts` is `number | null`, not just optional, because the update path
+ * reads `undefined` as "leave unchanged" (`if (dto.x !== undefined)`). Clearing
+ * it therefore REQUIRES an explicit `null` — omitting it would silently keep
+ * the old value.
+ *
+ * The three classification fields are required and NOT nullable: they feed the
+ * `JOB CONTEXT` block of the CV pre-screen prompt, so an unset one silently
+ * weakens every fit judgment made against the posting. The backend rejects a
+ * missing one on create and a null one on update.
  */
 export interface CreateJobPayload {
   title: string
   description?: string
-  employmentType?: EmploymentType | null
-  workMode?: WorkMode | null
-  seniorityLevel?: SeniorityLevel | null
+  employmentType: EmploymentType
+  workMode: WorkMode
+  seniorityLevel: SeniorityLevel
   /**
    * REPLACE semantics on PATCH: sending this swaps the WHOLE eligibility
    * block and every omitted sub-field resets to null. Always build it from
@@ -158,6 +218,8 @@ export interface CreateJobPayload {
   rejectionThreshold?: number
   /** `null` = inherit the org default. */
   maxAttempts?: number | null
+  /** Soft screening length in minutes. `null` = inherit the org default. */
+  interviewDurationMinutes?: number | null
 }
 
 /**
@@ -220,6 +282,55 @@ export const SENIORITY_LABELS: Record<SeniorityLevel, string> = {
   lead: "Lead",
   manager: "Manager",
   director: "Director",
+}
+
+/**
+ * The experience band each seniority level implies, inclusive both ends, in
+ * MONTHS; `maxMonths: null` means "and above". Months because the bottom of the
+ * ladder is sub-annual (intern 0–3, junior from 6) — in years those are 0.25
+ * and 0.5, which print badly and invite rounding drift.
+ *
+ * Mirrors `SENIORITY_EXPERIENCE` in the backend's `utils/seniority-experience.ts`
+ * — the numbers there are what the CV pre-screen prompt actually rates against,
+ * so if you change one, change both. This copy exists only to SHOW the admin
+ * what picking a level commits them to; nothing here is sent to the API, and
+ * the band is never stored on the job (it's derived from `seniorityLevel`).
+ *
+ * Not to be confused with `eligibility.minYearsExperience`, which is a hard
+ * auto-reject gate the admin sets by hand.
+ */
+export const SENIORITY_EXPERIENCE: Record<
+  SeniorityLevel,
+  { minMonths: number; maxMonths: number | null }
+> = {
+  intern: { minMonths: 0, maxMonths: 3 },
+  junior: { minMonths: 6, maxMonths: 18 },
+  mid: { minMonths: 24, maxMonths: 36 },
+  senior: { minMonths: 36, maxMonths: 60 },
+  lead: { minMonths: 60, maxMonths: 96 },
+  manager: { minMonths: 108, maxMonths: 144 },
+  director: { minMonths: 144, maxMonths: null },
+}
+
+const MONTHS_PER_YEAR = 12
+
+/** Below this the band reads in months; at or above it, in years. */
+const YEARS_THRESHOLD_MONTHS = 24
+
+/**
+ * `"0–3 mos"` / `"6–18 mos"` / `"3–5 yrs"` / `"12+ yrs"` — the band as it reads
+ * in the dropdown. The unit comes from the TOP of the band so both bounds share
+ * one; "6–18 mos" beats "6 mos–1.5 yrs" in a narrow trigger.
+ */
+export const seniorityExperienceLabel = (level: SeniorityLevel): string => {
+  const { minMonths, maxMonths } = SENIORITY_EXPERIENCE[level]
+  const inMonths = maxMonths !== null && maxMonths < YEARS_THRESHOLD_MONTHS
+  const unit = inMonths ? "mos" : "yrs"
+  const value = (months: number) =>
+    String(Number((inMonths ? months : months / MONTHS_PER_YEAR).toFixed(1)))
+  return maxMonths === null
+    ? `${value(minMonths)}+ ${unit}`
+    : `${value(minMonths)}–${value(maxMonths)} ${unit}`
 }
 
 export const DIFFICULTY_LABELS: Record<DifficultyLevel, string> = {

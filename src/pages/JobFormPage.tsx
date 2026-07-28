@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, Briefcase, Check, Loader2 } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Briefcase,
+  Check,
+  Info,
+  Loader2,
+} from "lucide-react";
 import toast from "react-hot-toast";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,7 +19,19 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ChipInput } from "@/features/jobs/components/ChipInput";
+import {
+  ExtraGatesEditor,
+  emptyExtraGates,
+  validateExtraGates,
+  type ExtraGatesValue,
+} from "@/features/jobs/components/ExtraGatesEditor";
 import { MarkdownEditor } from "@/features/jobs/components/MarkdownEditor";
 import {
   ANY_CITY_VALUE,
@@ -25,6 +44,7 @@ import {
   EMPLOYMENT_TYPE_LABELS,
   SENIORITY_LABELS,
   WORK_MODE_LABELS,
+  seniorityExperienceLabel,
   type CreateJobPayload,
   type EmploymentType,
   type Job,
@@ -35,15 +55,25 @@ import {
 import { useOrganization } from "@/features/organization/useOrganization";
 import { ROUTES, jobDetail } from "@/routes";
 import { errorMessage } from "@/lib/errors";
+import { blurOnWheel, cn } from "@/lib/utils";
 
-/** Sentinel for the "Not specified" option (Radix Select forbids empty values). */
-const NONE = "none";
+/**
+ * The not-yet-chosen state for the classification Selects. Empty string, so
+ * Radix shows the trigger's `placeholder` — there is deliberately no
+ * "Not specified" SelectItem to pick, since all three are required (Radix
+ * forbids `value=""` on an *item*, but the root reads it as "no selection").
+ */
+const UNSET = "";
 
-/** The scoring split presets, as `technical` percentages. */
-const WEIGHT_PRESETS: Array<[number, string]> = [
-  [60, "60/40"],
-  [50, "50/50"],
-  [70, "70/30"],
+/**
+ * Scoring presets as `[correctness, depth, label, hint]`. Communication is
+ * always the remainder, so every preset sums to 100 by construction.
+ */
+const WEIGHT_PRESETS: Array<[number, number, string, string]> = [
+  [40, 20, "Balanced", "The default — right answers, some judgment, clear delivery."],
+  [60, 10, "Recall-first", "Screening for correct knowledge above all."],
+  [30, 40, "Judgment", "Senior roles: trade-offs and lived experience lead."],
+  [20, 10, "Communication", "Client-facing roles: how they explain it matters most."],
 ];
 
 const EMPLOYMENT_TYPES = Object.keys(
@@ -142,29 +172,52 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
   const [titleTouched, setTitleTouched] = useState(false);
   const [description, setDescription] = useState(job?.description ?? "");
 
-  // ── Classification
+  // ── Classification. All three required. A job saved before that rule seeds
+  // `UNSET` and has to be classified before it can be saved again.
   const [employmentType, setEmploymentType] = useState<string>(
-    job?.employmentType ?? NONE,
+    job?.employmentType ?? UNSET,
   );
-  const [workMode, setWorkMode] = useState<string>(job?.workMode ?? NONE);
+  const [workMode, setWorkMode] = useState<string>(job?.workMode ?? UNSET);
   const [seniorityLevel, setSeniorityLevel] = useState<string>(
-    job?.seniorityLevel ?? NONE,
+    job?.seniorityLevel ?? UNSET,
   );
+  const [classificationTouched, setClassificationTouched] = useState(false);
 
-  // ── Scoring. ONE number: communication is always `100 - technical`, so the
-  // backend's "must sum to 100" invariant can't be violated from this form.
-  const [technicalWeight, setTechnicalWeight] = useState(
-    job?.scoringWeights.technical ?? 60,
+  // ── Scoring. TWO numbers, not three: communication is always the remainder
+  // (`100 - correctness - depth`), and `WeightSplitBar` only ever trades
+  // between two adjacent axes. So the backend's "must sum to 100" invariant is
+  // unviolatable from this form — the same property the old single-slider
+  // version had, preserved across the three-axis split.
+  const [correctnessWeight, setCorrectnessWeight] = useState(
+    job?.scoringWeights.correctness ?? 40,
   );
+  const [depthWeight, setDepthWeight] = useState(job?.scoringWeights.depth ?? 20);
+  const communicationWeight = 100 - correctnessWeight - depthWeight;
+
+  const setWeights = (correctness: number, depth: number) => {
+    setCorrectnessWeight(correctness);
+    setDepthWeight(depth);
+  };
   const [rejectionThreshold, setRejectionThreshold] = useState(
     job ? String(job.rejectionThreshold) : "70",
   );
   const [maxAttempts, setMaxAttempts] = useState(
     job?.maxAttempts == null ? "" : String(job.maxAttempts),
   );
+  // Empty = inherit the org default, exactly like maxAttempts above.
+  const [interviewDuration, setInterviewDuration] = useState(
+    job?.interviewDurationMinutes == null
+      ? ""
+      : String(job.interviewDurationMinutes),
+  );
 
   // ── Eligibility & vetting
   const [city, setCity] = useState(job?.eligibility.city ?? "");
+  // Defaults ON for a new job. `?? true` also covers a job saved before this
+  // flag existed, whose stored block has no value for it.
+  const [considerRelocators, setConsiderRelocators] = useState(
+    job?.eligibility.considerRelocators ?? true,
+  );
   const [minYearsExperience, setMinYearsExperience] = useState(
     job?.eligibility.minYearsExperience == null
       ? ""
@@ -173,6 +226,16 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
   const [requiredSkills, setRequiredSkills] = useState<string[]>(
     job?.eligibility.requiredSkills ?? [],
   );
+  const [extraGates, setExtraGates] = useState<ExtraGatesValue>(() => ({
+    ...emptyExtraGates(),
+    universityEnabled: job?.eligibility.university?.enabled ?? false,
+    universityNames: job?.eligibility.university?.names ?? [],
+    salaryEnabled: job?.eligibility.expectedSalary?.enabled ?? false,
+    salaryMax:
+      job?.eligibility.expectedSalary?.maxSalary == null
+        ? ""
+        : String(job.eligibility.expectedSalary.maxSalary),
+  }));
 
   const { data: organization } = useOrganization();
 
@@ -180,6 +243,15 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
   const trimmedTitle = title.trim();
   const titleError =
     titleTouched && trimmedTitle.length === 0 ? "A job title is required." : "";
+
+  // Shown only once the step has been left (or a save attempted), so a fresh
+  // form doesn't open pre-scolded — same rule as the title.
+  const employmentTypeError =
+    classificationTouched && !employmentType ? "Pick an employment type." : "";
+  const workModeError =
+    classificationTouched && !workMode ? "Pick a work mode." : "";
+  const seniorityError =
+    classificationTouched && !seniorityLevel ? "Pick a seniority level." : "";
 
   const parsedRejection = parseOptionalNumber(rejectionThreshold);
   const rejectionError =
@@ -198,6 +270,18 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
       ? "Enter a whole number of 1 or more, or leave it empty."
       : "";
 
+  // [2, 120] mirrors the schema bound on both the job and the org setting, so
+  // a value that would be clamped server-side is refused here instead.
+  const parsedDuration = parseOptionalNumber(interviewDuration);
+  const durationError =
+    interviewDuration.trim() &&
+    (parsedDuration === undefined ||
+      !Number.isInteger(parsedDuration) ||
+      parsedDuration < 2 ||
+      parsedDuration > 120)
+      ? "Enter a whole number of minutes between 2 and 120, or leave it empty."
+      : "";
+
   const parsedMinYears = parseOptionalNumber(minYearsExperience);
   const minYearsError =
     minYearsExperience.trim() &&
@@ -206,55 +290,90 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
       : "";
 
   // Per-step validity — Continue is disabled when the current step has
-  // outstanding errors. Classification has no rules at all. The accept/
-  // reject threshold and vetting-metric checks that used to live here were
-  // dropped when main simplified the eligibility schema.
+  // outstanding errors. Validity only, NOT touched-ness: the errors above gate
+  // when a message is *shown*, this gates whether the step may be left. The
+  // accept/reject threshold and vetting-metric checks that used to live here
+  // were dropped when main simplified the eligibility schema.
+  // Mirrors the server's 422 checks so the wizard blocks the step instead of
+  // bouncing the whole save. The server still re-checks.
+  const extraGateErrors = useMemo(
+    () => validateExtraGates(extraGates),
+    [extraGates],
+  );
+
   const stepValid = useMemo(
     () => [
       trimmedTitle.length > 0,
-      true,
-      !rejectionError && !maxAttemptsError,
-      !minYearsError,
+      Boolean(employmentType && workMode && seniorityLevel),
+      !rejectionError && !maxAttemptsError && !durationError,
+      !minYearsError && extraGateErrors.length === 0,
     ],
-    [trimmedTitle, rejectionError, maxAttemptsError, minYearsError],
+    [
+      trimmedTitle,
+      employmentType,
+      workMode,
+      seniorityLevel,
+      rejectionError,
+      maxAttemptsError,
+      durationError,
+      minYearsError,
+      extraGateErrors,
+    ],
   );
 
-  const hasErrors = stepValid.some((ok) => !ok);
+  /** The earliest step still holding an error, or -1 when all of them pass. */
+  const firstInvalidStep = stepValid.findIndex((ok) => !ok);
 
   // ── payload
   const buildEligibility = (): JobEligibilityPayload => {
     const eligibility: JobEligibilityPayload = {};
     if (city.trim()) eligibility.city = city.trim();
+    // Sent unconditionally, like the two gate blocks below: eligibility is
+    // REPLACE-semantics, so omitting it would reset the server to the default.
+    eligibility.considerRelocators = considerRelocators;
     if (parsedMinYears !== undefined) {
       eligibility.minYearsExperience = parsedMinYears;
     }
     if (requiredSkills.length > 0) {
       eligibility.requiredSkills = requiredSkills;
     }
+    // Always sent, both halves: eligibility is REPLACE-semantics, so omitting
+    // a switched-off gate would leave the previous one enabled on the server.
+    eligibility.university = {
+      enabled: extraGates.universityEnabled,
+      names: extraGates.universityNames,
+    };
+    eligibility.expectedSalary = {
+      enabled: extraGates.salaryEnabled,
+      ...(extraGates.salaryMax.trim()
+        ? { maxSalary: Number(extraGates.salaryMax.trim()) }
+        : {}),
+    };
     return eligibility;
   };
 
   const buildPayload = (): CreateJobPayload => ({
     title: trimmedTitle,
     description: description.trim(),
-    // `null`, not undefined: on PATCH undefined means "leave unchanged", so
-    // undefined could never clear a value back to Not specified.
-    employmentType:
-      employmentType === NONE ? null : (employmentType as EmploymentType),
-    workMode: workMode === NONE ? null : (workMode as WorkMode),
-    seniorityLevel:
-      seniorityLevel === NONE ? null : (seniorityLevel as SeniorityLevel),
+    // Narrowed, not folded: `stepValid[1]` gates every path that reaches the
+    // mutation, so none of these can still be `UNSET` here. There is no null
+    // branch any more — the backend rejects a null classification outright.
+    employmentType: employmentType as EmploymentType,
+    workMode: workMode as WorkMode,
+    seniorityLevel: seniorityLevel as SeniorityLevel,
     // ALWAYS sent, and always complete: eligibility is REPLACE-semantics, so
     // an omitted block leaves the old one intact (clearing the last gate would
     // silently no-op) and an omitted sub-field resets to null.
     eligibility: buildEligibility(),
     scoringWeights: {
-      technical: technicalWeight,
-      communication: 100 - technicalWeight,
+      correctness: correctnessWeight,
+      depth: depthWeight,
+      communication: communicationWeight,
     },
     rejectionThreshold: parsedRejection ?? 70,
     // `null` clears the per-job cap so the org default applies again.
     maxAttempts: parsedMaxAttempts ?? null,
+    interviewDurationMinutes: parsedDuration ?? null,
   });
 
   const mutation = useMutation({
@@ -314,14 +433,25 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
 
   const onContinue = () => {
     if (step === 0) setTitleTouched(true);
+    if (step === 1) setClassificationTouched(true);
     if (!stepValid[step]) return;
     if (!isFinalStep) {
       goToStep(step + 1);
       return;
     }
-    // Final step → submit.
+    // Final step → submit. Reveal every deferred message first: EDIT mode lets
+    // the stepper jump straight here, so whatever is blocking the save may sit
+    // on a step that was never opened.
     setTitleTouched(true);
-    if (hasErrors || busy) return;
+    setClassificationTouched(true);
+    if (busy) return;
+    if (firstInvalidStep !== -1) {
+      // Navigate TO the problem instead of leaving Save inert with no reason
+      // given — a job created before classification was required lands here.
+      goToStep(firstInvalidStep);
+      toast.error("Fill in the highlighted fields before saving.");
+      return;
+    }
     mutation.mutate();
   };
 
@@ -461,17 +591,23 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
             <ClassificationStep
               employmentType={employmentType}
               setEmploymentType={setEmploymentType}
+              employmentTypeError={employmentTypeError}
               workMode={workMode}
               setWorkMode={setWorkMode}
+              workModeError={workModeError}
               seniorityLevel={seniorityLevel}
               setSeniorityLevel={setSeniorityLevel}
+              seniorityError={seniorityError}
             />
           ) : null}
 
           {step === 2 ? (
             <ScoringStep
-              technicalWeight={technicalWeight}
-              setTechnicalWeight={setTechnicalWeight}
+              correctnessWeight={correctnessWeight}
+              depthWeight={depthWeight}
+              communicationWeight={communicationWeight}
+              setWeights={setWeights}
+              applyPreset={setWeights}
               rejectionThreshold={rejectionThreshold}
               setRejectionThreshold={setRejectionThreshold}
               rejectionError={rejectionError}
@@ -479,6 +615,10 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
               setMaxAttempts={setMaxAttempts}
               maxAttemptsError={maxAttemptsError}
               defaultAttempts={organization?.settings.maxInterviewAttempts}
+              interviewDuration={interviewDuration}
+              setInterviewDuration={setInterviewDuration}
+              durationError={durationError}
+              defaultDuration={organization?.settings.interviewDurationMinutes}
             />
           ) : null}
 
@@ -486,11 +626,16 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
             <EligibilityStep
               city={city}
               setCity={setCity}
+              workMode={workMode}
+              considerRelocators={considerRelocators}
+              setConsiderRelocators={setConsiderRelocators}
               minYearsExperience={minYearsExperience}
               setMinYearsExperience={setMinYearsExperience}
               minYearsError={minYearsError}
               requiredSkills={requiredSkills}
               setRequiredSkills={setRequiredSkills}
+              extraGates={extraGates}
+              setExtraGates={setExtraGates}
             />
           ) : null}
         </div>
@@ -521,7 +666,10 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
             <Button
               type="button"
               size="sm"
-              disabled={hasErrors || busy}
+              // Only `busy` — an outstanding error is handled by `onContinue`,
+              // which bounces to the offending step and says so. A disabled
+              // Save on a step whose own fields all look fine reads as broken.
+              disabled={busy}
               onClick={onContinue}
             >
               {busy ? (
@@ -676,17 +824,23 @@ function BasicsStep({
 function ClassificationStep({
   employmentType,
   setEmploymentType,
+  employmentTypeError,
   workMode,
   setWorkMode,
+  workModeError,
   seniorityLevel,
   setSeniorityLevel,
+  seniorityError,
 }: {
   employmentType: string;
   setEmploymentType: (v: string) => void;
+  employmentTypeError: string;
   workMode: string;
   setWorkMode: (v: string) => void;
+  workModeError: string;
   seniorityLevel: string;
   setSeniorityLevel: (v: string) => void;
+  seniorityError: string;
 }) {
   const triggerCls =
     "h-11 rounded-lg border-[var(--field-border)] bg-surface px-3.5 text-[14px]";
@@ -694,7 +848,7 @@ function ClassificationStep({
     <div>
       <StepHead
         title="Classification"
-        subtitle="Optional labels for the posting. Leave any of them unspecified."
+        subtitle="All three are required. They label the posting and give the CV pre-screen the role's context."
       />
       <div className="grid gap-4 sm:grid-cols-3">
         <div>
@@ -702,11 +856,14 @@ function ClassificationStep({
             Employment type
           </label>
           <Select value={employmentType} onValueChange={setEmploymentType}>
-            <SelectTrigger id="job-employment" className={triggerCls}>
-              <SelectValue />
+            <SelectTrigger
+              id="job-employment"
+              aria-invalid={Boolean(employmentTypeError)}
+              className={triggerCls}
+            >
+              <SelectValue placeholder="Select…" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={NONE}>Not specified</SelectItem>
               {EMPLOYMENT_TYPES.map((t) => (
                 <SelectItem key={t} value={t}>
                   {EMPLOYMENT_TYPE_LABELS[t]}
@@ -714,17 +871,23 @@ function ClassificationStep({
               ))}
             </SelectContent>
           </Select>
+          {employmentTypeError ? (
+            <p className={ERROR_CLASS}>{employmentTypeError}</p>
+          ) : null}
         </div>
         <div>
           <label htmlFor="job-mode" className={LABEL_CLASS}>
             Work mode
           </label>
           <Select value={workMode} onValueChange={setWorkMode}>
-            <SelectTrigger id="job-mode" className={triggerCls}>
-              <SelectValue />
+            <SelectTrigger
+              id="job-mode"
+              aria-invalid={Boolean(workModeError)}
+              className={triggerCls}
+            >
+              <SelectValue placeholder="Select…" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={NONE}>Not specified</SelectItem>
               {WORK_MODES.map((m) => (
                 <SelectItem key={m} value={m}>
                   {WORK_MODE_LABELS[m]}
@@ -732,24 +895,74 @@ function ClassificationStep({
               ))}
             </SelectContent>
           </Select>
+          {workModeError ? <p className={ERROR_CLASS}>{workModeError}</p> : null}
         </div>
         <div>
-          <label htmlFor="job-seniority" className={LABEL_CLASS}>
-            Seniority
-          </label>
+          <div className="mb-1.5 flex items-center gap-1.5">
+            <label htmlFor="job-seniority" className={cn(LABEL_CLASS, "mb-0")}>
+              Seniority
+            </label>
+            {/* Provider is local, matching QuestionBankPage — there is no global
+                one, and this is the page's only tooltip. */}
+            <TooltipProvider delayDuration={200}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  {/* `type="button"` is load-bearing: this sits inside the
+                      wizard's <form>, whose onSubmit advances the step, so a
+                      default-type button would move the user on when clicked. */}
+                  <button
+                    type="button"
+                    aria-label="How the experience band is used"
+                    className="inline-flex h-4 w-4 items-center justify-center rounded-full text-ink-subtle transition-colors hover:text-ink focus-visible:text-ink focus-visible:outline-none"
+                  >
+                    <Info className="h-3.5 w-3.5" strokeWidth={2} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  The band next to each level is sent to the AI too. When it
+                  rates a candidate, their experience is scored against this
+                  range, so the level you pick changes the scoring, not just
+                  the label on the posting.
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
           <Select value={seniorityLevel} onValueChange={setSeniorityLevel}>
-            <SelectTrigger id="job-seniority" className={triggerCls}>
-              <SelectValue />
+            <SelectTrigger
+              id="job-seniority"
+              aria-invalid={Boolean(seniorityError)}
+              className={triggerCls}
+            >
+              <SelectValue placeholder="Select…" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={NONE}>Not specified</SelectItem>
               {SENIORITY_LEVELS.map((s) => (
+                // The band rides along inside `ItemText`, so the closed trigger
+                // shows it too — the number is the part that decides how the
+                // pre-screen rates a CV, so it shouldn't only be visible while
+                // the list happens to be open.
                 <SelectItem key={s} value={s}>
                   {SENIORITY_LABELS[s]}
+                  <span className="ml-2 font-normal text-ink-muted">
+                    {seniorityExperienceLabel(s)}
+                  </span>
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+          {seniorityError ? (
+            <p className={ERROR_CLASS}>{seniorityError}</p>
+          ) : (
+            // Mutually exclusive with the error: one shows only when unset, the
+            // other only when set.
+            <p className={HELP_CLASS}>
+              {seniorityLevel
+                ? `Expecting ${seniorityExperienceLabel(
+                    seniorityLevel as SeniorityLevel,
+                  )} of relevant experience.`
+                : "Sets the experience band the CV pre-screen rates against."}
+            </p>
+          )}
         </div>
       </div>
     </div>
@@ -758,9 +971,351 @@ function ClassificationStep({
 
 /* ───────────────────────  Step 2 · Scoring  ───────────────────────── */
 
+/**
+ * The three axes share ONE hue at three intensities rather than three
+ * different colours. They are parts of a single score, not unrelated
+ * categories, and a monochrome ramp says that. It is also the only
+ * theme-safe option here: `--primary` is redefined for dark mode, whereas the
+ * `--stage-*` palette is not, so saturated hues would misfire on dark.
+ */
+const AXIS_FILL = [
+  "var(--primary)",
+  "color-mix(in oklab, var(--primary) 62%, var(--surface))",
+  "color-mix(in oklab, var(--primary) 28%, var(--surface))",
+] as const;
+
+/**
+ * The score split as ONE bar with two draggable dividers.
+ *
+ * Three numbers that must total 100 are a COMPOSITION, and the previous
+ * two-independent-sliders-plus-a-leftover layout hid that: you could not see
+ * the split at a glance, communication looked like a different kind of thing
+ * than its two peers, and dragging one slider silently shoved another down
+ * with no visual warning.
+ *
+ * Here the constraint is STRUCTURAL — a divider only ever trades between its
+ * two neighbours, so the total is 100 by construction and an invalid payload
+ * is unrepresentable. Handle 1 sits at `correctness`, handle 2 at
+ * `correctness + depth`; communication is whatever is left.
+ */
+function WeightSplitBar({
+  correctness,
+  depth,
+  onChange,
+}: {
+  correctness: number;
+  depth: number;
+  onChange: (correctness: number, depth: number) => void;
+}) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  /**
+   * Which divider the pointer is driving. `"stacked"` is the case where BOTH
+   * dividers sit on the same point (depth === 0): the grip under the finger
+   * stands for two of them, and which one the user means is only knowable once
+   * they move — see {@link onPointerMove}.
+   */
+  const [dragging, setDragging] = useState<1 | 2 | "stacked" | null>(null);
+
+  const communication = 100 - correctness - depth;
+  const positions = [correctness, correctness + depth];
+
+  /** Move one divider, trading only against its immediate neighbour. */
+  const moveHandle = (which: 1 | 2, raw: number) => {
+    const v = Math.min(100, Math.max(0, Math.round(raw)));
+    if (which === 1) {
+      // Handle 2 holds still, so communication is untouched.
+      const upper = correctness + depth;
+      const next = Math.min(v, upper);
+      onChange(next, upper - next);
+    } else {
+      // Handle 1 holds still, so correctness is untouched.
+      const next = Math.max(v, correctness);
+      onChange(correctness, next - correctness);
+    }
+  };
+
+  const pctFromClientX = (clientX: number): number | null => {
+    const el = trackRef.current;
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0) return null;
+    return ((clientX - rect.left) / rect.width) * 100;
+  };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!dragging) return;
+    const pct = pctFromClientX(e.clientX);
+    if (pct === null) return;
+
+    /*
+     * Resolve a stacked grab by DIRECTION.
+     *
+     * With depth at 0 both dividers render at the same point, one exactly on
+     * top of the other, and each can only travel one way: divider 1 leftwards
+     * (shrinking Correctness) and divider 2 rightwards (growing Depth). Before
+     * this, whichever happened to paint on top swallowed the gesture — so at
+     * Correctness 100 the grip under the finger was the one pinned against the
+     * edge, and the one that could actually move was buried beneath it and
+     * unreachable. The slider read as broken.
+     *
+     * The first movement says which divider was meant, which is also how it
+     * behaves once they separate: pull left and Correctness gives way, push
+     * right and Depth opens up.
+     */
+    if (dragging === "stacked") {
+      if (pct === positions[0]) return; // no direction expressed yet
+      const which = pct < positions[0] ? 1 : 2;
+      setDragging(which);
+      moveHandle(which, pct);
+      return;
+    }
+    moveHandle(dragging, pct);
+  };
+
+  const startDrag = (which: 1 | 2) => (e: React.PointerEvent) => {
+    e.preventDefault();
+    // Without this the track's own handler also fires and snaps the divider to
+    // the click point — a visible jolt when you grab a handle slightly off-centre.
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDragging(positions[0] === positions[1] ? "stacked" : which);
+  };
+
+  const endDrag = () => setDragging(null);
+
+  /** Click anywhere on the track to send the NEAREST divider there. */
+  const onTrackPointerDown = (e: React.PointerEvent) => {
+    const pct = pctFromClientX(e.clientX);
+    if (pct === null) return;
+    const [p0, p1] = positions;
+    /*
+     * Nearest wins — EXCEPT when the two dividers sit on the same point
+     * (depth === 0), where "nearest" is a tie and the old `<=` resolved it to
+     * divider 1 every time. Divider 1 is clamped at `correctness + depth`,
+     * which IS that point, so every click on the far side of it asked the one
+     * divider that cannot go there to go there: a guaranteed no-op. With
+     * Correctness at 60 and Depth at 0, the whole right-hand 40% of the track
+     * silently ignored clicks; at 0/0/100 the entire track did.
+     *
+     * Stacked, the tie is resolved by DIRECTION instead — the same rule the
+     * grip itself uses (see `onPointerMove`), so track and grip agree: left of
+     * the point moves divider 1, right of it moves divider 2. Each can only
+     * travel that way, so the click always lands on the one that can serve it.
+     */
+    const nearest =
+      p0 === p1
+        ? pct > p0
+          ? 2
+          : 1
+        : Math.abs(pct - p0) <= Math.abs(pct - p1)
+          ? 1
+          : 2;
+    moveHandle(nearest, pct);
+  };
+
+  const onHandleKeyDown = (which: 1 | 2) => (e: React.KeyboardEvent) => {
+    const current = positions[which - 1];
+    const step = e.shiftKey ? 5 : 1;
+    let next: number | null = null;
+    if (e.key === "ArrowLeft" || e.key === "ArrowDown") next = current - step;
+    if (e.key === "ArrowRight" || e.key === "ArrowUp") next = current + step;
+    if (e.key === "Home") next = 0;
+    if (e.key === "End") next = 100;
+    if (next === null) return;
+    e.preventDefault();
+    moveHandle(which, next);
+  };
+
+  const segments = [
+    { label: "Correctness", value: correctness },
+    { label: "Depth", value: depth },
+    { label: "Communication", value: communication },
+  ];
+
+  return (
+    <div
+      className="select-none"
+      onPointerMove={onPointerMove}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+    >
+      <div
+        ref={trackRef}
+        onPointerDown={onTrackPointerDown}
+        // `touch-none`: without it a touch device reserves the gesture for
+        // page scrolling, then fires pointercancel — which `endDrag` handles
+        // cleanly, so the drag just silently died and the page scrolled
+        // instead. `preventDefault()` in `startDrag` does NOT cover this;
+        // touch-action is the only thing that tells the browser up front. Every
+        // other draggable surface in the app already sets it (HlsPlayer,
+        // video-player, CandidateKanban, JobQuestionsManager, OverviewPage).
+        // NOT `overflow-hidden`: clipping is scoped to the fills below instead.
+        // The grips are positioned with `-translate-x-1/2`, so a divider parked
+        // at 0% or 100% has half its width outside the track — and a clip here
+        // sliced that half away, leaving ~1.5px of a 3px grip. Dragging
+        // Communication to zero made the handle look like it had vanished, with
+        // nothing left to grab it by. (It also swallowed the keyboard focus
+        // ring, which is exactly the height of the track.)
+        className="relative h-11 w-full cursor-pointer touch-none rounded-lg border border-line-2 bg-surface"
+      >
+        {/* The fills, and ONLY the fills, are clipped to the rounded shape. */}
+        <div className="absolute inset-0 overflow-hidden rounded-lg">
+          {segments.map((seg, i) => (
+            <div
+              key={seg.label}
+              // Animate preset jumps, but NEVER while dragging — a transition
+              // there makes the fill lag the cursor and feel soggy.
+              className={`absolute inset-y-0 ${
+                dragging ? "" : "transition-[left,width] duration-150 ease-out"
+              }`}
+              style={{
+                left: `${i === 0 ? 0 : positions[i - 1]}%`,
+                width: `${seg.value}%`,
+                background: AXIS_FILL[i],
+              }}
+            />
+          ))}
+        </div>
+
+        {/*
+         * Percentages live in ONE layer above every segment, not inside them.
+         *
+         * Inside, a segment narrower than its own text pushed the number onto
+         * its neighbour — where the next segment's background painted straight
+         * over it. The old guard (`value >= 9`) hid the number to avoid that,
+         * but it measured PERCENT rather than pixels: at 6% of a 1600px bar
+         * there is ~96px of room and the number vanished anyway, which reads as
+         * a bug rather than as tidiness.
+         *
+         * On its own layer a narrow label simply overhangs its neighbour and
+         * stays legible (the shadow carries it over any fill), so every value
+         * can be shown at every width. Only an EMPTY segment is skipped — there
+         * is no band to label, and the number would sit on the divider claiming
+         * width that isn't there. The legend still spells that case out in full.
+         */}
+        <div aria-hidden className="pointer-events-none absolute inset-0">
+          {segments.map((seg, i) => {
+            if (seg.value === 0) return null;
+            const start = i === 0 ? 0 : positions[i - 1];
+            return (
+              <span
+                key={seg.label}
+                className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap text-[12px] font-semibold tabular-nums ${
+                  dragging ? "" : "transition-[left] duration-150 ease-out"
+                }`}
+                style={{
+                  left: `${start + seg.value / 2}%`,
+                  // Segment 3 is only 28% primary over the surface, so it stays
+                  // light in both themes and needs ink, not primary-foreground.
+                  color: i === 2 ? "var(--ink)" : "var(--primary-foreground)",
+                  // Keeps a label readable on the frames where it overhangs a
+                  // neighbouring fill of the opposite lightness.
+                  textShadow:
+                    i === 2
+                      ? "0 1px 2px var(--surface)"
+                      : "0 1px 2px rgb(0 0 0 / 0.45)",
+                }}
+              >
+                {seg.value}%
+              </span>
+            );
+          })}
+        </div>
+
+        {([1, 2] as const).map((which) => (
+          <div
+            key={which}
+            role="slider"
+            tabIndex={0}
+            aria-label={
+              which === 1
+                ? "Correctness / Depth divider"
+                : "Depth / Communication divider"
+            }
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={positions[which - 1]}
+            aria-valuetext={
+              which === 1
+                ? `Correctness ${correctness}%, Depth ${depth}%`
+                : `Depth ${depth}%, Communication ${communication}%`
+            }
+            onPointerDown={startDrag(which)}
+            onKeyDown={onHandleKeyDown(which)}
+            // w-5 is a deliberate ~20px hit target on a 3px visual: the grip
+            // has to be grabbable without pixel-hunting, especially on a
+            // trackpad. The `group` drives the hover affordance below.
+            // `touch-none` for the same reason as the track — see there.
+            className={`group absolute inset-y-0 z-10 flex w-5 -translate-x-1/2 cursor-col-resize touch-none items-center justify-center rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] ${
+              // Only the divider NOT being driven opts out of hit-testing. A
+              // "stacked" grab has not resolved to one yet, so neither may —
+              // the grip still holds the pointer capture that will resolve it.
+              dragging !== null && dragging !== "stacked" && dragging !== which
+                ? "pointer-events-none"
+                : ""
+            }`}
+            style={{ left: `${positions[which - 1]}%` }}
+          >
+            <span
+              // Ringed rather than bare: the second divider sits against the
+              // palest segment, where an unringed grip nearly disappears.
+              className={`w-[3px] rounded-full bg-[var(--surface)] ring-1 ring-[var(--border)] transition-all group-hover:h-7 group-hover:w-[4px] ${
+                // A stacked grab shows both grips grabbed, because they are in
+                // the same place and the user is holding both until they move.
+                dragging === which || dragging === "stacked"
+                  ? "h-7 w-[4px]"
+                  : "h-6"
+              }`}
+            />
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-3 grid gap-3 sm:grid-cols-3">
+        {[
+          {
+            label: "Correctness",
+            value: correctness,
+            hint: "Did they answer the question asked and land the expected point?",
+          },
+          {
+            label: "Depth",
+            value: depth,
+            hint: "Have they lived it — trade-offs, real-world specifics, judgment?",
+          },
+          {
+            label: "Communication",
+            value: communication,
+            hint: "Structure, clarity, concision and spoken fluency.",
+          },
+        ].map((axis, i) => (
+          <div key={axis.label} className="flex gap-2">
+            <span
+              aria-hidden
+              className="mt-[5px] h-2.5 w-2.5 shrink-0 rounded-full"
+              style={{ background: AXIS_FILL[i] }}
+            />
+            <div className="flex flex-col">
+              <span className="text-[12.5px] font-semibold text-ink tabular-nums">
+                {axis.label} {axis.value}%
+              </span>
+              <span className="text-[11.5px] leading-snug text-ink-2">
+                {axis.hint}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ScoringStep({
-  technicalWeight,
-  setTechnicalWeight,
+  correctnessWeight,
+  depthWeight,
+  communicationWeight,
+  setWeights,
+  applyPreset,
   rejectionThreshold,
   setRejectionThreshold,
   rejectionError,
@@ -768,9 +1323,16 @@ function ScoringStep({
   setMaxAttempts,
   maxAttemptsError,
   defaultAttempts,
+  interviewDuration,
+  setInterviewDuration,
+  durationError,
+  defaultDuration,
 }: {
-  technicalWeight: number;
-  setTechnicalWeight: (n: number) => void;
+  correctnessWeight: number;
+  depthWeight: number;
+  communicationWeight: number;
+  setWeights: (correctness: number, depth: number) => void;
+  applyPreset: (correctness: number, depth: number) => void;
   rejectionThreshold: string;
   setRejectionThreshold: (v: string) => void;
   rejectionError: string;
@@ -778,27 +1340,43 @@ function ScoringStep({
   setMaxAttempts: (v: string) => void;
   maxAttemptsError: string;
   defaultAttempts: number | undefined;
+  interviewDuration: string;
+  setInterviewDuration: (v: string) => void;
+  durationError: string;
+  defaultDuration: number | undefined;
 }) {
   return (
     <div>
       <StepHead
         title="Scoring"
-        subtitle="How the interview's two axes fold into one overall score, and where the shortlist line sits."
+        subtitle="How the interview's three axes fold into one overall score, and where the shortlist line sits."
       />
       <div className="flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <span className="text-[13px] font-semibold text-ink">
             Score split
           </span>
-          <div className="flex items-center gap-1.5">
-            {WEIGHT_PRESETS.map(([pct, label]) => {
-              const active = technicalWeight === pct;
+          <div className="flex flex-wrap items-center gap-1.5">
+            {WEIGHT_PRESETS.map(([correctness, depth, label, hint]) => {
+              const active =
+                correctnessWeight === correctness && depthWeight === depth;
               return (
                 <button
-                  key={pct}
+                  key={label}
                   type="button"
-                  onClick={() => setTechnicalWeight(pct)}
-                  className={`rounded-md border px-2.5 py-1 text-[12px] font-semibold transition-colors ${
+                  title={hint}
+                  // Exactly one preset is applied at a time, so these behave as
+                  // a radio group. `aria-pressed` is what says so — without it
+                  // "which split is active" is carried by colour alone, and a
+                  // screen reader hears four identical buttons.
+                  aria-pressed={active}
+                  onClick={() => applyPreset(correctness, depth)}
+                  // The UA's default ring survives a mouse click and then sits
+                  // on a preset the user has since dragged away from, which
+                  // reads as "this preset is selected" when it isn't. Pinning
+                  // the ring to focus-VISIBLE keeps it for keyboard users only,
+                  // so the purple active fill is the one selection signal.
+                  className={`rounded-md border px-2.5 py-1 text-[12px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--ring)] ${
                     active
                       ? "border-primary bg-accent text-primary"
                       : "border-line-2 bg-surface text-ink-2 hover:bg-hover"
@@ -810,21 +1388,34 @@ function ScoringStep({
             })}
           </div>
         </div>
-        <input
-          id="job-weights"
-          type="range"
-          min={1}
-          max={100}
-          step={1}
-          value={technicalWeight}
-          onChange={(e) => setTechnicalWeight(Number(e.target.value))}
-          className="w-full cursor-pointer"
-          style={{ accentColor: "var(--primary)" }}
+
+        <WeightSplitBar
+          correctness={correctnessWeight}
+          depth={depthWeight}
+          onChange={setWeights}
         />
-        <div className="flex items-center justify-between text-[12.5px] font-semibold text-ink-2">
-          <span>Technical {technicalWeight}%</span>
-          <span>Communication {100 - technicalWeight}%</span>
-        </div>
+
+        {communicationWeight === 0 && (
+          <p className="rounded-md border border-line-2 bg-hover px-3 py-2 text-[11.5px] leading-relaxed text-ink-2">
+            <strong className="font-semibold text-ink">
+              Communication is weighted 0%.
+            </strong>{" "}
+            Spoken clarity won&apos;t affect the score — but answers are still
+            graded from a speech-to-text transcript, so a candidate who is hard
+            to understand will produce a poorer transcript and a less reliable
+            correctness score. It is still shown to reviewers, just not counted.
+          </p>
+        )}
+        {correctnessWeight === 0 && (
+          <p className="rounded-md border border-line-2 bg-hover px-3 py-2 text-[11.5px] leading-relaxed text-ink-2">
+            <strong className="font-semibold text-ink">
+              Correctness is weighted 0%.
+            </strong>{" "}
+            A confidently wrong answer can still score well on depth and
+            delivery. Only use this for rounds where being right isn&apos;t what
+            you&apos;re screening for.
+          </p>
+        )}
 
         <div className="mt-2 grid gap-4 sm:grid-cols-2">
           <div>
@@ -838,6 +1429,7 @@ function ScoringStep({
               max={100}
               value={rejectionThreshold}
               aria-invalid={Boolean(rejectionError)}
+              onWheel={blurOnWheel}
               onChange={(e) => setRejectionThreshold(e.target.value)}
               className={FIELD_CLASS}
             />
@@ -845,7 +1437,7 @@ function ScoringStep({
               <p className={ERROR_CLASS}>{rejectionError}</p>
             ) : (
               <p className={HELP_CLASS}>
-                At or above this (0–100) shortlists the candidate; below it
+                At or above this (0 to 100) shortlists the candidate; below it
                 rejects them.
               </p>
             )}
@@ -860,6 +1452,7 @@ function ScoringStep({
               min={1}
               value={maxAttempts}
               aria-invalid={Boolean(maxAttemptsError)}
+              onWheel={blurOnWheel}
               onChange={(e) => setMaxAttempts(e.target.value)}
               placeholder={defaultAttempts ? String(defaultAttempts) : ""}
               className={FIELD_CLASS}
@@ -870,6 +1463,34 @@ function ScoringStep({
               <p className={HELP_CLASS}>
                 Leave empty to inherit your org default
                 {defaultAttempts ? ` (${defaultAttempts})` : ""}.
+              </p>
+            )}
+          </div>
+          <div>
+            <label htmlFor="job-duration" className={LABEL_CLASS}>
+              Interview length (minutes)
+            </label>
+            <input
+              id="job-duration"
+              type="number"
+              min={2}
+              max={120}
+              value={interviewDuration}
+              aria-invalid={Boolean(durationError)}
+              onWheel={blurOnWheel}
+              onChange={(e) => setInterviewDuration(e.target.value)}
+              placeholder={defaultDuration ? String(defaultDuration) : ""}
+              className={FIELD_CLASS}
+            />
+            {durationError ? (
+              <p className={ERROR_CLASS}>{durationError}</p>
+            ) : (
+              <p className={HELP_CLASS}>
+                How long candidates get, counted down on their screen. Set it to
+                suit this job&apos;s question list. Leave empty to inherit your
+                org default
+                {defaultDuration ? ` (${defaultDuration})` : ""}. Changing it
+                only affects invites sent from now on.
               </p>
             )}
           </div>
@@ -884,19 +1505,29 @@ function ScoringStep({
 function EligibilityStep({
   city,
   setCity,
+  workMode,
+  considerRelocators,
+  setConsiderRelocators,
   minYearsExperience,
   setMinYearsExperience,
   minYearsError,
   requiredSkills,
   setRequiredSkills,
+  extraGates,
+  setExtraGates,
 }: {
   city: string;
   setCity: (v: string) => void;
+  workMode: string;
+  considerRelocators: boolean;
+  setConsiderRelocators: (v: boolean) => void;
   minYearsExperience: string;
   setMinYearsExperience: (v: string) => void;
   minYearsError: string;
   requiredSkills: string[];
   setRequiredSkills: (v: string[]) => void;
+  extraGates: ExtraGatesValue;
+  setExtraGates: (v: ExtraGatesValue) => void;
 }) {
   // City is picked from a fixed list (shared with /apply so a job's required
   // city and an applicant's stored city are drawn from one vocabulary), with
@@ -936,6 +1567,18 @@ function EligibilityStep({
   const cityTriggerCls =
     "h-11 rounded-lg border-[var(--field-border)] bg-surface px-3.5 text-[14px]";
 
+  /*
+   * A remote role has no office to come to, so where a candidate lives cannot
+   * decide whether they can do the job. The whole city control is replaced by a
+   * note rather than left visible-but-ignored, because a filter that appears to
+   * work and silently does nothing is worse than no filter.
+   *
+   * The stored value is deliberately NOT cleared here: a job flipped to remote
+   * and back keeps what HR configured. The server independently refuses to run
+   * the gate for a remote job (`cityGateApplies`), so nothing rests on this UI.
+   */
+  const isRemote = workMode === "remote";
+
   return (
     <div>
       <StepHead
@@ -948,39 +1591,76 @@ function EligibilityStep({
             <label htmlFor="job-city" className={LABEL_CLASS}>
               City
             </label>
-            <Select value={citySelectValue} onValueChange={handleCityChange}>
-              <SelectTrigger id="job-city" className={cityTriggerCls}>
-                <SelectValue placeholder="Any city" />
-              </SelectTrigger>
-              <SelectContent className="max-h-72">
-                <SelectItem value={ANY_CITY_VALUE}>
-                  Any city (no requirement)
-                </SelectItem>
-                {PAKISTAN_CITIES.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {c}
-                  </SelectItem>
-                ))}
-                <SelectItem value={OTHER_CITY_VALUE}>
-                  Other (not listed)
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            {isOther ? (
-              <input
-                ref={otherCityRef}
-                type="text"
-                value={city}
-                maxLength={120}
-                onChange={(e) => setCity(e.target.value)}
-                placeholder="Enter the required city"
-                aria-label="Enter the required city"
-                className={`${FIELD_CLASS} mt-2`}
-              />
-            ) : null}
-            <p className={HELP_CLASS}>
-              A hard gate, pick “Any city” for no city requirement.
-            </p>
+            {isRemote ? (
+              <p className="rounded-lg border border-dashed border-[var(--field-border)] px-3.5 py-3 text-[13px] text-ink-muted">
+                Not used for remote roles. Nobody is filtered on where they
+                live.
+              </p>
+            ) : (
+              <>
+                <Select value={citySelectValue} onValueChange={handleCityChange}>
+                  <SelectTrigger id="job-city" className={cityTriggerCls}>
+                    <SelectValue placeholder="Any city" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72">
+                    <SelectItem value={ANY_CITY_VALUE}>
+                      Any city (no requirement)
+                    </SelectItem>
+                    {PAKISTAN_CITIES.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value={OTHER_CITY_VALUE}>
+                      Other (not listed)
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                {isOther ? (
+                  <input
+                    ref={otherCityRef}
+                    type="text"
+                    value={city}
+                    maxLength={120}
+                    onChange={(e) => setCity(e.target.value)}
+                    placeholder="Enter the required city"
+                    aria-label="Enter the required city"
+                    className={`${FIELD_CLASS} mt-2`}
+                  />
+                ) : null}
+                <p className={HELP_CLASS}>
+                  A hard gate, pick “Any city” for no city requirement.
+                </p>
+                {/* Only meaningful once there IS a city to be in the wrong one
+                    of. Hidden rather than disabled on "Any city", because a
+                    live control that governs a gate nobody set is noise. */}
+                {city.trim() ? (
+                  <div className="mt-3">
+                    <label
+                      htmlFor="job-consider-relocators"
+                      className="flex cursor-pointer items-center gap-2 text-[13px] font-semibold text-ink"
+                    >
+                      <input
+                        id="job-consider-relocators"
+                        type="checkbox"
+                        checked={considerRelocators}
+                        onChange={(e) =>
+                          setConsiderRelocators(e.target.checked)
+                        }
+                        className="h-3.5 w-3.5 rounded border-[var(--field-border)] accent-[var(--primary)]"
+                      />
+                      Also consider candidates willing to relocate
+                    </label>
+                    <p className={HELP_CLASS}>
+                      Someone in another city who says they would move goes to
+                      your review queue instead of being rejected. They are
+                      never auto-invited. Turn this off if the role needs
+                      someone already living there.
+                    </p>
+                  </div>
+                ) : null}
+              </>
+            )}
           </div>
           <div>
             <label htmlFor="job-min-years" className={LABEL_CLASS}>
@@ -992,6 +1672,7 @@ function EligibilityStep({
               min={0}
               value={minYearsExperience}
               aria-invalid={Boolean(minYearsError)}
+              onWheel={blurOnWheel}
               onChange={(e) => setMinYearsExperience(e.target.value)}
               placeholder="No minimum"
               className={FIELD_CLASS}
@@ -1017,11 +1698,21 @@ function EligibilityStep({
             placeholder="Type a skill and press Enter"
           />
           <p className={HELP_CLASS}>
-            A hard gate: the AI checks the CV for every skill listed — any
+            A hard gate: the AI checks the CV for every skill listed. Any
             spelling counts (Node = NodeJS = Node.js). A skill it finds no
             evidence of rejects the candidate; an unsure call goes to review
             instead.
           </p>
+        </div>
+
+        <div className="border-t border-[var(--field-border)] pt-4">
+          <label className={LABEL_CLASS}>Extra checks</label>
+          <p className="mb-3 text-[12px] text-ink-muted">
+            Two optional checks, off unless you switch them on. Each says where
+            its answer comes from, so there is nothing to configure beyond the
+            values themselves.
+          </p>
+          <ExtraGatesEditor value={extraGates} onChange={setExtraGates} />
         </div>
       </div>
     </div>

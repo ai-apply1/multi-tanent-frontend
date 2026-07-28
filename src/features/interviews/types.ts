@@ -148,16 +148,30 @@ export interface InterviewIntegrity {
 /**
  * One question's scoring detail from the LLM judge — the authoritative
  * per-answer breakdown. `questions[].score` on the detail is only the headline
- * blend (`(technical + communication) / 2`), so the drawer joins this in by
- * `questionId` to show the components.
+ * blend (the job's own correctness/depth/communication fold applied to this one
+ * answer), so the drawer joins this in by `questionId` to show the components.
  */
 export interface ScoredAnswer {
   questionId: string
   /** The wording that was actually asked (this candidate's variant). */
   text: string
   transcript: string
-  /** Per-answer technical/substance correctness, 0–10. */
-  technical: number
+  /**
+   * Did they answer the question asked and land the expected point, 0–10.
+   * Accuracy only — accurate-but-shallow still scores high here, and a
+   * fluent, confidently-wrong answer scores low. Never difficulty-adjusted.
+   */
+  correctness: number
+  /**
+   * Have they lived it — trade-offs, specifics, judgment, 0–10. This is the
+   * DIFFICULTY-NORMALISED value the overall was computed from.
+   */
+  depth: number
+  /**
+   * The judge's raw depth before the difficulty normalisation. Equal to
+   * `depth` while the band ceilings sit at their 1.0 default.
+   */
+  depthRaw?: number
   /** Per-answer SUBSTANCE communication: mean of structure/clarity/concision. */
   communication: number
   feedback: string
@@ -192,8 +206,9 @@ export interface QualitativeEval {
 
 /** The job's fold weights, snapshotted onto the scores at scoring time. */
 export interface ScoringWeights {
-  /** 0–100; sums to 100 with `communication` (backend-validated). */
-  technical: number
+  /** 0–100; the three sum to 100 (backend-validated). */
+  correctness: number
+  depth: number
   communication: number
 }
 
@@ -207,10 +222,17 @@ export interface ScoringWeights {
  * — never recompute client-side, because the weights are per-job.
  */
 export interface InterviewScores {
-  /** Weighted blend: (W.technical·technical + W.communication·communication)/100. */
+  /**
+   * Weighted blend:
+   * `(W.correctness·correctness + W.depth·depth + W.communication·communication)/100`.
+   */
   overall: number
-  /** Weighted per-question technical mean (skipped answers score 0). */
-  technical: number
+  /** Weighted per-question correctness mean (skipped answers score 0). */
+  correctness: number
+  /** Weighted per-question DEPTH mean, difficulty-normalised per question. */
+  depth: number
+  /** Weighted per-question RAW depth mean (pre-normalisation) — audit only. */
+  depthRaw?: number
   /** Substance mean with the pooled-fluency fold applied. */
   communication: number
   recommendation: Recommendation

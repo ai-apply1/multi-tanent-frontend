@@ -68,6 +68,7 @@ import {
   invalidateCandidateDataAndJobCounts,
 } from "@/features/candidates/candidatesCache";
 import { aiScoreState, type AiScoreState } from "@/features/candidates/aiScore";
+import { manualMoveBlocker } from "@/features/candidates/manualMove";
 import {
   type CandidateListItem,
   type CandidateStatus,
@@ -79,6 +80,7 @@ import { formatDate } from "@/lib/date";
 import { errorMessage } from "@/lib/errors";
 import { cn } from "@/lib/utils";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { ClearFiltersButton } from "@/components/common/ClearFiltersButton";
 
 /** Radix `Select` forbids an empty value — the "no filter" sentinel. */
 const ALL = "all";
@@ -584,6 +586,22 @@ export function CandidatesPage() {
 
   const resetPage = () => setPage(1);
 
+  // On the job-scoped route (`/jobs/:jobId/candidates`) the job is pinned by the
+  // path and its Select is hidden, so it does not count as a clearable filter
+  // and clearing leaves it on `routeJobId`. Off that route, the job dropdown is
+  // one of the filters and resets to ALL like the rest.
+  const filtersActive = Boolean(
+    search.trim() ||
+      statusFilter !== ALL ||
+      (!routeJobId && jobFilter !== ALL),
+  );
+  const clearFilters = () => {
+    setSearch("");
+    setStatusFilter(ALL);
+    if (!routeJobId) setJobFilter(ALL);
+    resetPage();
+  };
+
   const headline = selectedJob
     ? `Candidates · ${selectedJob.title}`
     : "Candidates";
@@ -647,6 +665,7 @@ export function CandidatesPage() {
               </Link>
             </Button>
           ) : null}
+          <ClearFiltersButton active={filtersActive} onClear={clearFilters} />
           <Button
             variant="secondary"
             size="sm"
@@ -1408,10 +1427,17 @@ function CandidateRow({
                 <DropdownMenuLabel>Move to</DropdownMenuLabel>
                 {statuses.map((option) => {
                   const isCurrent = option.key === status?.key;
+                  // Columns that aren't a human's to assert are disabled rather
+                  // than hidden: a missing option reads as a bug, a greyed one
+                  // with a reason teaches the rule. `title` carries the reason
+                  // — Radix keeps disabled items out of the tab order, so this
+                  // is the hover affordance that still fires.
+                  const blocked = manualMoveBlocker(option, row);
                   return (
                     <DropdownMenuItem
                       key={option._id}
-                      disabled={isCurrent}
+                      disabled={isCurrent || blocked !== null}
+                      title={blocked ?? undefined}
                       onSelect={() => onChangeStatus(option.key)}
                     >
                       <span
