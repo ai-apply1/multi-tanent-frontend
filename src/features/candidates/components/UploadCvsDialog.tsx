@@ -65,7 +65,6 @@ import {
   getJob,
   listJobOptions,
 } from "@/features/jobs/jobsApi"
-import type { JobCustomField } from "@/features/jobs/types"
 import { errorMessage } from "@/lib/errors"
 import { blurOnWheel, cn } from "@/lib/utils"
 
@@ -143,11 +142,10 @@ interface UploadRow {
   phoneNumber: string
   city: string
   /**
-   * Answers to the job's applicant-sourced custom fields, keyed by field key.
-   * Strings throughout, exactly like the apply form posts them — the server
-   * owns the typing, so the dialog never has to guess what a field expects.
+   * The minimum salary this candidate would accept. A raw string so a
+   * half-typed number is a legal editing state; parsed at confirm.
    */
-  customAnswers: Record<string, string>
+  expectedSalaryMin: string
   status: RowStatus
   progress: number
   /** Why the direct S3 PUT failed — shown inline, not toasted. */
@@ -244,14 +242,13 @@ export function UploadCvsDialog({
     enabled: open && Boolean(selectedJobId),
   })
 
-  /** Only the fields a HUMAN answers. The rest come off the CV. */
-  const askedCustomFields = useMemo(
-    () =>
-      (targetJobQuery.data?.eligibility.customFields ?? []).filter(
-        (f) => f.source === "applicant"
-      ),
-    [targetJobQuery.data]
-  )
+  /**
+   * Does the TARGET job ask for an expected salary? Keyed on `selectedJobId`,
+   * not the `jobId` prop, because the dialog lets the admin re-point the import
+   * at a different job mid-flow and the column must follow it.
+   */
+  const asksSalary =
+    targetJobQuery.data?.eligibility.expectedSalary?.enabled === true
 
   const jobOptions = useMemo(() => {
     const all = jobsQuery.data ?? []
@@ -284,7 +281,7 @@ export function UploadCvsDialog({
         phoneIso: "",
         phoneNumber: "",
         city: "",
-        customAnswers: {},
+        expectedSalaryMin: "",
         status: "idle",
         progress: 0,
         error: null,
@@ -406,14 +403,12 @@ export function UploadCvsDialog({
    * to fix it in place. Only fields the CANDIDATE answers appear at all; the
    * resume-sourced ones are the CV parser's job.
    */
-  const customAnswerError = (row: UploadRow): string | null => {
-    for (const field of askedCustomFields) {
-      if (!field.required) continue
-      if (!(row.customAnswers[field.key] ?? "").trim()) {
-        return `${field.label} is required.`
-      }
-    }
-    return null
+  const salaryError = (row: UploadRow): string | null => {
+    if (!asksSalary) return null
+    const raw = row.expectedSalaryMin.trim()
+    if (!raw) return "Expected salary is required for this job."
+    const n = Number(raw)
+    return Number.isFinite(n) && n >= 0 ? null : "Enter a number."
   }
 
   const rowIncomplete = (row: UploadRow): boolean =>
@@ -422,7 +417,7 @@ export function UploadCvsDialog({
         nameError(row) ||
         phoneError(row) ||
         cityError(row) ||
-        customAnswerError(row)
+        salaryError(row)
     )
 
   /** Only uploaded rows can become candidates — a failed PUT has no key. */
@@ -547,13 +542,11 @@ export function UploadCvsDialog({
           phone: combinePhone(row.phoneIso, row.phoneNumber.trim()),
           city: row.city.trim(),
           cvKey: row.cvKey as string,
-          // Only the fields this job actually asks for, so a stale answer left
-          // behind by re-pointing the import at another job is never sent.
-          customAnswers: Object.fromEntries(
-            askedCustomFields
-              .map((f) => [f.key, (row.customAnswers[f.key] ?? "").trim()])
-              .filter(([, value]) => value !== "")
-          ),
+          // Only when this job asks, so a stale answer left behind by
+          // re-pointing the import at another job is never sent.
+          ...(asksSalary && row.expectedSalaryMin.trim()
+            ? { expectedSalaryMin: Number(row.expectedSalaryMin.trim()) }
+            : {}),
         }))
       ),
     onSuccess: (res) => {
@@ -780,7 +773,8 @@ export function UploadCvsDialog({
                           nameMsg={touched.has(row.id) ? nameError(row) : null}
                           phoneMsg={touched.has(row.id) ? phoneError(row) : null}
                           cityMsg={touched.has(row.id) ? cityError(row) : null}
-                          customFields={askedCustomFields}
+                          asksSalary={asksSalary}
+                          salaryMsg={touched.has(row.id) ? salaryError(row) : null}
                           onPatch={(patch) => patchRow(row.id, patch)}
                           onTouch={() => setTouched((prev) => new Set(prev).add(row.id))}
                           onRemove={() => removeRow(row.id)}
@@ -957,7 +951,8 @@ function ReviewRow({
   nameMsg,
   phoneMsg,
   cityMsg,
-  customFields,
+  asksSalary,
+  salaryMsg,
   onPatch,
   onTouch,
   onRemove,
@@ -969,15 +964,13 @@ function ReviewRow({
   nameMsg: string | null
   phoneMsg: string | null
   cityMsg: string | null
-  /** The target job's applicant-sourced custom fields, in job order. */
-  customFields: JobCustomField[]
+  /** Does the target job ask for an expected salary? */
+  asksSalary: boolean
+  salaryMsg: string | null
   onPatch: (patch: Partial<UploadRow>) => void
   onTouch: () => void
   onRemove: () => void
 }) {
-  const setAnswer = (key: string, value: string) => {
-    onPatch({ customAnswers: { ...row.customAnswers, [key]: value } })
-  }
   return (
     <div
       className={cn(
@@ -1111,113 +1104,33 @@ function ReviewRow({
           onTouch={onTouch}
         />
         {/*
-         * The job's own questions, one column each, in the same grid as the
-         * built-in fields. Only the ones a human answers appear here: a
-         * resume-sourced field is the CV parser's job and asking an admin to
-         * retype it would just create a second, conflicting answer.
+         * Only when the job asks. The candidate states a MINIMUM; the job's
+         * maximum stays server-side, so nothing here reveals the ceiling.
          */}
-        {customFields.map((field) => (
-          <CustomAnswerField
-            key={field.key}
-            rowId={row.id}
-            field={field}
-            value={row.customAnswers[field.key] ?? ""}
-            disabled={busy}
-            invalid={
-              field.required && !(row.customAnswers[field.key] ?? "").trim()
-            }
-            onChange={(value) => setAnswer(field.key, value)}
-            onTouch={onTouch}
-          />
-        ))}
+        {asksSalary ? (
+          <div className="space-y-1.5">
+            <Label htmlFor={`salary-${row.id}`} className="text-xs text-ink">
+              Expected salary<span className="text-[var(--danger)]"> *</span>
+            </Label>
+            <Input
+              id={`salary-${row.id}`}
+              type="number"
+              inputMode="numeric"
+              min={0}
+              value={row.expectedSalaryMin}
+              disabled={busy}
+              aria-invalid={Boolean(salaryMsg)}
+              placeholder="Minimum they would accept"
+              onWheel={blurOnWheel}
+              onChange={(e) => onPatch({ expectedSalaryMin: e.target.value })}
+              onBlur={onTouch}
+            />
+            {salaryMsg ? (
+              <p className="text-xs text-[var(--danger)]">{salaryMsg}</p>
+            ) : null}
+          </div>
+        ) : null}
       </div>
-    </div>
-  )
-}
-
-/**
- * One custom-field answer on one review row. The input follows the field's
- * declared type, so the admin gets a number box for a number gate and the
- * exact choice list for a choice gate rather than free text that the server
- * would then have to reject.
- */
-function CustomAnswerField({
-  rowId,
-  field,
-  value,
-  disabled,
-  invalid,
-  onChange,
-  onTouch,
-}: {
-  rowId: string
-  field: JobCustomField
-  value: string
-  disabled: boolean
-  invalid: boolean
-  onChange: (value: string) => void
-  onTouch: () => void
-}) {
-  const id = `cf-${field.key}-${rowId}`
-  const label = (
-    <Label htmlFor={id} className="text-xs text-ink">
-      {field.label}
-      {field.required ? <span className="text-[var(--danger)]"> *</span> : null}
-    </Label>
-  )
-
-  if (field.type === "boolean" || field.type === "select") {
-    // Radix forbids an empty item value, so "unanswered" is the absence of a
-    // selection on the root (placeholder showing), not a sentinel option.
-    const choices =
-      field.type === "boolean"
-        ? [
-            { value: "yes", label: "Yes" },
-            { value: "no", label: "No" },
-          ]
-        : field.options.map((o) => ({ value: o, label: o }))
-    return (
-      <div className="space-y-1.5">
-        {label}
-        <Select
-          value={value}
-          disabled={disabled}
-          onValueChange={(next) => {
-            onChange(next)
-            onTouch()
-          }}
-        >
-          <SelectTrigger id={id} aria-invalid={invalid}>
-            <SelectValue placeholder="Not answered" />
-          </SelectTrigger>
-          <SelectContent>
-            {choices.map((c) => (
-              <SelectItem key={c.value} value={c.value}>
-                {c.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-    )
-  }
-
-  return (
-    <div className="space-y-1.5">
-      {label}
-      <Input
-        id={id}
-        type={field.type === "number" ? "number" : "text"}
-        inputMode={field.type === "number" ? "numeric" : undefined}
-        value={value}
-        disabled={disabled}
-        aria-invalid={invalid}
-        placeholder={field.helpText || "Not answered"}
-        // A 50-row review table is all scrolling — see `blurOnWheel`.
-        onWheel={field.type === "number" ? blurOnWheel : undefined}
-        onChange={(e) => onChange(e.target.value)}
-        onBlur={onTouch}
-      />
     </div>
   )
 }

@@ -222,24 +222,10 @@ export interface CandidateDetail extends CandidateBase {
   /** The parsed-CV cache. `null` until the cv-parse worker finishes. */
   profile: CandidateProfile | null
   /**
-   * Answers to the job's custom eligibility fields, from both sources: the
-   * applicant-sourced ones written at creation, the resume-sourced ones by the
-   * CV-parse worker. Sparse, so a field the candidate skipped, or one added to
-   * the job after they applied, simply has no entry.
+   * The LEAST this candidate said they would accept, from the apply form.
+   * Null when the job's salary gate is off, so the question was never asked.
    */
-  customAnswers?: CandidateFieldAnswer[]
-}
-
-/** One stored answer to one custom eligibility field. */
-export interface CandidateFieldAnswer {
-  /** FK into `job.eligibility.customFields[].key`. */
-  key: string
-  /** The label as it stood when the answer was collected, not as renamed since. */
-  label: string
-  value: string | number | boolean | null
-  source: "applicant" | "resume"
-  /** Resume-sourced only: the CV quote behind the value. '' otherwise. */
-  evidence: string
+  expectedSalaryMin?: number | null
 }
 
 /**
@@ -257,6 +243,16 @@ export interface CandidateProfile {
   jobFit?: {
     rating: "strong" | "moderate" | "weak" | "unclear"
     summary: string
+  }
+  /**
+   * The university gate's verdict, from the CV. Absent when the job had no
+   * university gate when this CV was read.
+   */
+  universityCheck?: {
+    verdict: "yes" | "no" | "unclear"
+    /** The accepted institution matched, verbatim. '' when none. */
+    matched: string
+    evidence: string
   }
   technologies?: Array<{ name: string; category: string; isCoreProgramming: boolean }>
   workHistory?: Array<{
@@ -428,12 +424,11 @@ export interface BulkConfirmRow {
   city: string
   cvKey: string
   /**
-   * This row's answers to the job's applicant-sourced custom fields, keyed by
-   * field key. Strings on the wire; the server types them against the job's
-   * own field list. A row missing a REQUIRED answer is skipped server-side
-   * (`missing_custom_answer`), which is why the dialog blocks it first.
+   * The minimum salary this candidate would accept. Required when the job's
+   * salary gate is on; a row missing it is skipped server-side
+   * (`missing_expected_salary`), which is why the dialog blocks it first.
    */
-  customAnswers?: Record<string, string>
+  expectedSalaryMin?: number
 }
 
 /**
