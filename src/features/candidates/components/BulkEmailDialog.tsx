@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { Loader2, Plus } from "lucide-react"
 import toast from "react-hot-toast"
@@ -48,6 +48,7 @@ export function BulkEmailDialog({
   onOpenChange,
   candidateIds,
   recipientLabel,
+  previewMergeValues,
   onSent,
 }: {
   open: boolean
@@ -55,6 +56,15 @@ export function BulkEmailDialog({
   candidateIds: string[]
   /** Human recipient summary, e.g. "8 candidates" or a single name. */
   recipientLabel: string
+  /**
+   * Real `{{token}}` values to fill into the LIVE PREVIEW only, so a single
+   * recipient's send shows their own name and job instead of the generic
+   * "Alex Morgan" sample. Preview-only: the actual send always ships the raw
+   * template with tokens, and the backend fills every candidate's true values
+   * (name, job, freshly minted interview link) per recipient. Empty/absent for
+   * a multi-select send, where a single set of values would be a lie.
+   */
+  previewMergeValues?: Record<string, string>
   onSent?: () => void
 }) {
   const count = candidateIds.length
@@ -96,35 +106,60 @@ export function BulkEmailDialog({
     setBody(selected.body)
   }, [selected])
 
-  // Reset to a fresh compose each time the dialog is reopened.
-  useEffect(() => {
-    if (!open) {
-      seededFor.current = null
-      setPurpose("")
-    }
-  }, [open])
+  // For a single recipient, inline the tokens we already know (name, job) into
+  // the copy sent to the preview endpoint, so the preview reads as their mail.
+  // Tokens we can't fill client-side (interviewUrl, dates, duration) stay as
+  // `{{tokens}}` and the server renders them with its samples, exactly as
+  // before. Whitespace-tolerant so `{{ candidateName }}` matches too.
+  const mergeEntries = useMemo(
+    () => Object.entries(previewMergeValues ?? {}).filter(([, v]) => v.trim()),
+    [previewMergeValues],
+  )
+  const applyMerge = useCallback(
+    (text: string) =>
+      mergeEntries.reduce(
+        // A function replacement (not a string) so a `$` in the value is a
+        // literal, not a `$&`/`$1` back-reference pattern.
+        (acc, [token, value]) =>
+          acc.replace(new RegExp(`\\{\\{\\s*${token}\\s*\\}\\}`, "g"), () => value),
+        text,
+      ),
+    [mergeEntries],
+  )
 
   // ── Live preview (debounced, server-rendered so it matches the sent mail) ──
   const [previewHtml, setPreviewHtml] = useState("")
   const [previewSubject, setPreviewSubject] = useState("")
   const [previewing, setPreviewing] = useState(false)
+  const [previewError, setPreviewError] = useState(false)
   const previewKeyRef = useRef("")
   useEffect(() => {
     if (!open || !selected) return
-    const key = `${selected.purpose} ${subject} ${body}`
+    const subjectForPreview = applyMerge(subject)
+    const bodyForPreview = applyMerge(body)
+    const key = `${selected.purpose} ${subjectForPreview} ${bodyForPreview}`
     if (key === previewKeyRef.current) return
 
     let cancelled = false
     const id = setTimeout(() => {
       setPreviewing(true)
-      previewEmailTemplate({ purpose: selected.purpose, subject, body })
+      previewEmailTemplate({
+        purpose: selected.purpose,
+        subject: subjectForPreview,
+        body: bodyForPreview,
+      })
         .then((r) => {
           if (cancelled) return
           previewKeyRef.current = key
           setPreviewHtml(r.html)
           setPreviewSubject(r.subject)
+          setPreviewError(false)
         })
-        .catch(() => undefined)
+        .catch(() => {
+          // Don't blow away an already-rendered preview on a refresh error;
+          // the render only shows the error state when there's nothing yet.
+          if (!cancelled) setPreviewError(true)
+        })
         .finally(() => {
           if (!cancelled) setPreviewing(false)
         })
@@ -133,7 +168,24 @@ export function BulkEmailDialog({
       cancelled = true
       clearTimeout(id)
     }
-  }, [open, selected, subject, body])
+  }, [open, selected, subject, body, applyMerge])
+
+  // Reset to a fresh compose each time the dialog is reopened. This component
+  // stays mounted after close (the dialog content unmounts, not us), so the
+  // preview state must be cleared too — otherwise reopening for a DIFFERENT
+  // candidate would flash the previous one's rendered mail before the new
+  // preview arrives. Clearing `previewKeyRef` forces a re-fetch even when the
+  // copy is identical.
+  useEffect(() => {
+    if (!open) {
+      seededFor.current = null
+      setPurpose("")
+      previewKeyRef.current = ""
+      setPreviewHtml("")
+      setPreviewSubject("")
+      setPreviewError(false)
+    }
+  }, [open])
 
   const sendMutation = useMutation({
     mutationFn: () =>
@@ -319,29 +371,65 @@ export function BulkEmailDialog({
                 ) : null}
               </div>
               <div className="overflow-hidden rounded-2xl border border-line bg-white">
-                {previewSubject ? (
-                  <div className="flex items-baseline gap-2.5 border-b border-[#edecf2] bg-[#fbfbfd] px-5 py-3.5">
-                    <span className="shrink-0 text-[12px] font-medium text-[#9a96a4]">
-                      Subject
-                    </span>
-                    <span
-                      className="truncate text-[14px] font-semibold text-[#1a1622]"
-                      title={previewSubject}
-                    >
-                      {previewSubject}
-                    </span>
+                {previewHtml ? (
+                  <>
+                    {previewSubject ? (
+                      <div className="flex items-baseline gap-2.5 border-b border-[#edecf2] bg-[#fbfbfd] px-5 py-3.5">
+                        <span className="shrink-0 text-[12px] font-medium text-[#9a96a4]">
+                          Subject
+                        </span>
+                        <span
+                          className="truncate text-[14px] font-semibold text-[#1a1622]"
+                          title={previewSubject}
+                        >
+                          {previewSubject}
+                        </span>
+                      </div>
+                    ) : null}
+                    <iframe
+                      title="Email preview"
+                      sandbox=""
+                      srcDoc={previewHtml}
+                      className="h-[440px] w-full"
+                    />
+                  </>
+                ) : previewError ? (
+                  // Fixed colours (not theme tokens): this box is always the
+                  // white email canvas, in either app theme.
+                  <div className="flex h-[440px] flex-col items-center justify-center gap-1.5 px-6 text-center">
+                    <p className="text-[13px] font-medium text-[#b4453a]">
+                      Could not build the preview.
+                    </p>
+                    <p className="text-[12px] text-[#9a96a4]">
+                      Your draft is safe. It will retry as you keep typing.
+                    </p>
                   </div>
-                ) : null}
-                <iframe
-                  title="Email preview"
-                  sandbox=""
-                  srcDoc={previewHtml}
-                  className="h-[440px] w-full"
-                />
+                ) : (
+                  // First render after opening: the server preview is still on
+                  // its way (300ms debounce + round-trip), so show a loader
+                  // instead of a blank white pane that reads as broken.
+                  <div className="flex h-[440px] flex-col items-center justify-center gap-2.5 text-[#9a96a4]">
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    <span className="text-[12.5px]">Building preview...</span>
+                  </div>
+                )}
               </div>
               <p className="mt-2 text-[11.5px] text-ink-subtle">
-                Preview uses sample values. Each candidate gets their own name,
-                job and link.
+                {mergeEntries.length > 0 ? (
+                  <>
+                    Personalized for{" "}
+                    <span className="font-medium text-ink-2">
+                      {previewMergeValues?.candidateName ?? recipientLabel}
+                    </span>
+                    . The interview link and dates shown are samples; the real
+                    ones are filled in when you send.
+                  </>
+                ) : (
+                  <>
+                    Preview uses sample values. Each candidate gets their own
+                    name, job and link.
+                  </>
+                )}
               </p>
             </div>
           </div>
