@@ -105,9 +105,34 @@ export interface CandidateStatus {
   isTerminal: boolean
   builtin: boolean
   isProtected: boolean
+  /**
+   * Who may move a candidate INTO this column by hand. Server-owned and not
+   * editable from the pipeline settings screen.
+   *
+   * The board's columns are two kinds of claim. `system` ones state a FACT
+   * about what the candidate did (an invite went out, they entered the room) —
+   * a drag can't make that true, only make the board lie, so the backend
+   * refuses every manual move into them. `pre_interview` ones only make sense
+   * for someone who hasn't interviewed yet; `post_interview` (just `scored`)
+   * only for someone who has. `manual` ones record a decision WE made, so
+   * they're always ours to set — that includes every custom column the org
+   * invents.
+   *
+   * Optional because a tenant whose catalog predates the field returns rows
+   * without it; treat absent as `"manual"` (see `manualMoveBlocker`), which is
+   * how the backend's schema default reads it too.
+   */
+  manualMovePolicy?: ManualMovePolicy
   createdAt: string
   updatedAt: string
 }
+
+/** @see CandidateStatus.manualMovePolicy */
+export type ManualMovePolicy =
+  | "system"
+  | "pre_interview"
+  | "post_interview"
+  | "manual"
 
 /**
  * Weighted scoring fold of a submitted interview — the slim projection the
@@ -226,6 +251,15 @@ export interface CandidateDetail extends CandidateBase {
    * Null when the job's salary gate is off, so the question was never asked.
    */
   expectedSalaryMin?: number | null
+  /**
+   * Would they move for the role? Their own answer from the apply form.
+   *
+   * `null`/absent means NOT ASKED, which is different from "no": the job may
+   * be remote, may have no city gate, or the gate may have been switched on
+   * after they applied. The drawer therefore hides the row entirely rather
+   * than rendering a "No" nobody said.
+   */
+  willingToRelocate?: boolean | null
 }
 
 /**
@@ -238,6 +272,14 @@ export interface CandidateProfile {
   primaryRoleEvidence?: string
   seniority?: "junior" | "mid" | "senior" | "lead" | "unknown"
   yearsOfExperience?: number
+  /**
+   * The candidate's own base city AS WRITTEN ON THE CV, `''` when it states
+   * none. Not the same field as the candidate row's `city`, which is what they
+   * typed on the apply form. The two disagreeing is the ordinary case of
+   * someone who moved and never updated their CV header, so the drawer SHOWS
+   * the disagreement and nothing gates on it.
+   */
+  city?: string
   summary?: string
   /** Advisory AI read on how the CV fits the job — informational only. */
   jobFit?: {
@@ -369,6 +411,8 @@ export interface KanbanColumn {
   stageOrder: number
   isTerminal: boolean
   builtin: boolean
+  /** @see CandidateStatus.manualMovePolicy — the board needs it to refuse drops. */
+  manualMovePolicy?: ManualMovePolicy
   count: number
   candidates: KanbanCard[]
 }

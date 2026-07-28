@@ -68,6 +68,7 @@ import {
   invalidateCandidateDataAndJobCounts,
 } from "@/features/candidates/candidatesCache";
 import { aiScoreState, type AiScoreState } from "@/features/candidates/aiScore";
+import { manualMoveBlocker } from "@/features/candidates/manualMove";
 import {
   type CandidateListItem,
   type CandidateStatus,
@@ -1426,10 +1427,17 @@ function CandidateRow({
                 <DropdownMenuLabel>Move to</DropdownMenuLabel>
                 {statuses.map((option) => {
                   const isCurrent = option.key === status?.key;
+                  // Columns that aren't a human's to assert are disabled rather
+                  // than hidden: a missing option reads as a bug, a greyed one
+                  // with a reason teaches the rule. `title` carries the reason
+                  // — Radix keeps disabled items out of the tab order, so this
+                  // is the hover affordance that still fires.
+                  const blocked = manualMoveBlocker(option, row);
                   return (
                     <DropdownMenuItem
                       key={option._id}
-                      disabled={isCurrent}
+                      disabled={isCurrent || blocked !== null}
+                      title={blocked ?? undefined}
                       onSelect={() => onChangeStatus(option.key)}
                     >
                       <span

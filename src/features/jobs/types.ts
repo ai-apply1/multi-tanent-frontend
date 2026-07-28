@@ -44,7 +44,19 @@ export interface Paginated<T> {
  * There is no scoring layer, so there is nothing else to configure here.
  */
 export interface JobEligibility {
+  /**
+   * IGNORED ENTIRELY when `workMode` is `remote`, and the value is kept rather
+   * than cleared so switching back to onsite restores it. Read it through
+   * `cityGateApplies(job)`, never bare, or a remote job looks like it filters
+   * on location when the server has already decided it does not.
+   */
   city: string | null
+  /**
+   * Does a wrong-city candidate who says they would MOVE still get looked at?
+   * On (the default) turns that mismatch into an HR review instead of an
+   * auto-reject. Never an auto-pass: willingness is an unverifiable claim.
+   */
+  considerRelocators: boolean
   minYearsExperience: number | null
   requiredSkills: string[]
   university: JobUniversityGate
@@ -170,6 +182,7 @@ export interface Job extends JobBase {
  */
 export interface JobEligibilityPayload {
   city?: string
+  considerRelocators?: boolean
   minYearsExperience?: number
   requiredSkills?: string[]
   university?: JobUniversityGate

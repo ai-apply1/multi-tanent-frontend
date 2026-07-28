@@ -1,5 +1,6 @@
 import MDEditor from "@uiw/react-md-editor";
 import { Markdown } from "@/components/Markdown";
+import { htmlToMarkdown } from "@/lib/htmlToMarkdown";
 import { useTheme } from "@/features/theme/ThemeContext";
 
 interface MarkdownEditorProps {
@@ -36,10 +37,62 @@ export function MarkdownEditor({
 }: MarkdownEditorProps) {
   const { theme } = useTheme();
 
+  // A <textarea> only receives the clipboard's plain-text flavor, so pasting a
+  // formatted description (LinkedIn/Word/Google Docs — all `text/html`) drops
+  // every heading, bold run and bullet. When the clipboard carries HTML,
+  // convert it to Markdown and insert that instead of the flattened text.
+  const handlePaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const markdown = htmlToMarkdown(event.clipboardData.getData("text/html"));
+    // Nothing rich to convert (or a malformed payload) → let the browser paste
+    // plain text as usual.
+    if (!markdown) return;
+
+    event.preventDefault();
+    const textarea = event.currentTarget;
+
+    // `insertText` keeps the native undo stack and caret intact and honours the
+    // textarea's maxLength; fall back to a manual splice on the rare browser
+    // that rejects it. Either path fires MDEditor's onChange, which re-clamps
+    // to maxLength.
+    if (!document.execCommand("insertText", false, markdown)) {
+      const start = textarea.selectionStart ?? value.length;
+      const end = textarea.selectionEnd ?? value.length;
+      onChange(
+        (value.slice(0, start) + markdown + value.slice(end)).slice(0, maxLength),
+      );
+    }
+  };
+
+  // The library's textarea only grows to fit its content, so the empty space
+  // below a short description didn't focus the editor — clicking there felt
+  // dead. Redirect any mousedown in the editor chrome (but not on the textarea
+  // itself, a toolbar control, a link, or the live-preview pane — where a click
+  // means "select this text", not "focus the editor") to the textarea, caret at
+  // the end.
+  const focusEditorOnEmptyClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (
+      !target.closest(".w-md-editor") ||
+      target.closest(
+        "textarea, .w-md-editor-toolbar, .w-md-editor-preview, a, button",
+      )
+    ) {
+      return;
+    }
+    const textarea = event.currentTarget.querySelector<HTMLTextAreaElement>(
+      ".w-md-editor-text-input",
+    );
+    if (!textarea) return;
+    event.preventDefault(); // keep the browser from focusing elsewhere first
+    textarea.focus();
+    const caret = textarea.value.length;
+    textarea.setSelectionRange(caret, caret);
+  };
+
   return (
     // `md-editor-themed` scopes the globals.css bridge that remaps the
     // library's GitHub palette onto the app's theme tokens.
-    <div className="md-editor-themed">
+    <div className="md-editor-themed" onMouseDown={focusEditorOnEmptyClick}>
       {label ? (
         <label
           htmlFor={id}
@@ -53,10 +106,13 @@ export function MarkdownEditor({
         // Native maxLength only guards typing/pasting; toolbar commands write
         // programmatically, so clamp here to keep the backend cap intact.
         onChange={(next) => onChange((next ?? "").slice(0, maxLength))}
-        preview="edit"
+        // Default to the split view (Markdown source on the left, live preview
+        // on the right) so authors see the rendered result as they type. The
+        // toolbar toggles still switch to edit-only or preview-only.
+        preview="live"
         height={120 + rows * 30}
         data-color-mode={theme}
-        textareaProps={{ id, placeholder, maxLength, disabled }}
+        textareaProps={{ id, placeholder, maxLength, disabled, onPaste: handlePaste }}
         components={{
           preview: (source) =>
             source.trim().length > 0 ? (
