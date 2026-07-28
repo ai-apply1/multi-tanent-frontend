@@ -66,12 +66,16 @@ export function MarkdownEditor({
   // The library's textarea only grows to fit its content, so the empty space
   // below a short description didn't focus the editor — clicking there felt
   // dead. Redirect any mousedown in the editor chrome (but not on the textarea
-  // itself, a toolbar control, or a link) to the textarea, caret at the end.
+  // itself, a toolbar control, a link, or the live-preview pane — where a click
+  // means "select this text", not "focus the editor") to the textarea, caret at
+  // the end.
   const focusEditorOnEmptyClick = (event: React.MouseEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
     if (
       !target.closest(".w-md-editor") ||
-      target.closest("textarea, .w-md-editor-toolbar, a, button")
+      target.closest(
+        "textarea, .w-md-editor-toolbar, .w-md-editor-preview, a, button",
+      )
     ) {
       return;
     }
@@ -102,7 +106,10 @@ export function MarkdownEditor({
         // Native maxLength only guards typing/pasting; toolbar commands write
         // programmatically, so clamp here to keep the backend cap intact.
         onChange={(next) => onChange((next ?? "").slice(0, maxLength))}
-        preview="edit"
+        // Default to the split view (Markdown source on the left, live preview
+        // on the right) so authors see the rendered result as they type. The
+        // toolbar toggles still switch to edit-only or preview-only.
+        preview="live"
         height={120 + rows * 30}
         data-color-mode={theme}
         textareaProps={{ id, placeholder, maxLength, disabled, onPaste: handlePaste }}
