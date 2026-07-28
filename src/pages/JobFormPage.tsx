@@ -213,6 +213,11 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
 
   // ── Eligibility & vetting
   const [city, setCity] = useState(job?.eligibility.city ?? "");
+  // Defaults ON for a new job. `?? true` also covers a job saved before this
+  // flag existed, whose stored block has no value for it.
+  const [considerRelocators, setConsiderRelocators] = useState(
+    job?.eligibility.considerRelocators ?? true,
+  );
   const [minYearsExperience, setMinYearsExperience] = useState(
     job?.eligibility.minYearsExperience == null
       ? ""
@@ -323,6 +328,9 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
   const buildEligibility = (): JobEligibilityPayload => {
     const eligibility: JobEligibilityPayload = {};
     if (city.trim()) eligibility.city = city.trim();
+    // Sent unconditionally, like the two gate blocks below: eligibility is
+    // REPLACE-semantics, so omitting it would reset the server to the default.
+    eligibility.considerRelocators = considerRelocators;
     if (parsedMinYears !== undefined) {
       eligibility.minYearsExperience = parsedMinYears;
     }
@@ -618,6 +626,9 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
             <EligibilityStep
               city={city}
               setCity={setCity}
+              workMode={workMode}
+              considerRelocators={considerRelocators}
+              setConsiderRelocators={setConsiderRelocators}
               minYearsExperience={minYearsExperience}
               setMinYearsExperience={setMinYearsExperience}
               minYearsError={minYearsError}
@@ -1494,6 +1505,9 @@ function ScoringStep({
 function EligibilityStep({
   city,
   setCity,
+  workMode,
+  considerRelocators,
+  setConsiderRelocators,
   minYearsExperience,
   setMinYearsExperience,
   minYearsError,
@@ -1504,6 +1518,9 @@ function EligibilityStep({
 }: {
   city: string;
   setCity: (v: string) => void;
+  workMode: string;
+  considerRelocators: boolean;
+  setConsiderRelocators: (v: boolean) => void;
   minYearsExperience: string;
   setMinYearsExperience: (v: string) => void;
   minYearsError: string;
@@ -1550,6 +1567,18 @@ function EligibilityStep({
   const cityTriggerCls =
     "h-11 rounded-lg border-[var(--field-border)] bg-surface px-3.5 text-[14px]";
 
+  /*
+   * A remote role has no office to come to, so where a candidate lives cannot
+   * decide whether they can do the job. The whole city control is replaced by a
+   * note rather than left visible-but-ignored, because a filter that appears to
+   * work and silently does nothing is worse than no filter.
+   *
+   * The stored value is deliberately NOT cleared here: a job flipped to remote
+   * and back keeps what HR configured. The server independently refuses to run
+   * the gate for a remote job (`cityGateApplies`), so nothing rests on this UI.
+   */
+  const isRemote = workMode === "remote";
+
   return (
     <div>
       <StepHead
@@ -1562,39 +1591,76 @@ function EligibilityStep({
             <label htmlFor="job-city" className={LABEL_CLASS}>
               City
             </label>
-            <Select value={citySelectValue} onValueChange={handleCityChange}>
-              <SelectTrigger id="job-city" className={cityTriggerCls}>
-                <SelectValue placeholder="Any city" />
-              </SelectTrigger>
-              <SelectContent className="max-h-72">
-                <SelectItem value={ANY_CITY_VALUE}>
-                  Any city (no requirement)
-                </SelectItem>
-                {PAKISTAN_CITIES.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {c}
-                  </SelectItem>
-                ))}
-                <SelectItem value={OTHER_CITY_VALUE}>
-                  Other (not listed)
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            {isOther ? (
-              <input
-                ref={otherCityRef}
-                type="text"
-                value={city}
-                maxLength={120}
-                onChange={(e) => setCity(e.target.value)}
-                placeholder="Enter the required city"
-                aria-label="Enter the required city"
-                className={`${FIELD_CLASS} mt-2`}
-              />
-            ) : null}
-            <p className={HELP_CLASS}>
-              A hard gate, pick “Any city” for no city requirement.
-            </p>
+            {isRemote ? (
+              <p className="rounded-lg border border-dashed border-[var(--field-border)] px-3.5 py-3 text-[13px] text-ink-muted">
+                Not used for remote roles. Nobody is filtered on where they
+                live.
+              </p>
+            ) : (
+              <>
+                <Select value={citySelectValue} onValueChange={handleCityChange}>
+                  <SelectTrigger id="job-city" className={cityTriggerCls}>
+                    <SelectValue placeholder="Any city" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72">
+                    <SelectItem value={ANY_CITY_VALUE}>
+                      Any city (no requirement)
+                    </SelectItem>
+                    {PAKISTAN_CITIES.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value={OTHER_CITY_VALUE}>
+                      Other (not listed)
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                {isOther ? (
+                  <input
+                    ref={otherCityRef}
+                    type="text"
+                    value={city}
+                    maxLength={120}
+                    onChange={(e) => setCity(e.target.value)}
+                    placeholder="Enter the required city"
+                    aria-label="Enter the required city"
+                    className={`${FIELD_CLASS} mt-2`}
+                  />
+                ) : null}
+                <p className={HELP_CLASS}>
+                  A hard gate, pick “Any city” for no city requirement.
+                </p>
+                {/* Only meaningful once there IS a city to be in the wrong one
+                    of. Hidden rather than disabled on "Any city", because a
+                    live control that governs a gate nobody set is noise. */}
+                {city.trim() ? (
+                  <div className="mt-3">
+                    <label
+                      htmlFor="job-consider-relocators"
+                      className="flex cursor-pointer items-center gap-2 text-[13px] font-semibold text-ink"
+                    >
+                      <input
+                        id="job-consider-relocators"
+                        type="checkbox"
+                        checked={considerRelocators}
+                        onChange={(e) =>
+                          setConsiderRelocators(e.target.checked)
+                        }
+                        className="h-3.5 w-3.5 rounded border-[var(--field-border)] accent-[var(--primary)]"
+                      />
+                      Also consider candidates willing to relocate
+                    </label>
+                    <p className={HELP_CLASS}>
+                      Someone in another city who says they would move goes to
+                      your review queue instead of being rejected. They are
+                      never auto-invited. Turn this off if the role needs
+                      someone already living there.
+                    </p>
+                  </div>
+                ) : null}
+              </>
+            )}
           </div>
           <div>
             <label htmlFor="job-min-years" className={LABEL_CLASS}>

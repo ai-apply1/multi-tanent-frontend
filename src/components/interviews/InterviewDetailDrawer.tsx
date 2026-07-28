@@ -851,20 +851,69 @@ function VettingCheckRow({ check }: { check: VettingCheck }) {
 }
 
 /**
- * What the job's two optional gates actually found for this candidate.
+ * Do the application's city and the CV's city actually disagree?
+ *
+ * The SAME bidirectional contains match the vetting engine's city gate uses,
+ * so "lahore" and "Lahore, Pakistan" are one city rather than a conflict. The
+ * lenient direction is the safe one to err in: a missed conflict costs HR
+ * nothing, while flagging a formatting difference as a discrepancy would put a
+ * "check this" marker on half the pipeline and train reviewers to ignore it.
+ *
+ * Either side blank is not a disagreement. A CV that simply never states a
+ * city is the normal case, not evidence of anything.
+ */
+function citiesDisagree(applied: string, fromCv: string): boolean {
+  const a = applied.trim().toLowerCase();
+  const b = fromCv.trim().toLowerCase();
+  if (!a || !b) return false;
+  return !a.includes(b) && !b.includes(a);
+}
+
+/**
+ * What the job's optional gates actually found for this candidate.
  *
  * Separate from the pre-screen checklist below on purpose: that card shows
  * VERDICTS, this one shows the underlying facts, and a candidate who was
  * accepted has no checklist at all but still has these.
+ *
+ * The city row appears ONLY on a disagreement. The city itself is already in
+ * the drawer header, so repeating it unconditionally would be noise; what the
+ * header cannot show is that the CV says somewhere else. That is the exact
+ * "originally from Faisalabad, living in Lahore now" case, and it is shown
+ * rather than acted on: which of the two is current is not machine-decidable,
+ * so it is context for the reviewer and gates nothing.
  */
-function ExtraGatesCard({
-  university,
-  expectedSalaryMin,
-}: {
+interface ExtraGatesCardProps {
   university: CandidateProfile["universityCheck"] | null
   expectedSalaryMin: number | null
-}) {
-  if (!university && expectedSalaryMin == null) return null;
+  willingToRelocate: boolean | null
+  city: string | null
+  profileCity: string | null
+}
+
+/**
+ * Does the card have anything at all to render?
+ *
+ * Exported as its own function because ONE call site below wraps the card in a
+ * spacing div, which would otherwise be rendered empty (and its margin
+ * applied) whenever the card returns null. Two copies of this condition is
+ * exactly how a card ends up with a phantom gap above it after someone adds a
+ * fourth row to one copy and not the other.
+ */
+function hasExtraGates(p: ExtraGatesCardProps): boolean {
+  return (
+    Boolean(p.university) ||
+    p.expectedSalaryMin != null ||
+    p.willingToRelocate != null ||
+    citiesDisagree(p.city ?? "", p.profileCity ?? "")
+  );
+}
+
+function ExtraGatesCard(props: ExtraGatesCardProps) {
+  const { university, expectedSalaryMin, willingToRelocate, city, profileCity } =
+    props;
+  const cityConflict = citiesDisagree(city ?? "", profileCity ?? "");
+  if (!hasExtraGates(props)) return null;
 
   const money = (n: number) =>
     n.toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -913,6 +962,35 @@ function ExtraGatesCard({
             </dt>
             <dd className="text-[13.5px] font-semibold text-ink">
               {money(expectedSalaryMin)}
+            </dd>
+          </div>
+        ) : null}
+        {willingToRelocate != null ? (
+          <div className="grid gap-0.5">
+            <dt className="flex flex-wrap items-center gap-x-1.5 text-[12px] text-ink-muted">
+              Willing to relocate
+              <span className="text-[11px] text-ink-subtle">
+                from the application
+              </span>
+            </dt>
+            <dd className="text-[13.5px] font-semibold text-ink">
+              {willingToRelocate ? "Yes" : "No"}
+            </dd>
+          </div>
+        ) : null}
+        {cityConflict ? (
+          <div className="grid gap-0.5">
+            <dt className="flex flex-wrap items-center gap-x-1.5 text-[12px] text-ink-muted">
+              Current city
+              <span className="text-[11px] text-ink-subtle">
+                from the application
+              </span>
+            </dt>
+            <dd className="text-[13.5px] font-semibold capitalize text-ink">
+              {city}
+            </dd>
+            <dd className="text-[12px] leading-snug text-ink-muted">
+              The CV says <span className="capitalize">{profileCity}</span>.
             </dd>
           </div>
         ) : null}
@@ -1097,6 +1175,17 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   const profile = candidate?.profile ?? null;
   const universityCheck = profile?.universityCheck ?? null;
   const expectedSalaryMin = candidate?.expectedSalaryMin ?? null;
+  // Bundled because two call sites render this card and one of them also has
+  // to ask `hasExtraGates` the same question, so the inputs must not drift.
+  // `city` and `profileCity` are passed RAW: whether they actually disagree is
+  // decided inside the card, next to the matching rule it depends on.
+  const extraGatesProps: ExtraGatesCardProps = {
+    university: universityCheck,
+    expectedSalaryMin,
+    willingToRelocate: candidate?.willingToRelocate ?? null,
+    city: candidate?.city ?? null,
+    profileCity: profile?.city ?? null,
+  };
 
 
   // "Initial rejection" = the CV-stage auto-reject column (`rejected`), NOT a
@@ -1652,10 +1741,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                 {/* Contact + identity live in the header now, so this state is
                     just the parsed-CV profile and a note. */}
                 <ProfileCard profile={profile} />
-                <ExtraGatesCard
-                  university={universityCheck}
-                  expectedSalaryMin={expectedSalaryMin}
-                />
+                <ExtraGatesCard {...extraGatesProps} />
 
                 {isInitialRejected ? (
                   // Rejected at the CV pre-screen, no interview will ever exist,
@@ -1702,12 +1788,9 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                     <ProfileCard profile={profile} />
                   </div>
                 ) : null}
-                {universityCheck || expectedSalaryMin != null ? (
+                {hasExtraGates(extraGatesProps) ? (
                   <div className="mb-4">
-                    <ExtraGatesCard
-                      university={universityCheck}
-                      expectedSalaryMin={expectedSalaryMin}
-                    />
+                    <ExtraGatesCard {...extraGatesProps} />
                   </div>
                 ) : null}
 
