@@ -1777,7 +1777,8 @@ function EvaluationTab({
   }
 
   const rows: Array<[string, number]> = [
-    ["Technical", Math.round((data.scores.technical ?? 0) * 10)],
+    ["Correctness", Math.round((data.scores.correctness ?? 0) * 10)],
+    ["Depth", Math.round((data.scores.depth ?? 0) * 10)],
     ["Communication", Math.round((data.scores.communication ?? 0) * 10)],
   ];
 
@@ -2533,7 +2534,18 @@ function AnswerRow({
           {scored ? (
             <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
               <span className="rounded-full border border-line px-2 py-0.5 font-semibold text-ink-2">
-                Technical: {formatScore(scored.technical, { suffix: " / 10" })}
+                Correctness:{" "}
+                {formatScore(scored.correctness, { suffix: " / 10" })}
+              </span>
+              <span className="rounded-full border border-line px-2 py-0.5 font-semibold text-ink-2">
+                Depth: {formatScore(scored.depth, { suffix: " / 10" })}
+                {/* Surfaced only when the difficulty normalisation actually
+                    moved the number, so the reviewer is never shown a
+                    "raw → adjusted" pair that says the same thing twice. */}
+                {typeof scored.depthRaw === "number" &&
+                scored.depthRaw !== scored.depth
+                  ? ` (raw ${formatScore(scored.depthRaw)})`
+                  : ""}
               </span>
               <span className="rounded-full border border-line px-2 py-0.5 font-semibold text-ink-2">
                 Communication:{" "}

@@ -59,11 +59,15 @@ import { cn } from "@/lib/utils";
  */
 const UNSET = "";
 
-/** The scoring split presets, as `technical` percentages. */
-const WEIGHT_PRESETS: Array<[number, string]> = [
-  [60, "60/40"],
-  [50, "50/50"],
-  [70, "70/30"],
+/**
+ * Scoring presets as `[correctness, depth, label, hint]`. Communication is
+ * always the remainder, so every preset sums to 100 by construction.
+ */
+const WEIGHT_PRESETS: Array<[number, number, string, string]> = [
+  [40, 20, "Balanced", "The default — right answers, some judgment, clear delivery."],
+  [60, 10, "Recall-first", "Screening for correct knowledge above all."],
+  [30, 40, "Judgment", "Senior roles: trade-offs and lived experience lead."],
+  [20, 10, "Communication", "Client-facing roles: how they explain it matters most."],
 ];
 
 const EMPLOYMENT_TYPES = Object.keys(
@@ -173,11 +177,21 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
   );
   const [classificationTouched, setClassificationTouched] = useState(false);
 
-  // ── Scoring. ONE number: communication is always `100 - technical`, so the
-  // backend's "must sum to 100" invariant can't be violated from this form.
-  const [technicalWeight, setTechnicalWeight] = useState(
-    job?.scoringWeights.technical ?? 60,
+  // ── Scoring. TWO numbers, not three: communication is always the remainder
+  // (`100 - correctness - depth`), and `WeightSplitBar` only ever trades
+  // between two adjacent axes. So the backend's "must sum to 100" invariant is
+  // unviolatable from this form — the same property the old single-slider
+  // version had, preserved across the three-axis split.
+  const [correctnessWeight, setCorrectnessWeight] = useState(
+    job?.scoringWeights.correctness ?? 40,
   );
+  const [depthWeight, setDepthWeight] = useState(job?.scoringWeights.depth ?? 20);
+  const communicationWeight = 100 - correctnessWeight - depthWeight;
+
+  const setWeights = (correctness: number, depth: number) => {
+    setCorrectnessWeight(correctness);
+    setDepthWeight(depth);
+  };
   const [rejectionThreshold, setRejectionThreshold] = useState(
     job ? String(job.rejectionThreshold) : "70",
   );
@@ -289,8 +303,9 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
     // silently no-op) and an omitted sub-field resets to null.
     eligibility: buildEligibility(),
     scoringWeights: {
-      technical: technicalWeight,
-      communication: 100 - technicalWeight,
+      correctness: correctnessWeight,
+      depth: depthWeight,
+      communication: communicationWeight,
     },
     rejectionThreshold: parsedRejection ?? 70,
     // `null` clears the per-job cap so the org default applies again.
@@ -524,8 +539,11 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
 
           {step === 2 ? (
             <ScoringStep
-              technicalWeight={technicalWeight}
-              setTechnicalWeight={setTechnicalWeight}
+              correctnessWeight={correctnessWeight}
+              depthWeight={depthWeight}
+              communicationWeight={communicationWeight}
+              setWeights={setWeights}
+              applyPreset={setWeights}
               rejectionThreshold={rejectionThreshold}
               setRejectionThreshold={setRejectionThreshold}
               rejectionError={rejectionError}
@@ -880,9 +898,244 @@ function ClassificationStep({
 
 /* ───────────────────────  Step 2 · Scoring  ───────────────────────── */
 
+/**
+ * The three axes share ONE hue at three intensities rather than three
+ * different colours. They are parts of a single score, not unrelated
+ * categories, and a monochrome ramp says that. It is also the only
+ * theme-safe option here: `--primary` is redefined for dark mode, whereas the
+ * `--stage-*` palette is not, so saturated hues would misfire on dark.
+ */
+const AXIS_FILL = [
+  "var(--primary)",
+  "color-mix(in oklab, var(--primary) 62%, var(--surface))",
+  "color-mix(in oklab, var(--primary) 28%, var(--surface))",
+] as const;
+
+/**
+ * The score split as ONE bar with two draggable dividers.
+ *
+ * Three numbers that must total 100 are a COMPOSITION, and the previous
+ * two-independent-sliders-plus-a-leftover layout hid that: you could not see
+ * the split at a glance, communication looked like a different kind of thing
+ * than its two peers, and dragging one slider silently shoved another down
+ * with no visual warning.
+ *
+ * Here the constraint is STRUCTURAL — a divider only ever trades between its
+ * two neighbours, so the total is 100 by construction and an invalid payload
+ * is unrepresentable. Handle 1 sits at `correctness`, handle 2 at
+ * `correctness + depth`; communication is whatever is left.
+ */
+function WeightSplitBar({
+  correctness,
+  depth,
+  onChange,
+}: {
+  correctness: number;
+  depth: number;
+  onChange: (correctness: number, depth: number) => void;
+}) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [dragging, setDragging] = useState<1 | 2 | null>(null);
+
+  const communication = 100 - correctness - depth;
+  const positions = [correctness, correctness + depth];
+
+  /** Move one divider, trading only against its immediate neighbour. */
+  const moveHandle = (which: 1 | 2, raw: number) => {
+    const v = Math.min(100, Math.max(0, Math.round(raw)));
+    if (which === 1) {
+      // Handle 2 holds still, so communication is untouched.
+      const upper = correctness + depth;
+      const next = Math.min(v, upper);
+      onChange(next, upper - next);
+    } else {
+      // Handle 1 holds still, so correctness is untouched.
+      const next = Math.max(v, correctness);
+      onChange(correctness, next - correctness);
+    }
+  };
+
+  const pctFromClientX = (clientX: number): number | null => {
+    const el = trackRef.current;
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0) return null;
+    return ((clientX - rect.left) / rect.width) * 100;
+  };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!dragging) return;
+    const pct = pctFromClientX(e.clientX);
+    if (pct !== null) moveHandle(dragging, pct);
+  };
+
+  const startDrag = (which: 1 | 2) => (e: React.PointerEvent) => {
+    e.preventDefault();
+    // Without this the track's own handler also fires and snaps the divider to
+    // the click point — a visible jolt when you grab a handle slightly off-centre.
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDragging(which);
+  };
+
+  const endDrag = () => setDragging(null);
+
+  /** Click anywhere on the track to send the NEAREST divider there. */
+  const onTrackPointerDown = (e: React.PointerEvent) => {
+    const pct = pctFromClientX(e.clientX);
+    if (pct === null) return;
+    const nearest =
+      Math.abs(pct - positions[0]) <= Math.abs(pct - positions[1]) ? 1 : 2;
+    moveHandle(nearest, pct);
+  };
+
+  const onHandleKeyDown = (which: 1 | 2) => (e: React.KeyboardEvent) => {
+    const current = positions[which - 1];
+    const step = e.shiftKey ? 5 : 1;
+    let next: number | null = null;
+    if (e.key === "ArrowLeft" || e.key === "ArrowDown") next = current - step;
+    if (e.key === "ArrowRight" || e.key === "ArrowUp") next = current + step;
+    if (e.key === "Home") next = 0;
+    if (e.key === "End") next = 100;
+    if (next === null) return;
+    e.preventDefault();
+    moveHandle(which, next);
+  };
+
+  const segments = [
+    { label: "Correctness", value: correctness },
+    { label: "Depth", value: depth },
+    { label: "Communication", value: communication },
+  ];
+
+  return (
+    <div
+      className="select-none"
+      onPointerMove={onPointerMove}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+    >
+      <div
+        ref={trackRef}
+        onPointerDown={onTrackPointerDown}
+        className="relative h-11 w-full cursor-pointer overflow-hidden rounded-lg border border-line-2 bg-surface"
+      >
+        {segments.map((seg, i) => (
+          <div
+            key={seg.label}
+            // Animate preset jumps, but NEVER while dragging — a transition
+            // there makes the fill lag the cursor and feel soggy.
+            className={`absolute inset-y-0 flex items-center justify-center ${
+              dragging ? "" : "transition-[left,width] duration-150 ease-out"
+            }`}
+            style={{
+              left: `${i === 0 ? 0 : positions[i - 1]}%`,
+              width: `${seg.value}%`,
+              background: AXIS_FILL[i],
+            }}
+          >
+            {/* The inline number is the fast read while dragging, but it
+                cannot fit in a narrow segment — below ~9% it would clip or
+                overflow onto its neighbour, so the legend carries it. */}
+            {seg.value >= 9 && (
+              <span
+                className="text-[12px] font-semibold tabular-nums"
+                // Segment 3 is only 28% primary over the surface, so it stays
+                // light in both themes and needs ink, not primary-foreground.
+                style={{
+                  color: i === 2 ? "var(--ink)" : "var(--primary-foreground)",
+                }}
+              >
+                {seg.value}%
+              </span>
+            )}
+          </div>
+        ))}
+
+        {([1, 2] as const).map((which) => (
+          <div
+            key={which}
+            role="slider"
+            tabIndex={0}
+            aria-label={
+              which === 1
+                ? "Correctness / Depth divider"
+                : "Depth / Communication divider"
+            }
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={positions[which - 1]}
+            aria-valuetext={
+              which === 1
+                ? `Correctness ${correctness}%, Depth ${depth}%`
+                : `Depth ${depth}%, Communication ${communication}%`
+            }
+            onPointerDown={startDrag(which)}
+            onKeyDown={onHandleKeyDown(which)}
+            // w-5 is a deliberate ~20px hit target on a 3px visual: the grip
+            // has to be grabbable without pixel-hunting, especially on a
+            // trackpad. The `group` drives the hover affordance below.
+            className={`group absolute inset-y-0 z-10 flex w-5 -translate-x-1/2 cursor-col-resize items-center justify-center rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] ${
+              dragging && dragging !== which ? "pointer-events-none" : ""
+            }`}
+            style={{ left: `${positions[which - 1]}%` }}
+          >
+            <span
+              // Ringed rather than bare: the second divider sits against the
+              // palest segment, where an unringed grip nearly disappears.
+              className={`w-[3px] rounded-full bg-[var(--surface)] ring-1 ring-[var(--border)] transition-all group-hover:h-7 group-hover:w-[4px] ${
+                dragging === which ? "h-7 w-[4px]" : "h-6"
+              }`}
+            />
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-3 grid gap-3 sm:grid-cols-3">
+        {[
+          {
+            label: "Correctness",
+            value: correctness,
+            hint: "Did they answer the question asked and land the expected point?",
+          },
+          {
+            label: "Depth",
+            value: depth,
+            hint: "Have they lived it — trade-offs, real-world specifics, judgment?",
+          },
+          {
+            label: "Communication",
+            value: communication,
+            hint: "Structure, clarity, concision and spoken fluency.",
+          },
+        ].map((axis, i) => (
+          <div key={axis.label} className="flex gap-2">
+            <span
+              aria-hidden
+              className="mt-[5px] h-2.5 w-2.5 shrink-0 rounded-full"
+              style={{ background: AXIS_FILL[i] }}
+            />
+            <div className="flex flex-col">
+              <span className="text-[12.5px] font-semibold text-ink tabular-nums">
+                {axis.label} {axis.value}%
+              </span>
+              <span className="text-[11.5px] leading-snug text-ink-2">
+                {axis.hint}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ScoringStep({
-  technicalWeight,
-  setTechnicalWeight,
+  correctnessWeight,
+  depthWeight,
+  communicationWeight,
+  setWeights,
+  applyPreset,
   rejectionThreshold,
   setRejectionThreshold,
   rejectionError,
@@ -891,8 +1144,11 @@ function ScoringStep({
   maxAttemptsError,
   defaultAttempts,
 }: {
-  technicalWeight: number;
-  setTechnicalWeight: (n: number) => void;
+  correctnessWeight: number;
+  depthWeight: number;
+  communicationWeight: number;
+  setWeights: (correctness: number, depth: number) => void;
+  applyPreset: (correctness: number, depth: number) => void;
   rejectionThreshold: string;
   setRejectionThreshold: (v: string) => void;
   rejectionError: string;
@@ -905,21 +1161,23 @@ function ScoringStep({
     <div>
       <StepHead
         title="Scoring"
-        subtitle="How the interview's two axes fold into one overall score, and where the shortlist line sits."
+        subtitle="How the interview's three axes fold into one overall score, and where the shortlist line sits."
       />
       <div className="flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <span className="text-[13px] font-semibold text-ink">
             Score split
           </span>
-          <div className="flex items-center gap-1.5">
-            {WEIGHT_PRESETS.map(([pct, label]) => {
-              const active = technicalWeight === pct;
+          <div className="flex flex-wrap items-center gap-1.5">
+            {WEIGHT_PRESETS.map(([correctness, depth, label, hint]) => {
+              const active =
+                correctnessWeight === correctness && depthWeight === depth;
               return (
                 <button
-                  key={pct}
+                  key={label}
                   type="button"
-                  onClick={() => setTechnicalWeight(pct)}
+                  title={hint}
+                  onClick={() => applyPreset(correctness, depth)}
                   className={`rounded-md border px-2.5 py-1 text-[12px] font-semibold transition-colors ${
                     active
                       ? "border-primary bg-accent text-primary"
@@ -932,21 +1190,34 @@ function ScoringStep({
             })}
           </div>
         </div>
-        <input
-          id="job-weights"
-          type="range"
-          min={1}
-          max={100}
-          step={1}
-          value={technicalWeight}
-          onChange={(e) => setTechnicalWeight(Number(e.target.value))}
-          className="w-full cursor-pointer"
-          style={{ accentColor: "var(--primary)" }}
+
+        <WeightSplitBar
+          correctness={correctnessWeight}
+          depth={depthWeight}
+          onChange={setWeights}
         />
-        <div className="flex items-center justify-between text-[12.5px] font-semibold text-ink-2">
-          <span>Technical {technicalWeight}%</span>
-          <span>Communication {100 - technicalWeight}%</span>
-        </div>
+
+        {communicationWeight === 0 && (
+          <p className="rounded-md border border-line-2 bg-hover px-3 py-2 text-[11.5px] leading-relaxed text-ink-2">
+            <strong className="font-semibold text-ink">
+              Communication is weighted 0%.
+            </strong>{" "}
+            Spoken clarity won&apos;t affect the score — but answers are still
+            graded from a speech-to-text transcript, so a candidate who is hard
+            to understand will produce a poorer transcript and a less reliable
+            correctness score. It is still shown to reviewers, just not counted.
+          </p>
+        )}
+        {correctnessWeight === 0 && (
+          <p className="rounded-md border border-line-2 bg-hover px-3 py-2 text-[11.5px] leading-relaxed text-ink-2">
+            <strong className="font-semibold text-ink">
+              Correctness is weighted 0%.
+            </strong>{" "}
+            A confidently wrong answer can still score well on depth and
+            delivery. Only use this for rounds where being right isn&apos;t what
+            you&apos;re screening for.
+          </p>
+        )}
 
         <div className="mt-2 grid gap-4 sm:grid-cols-2">
           <div>

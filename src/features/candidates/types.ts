@@ -101,10 +101,18 @@ export interface CandidateStatus {
   updatedAt: string
 }
 
-/** Weighted scoring fold of a submitted interview. */
+/**
+ * Weighted scoring fold of a submitted interview — the slim projection the
+ * candidate list carries. The full breakdown (sub-scores, fluency, per-question
+ * detail) lives on the interviews feature's `InterviewScores`.
+ */
 export interface InterviewScores {
   overall: number
-  technical: number
+  /** Did they answer the question asked and land the expected point? */
+  correctness: number
+  /** Trade-offs, specifics, judgment — difficulty-normalised. */
+  depth: number
+  /** Substance (structure · clarity · concision) + spoken fluency. */
   communication: number
   recommendation: Recommendation | string
   summary: string

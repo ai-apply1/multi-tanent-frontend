@@ -49,9 +49,20 @@ export interface JobEligibility {
   requiredSkills: string[]
 }
 
-/** Fold weights for `scores.overall`. Always sum to exactly 100. */
+/**
+ * Fold weights for `scores.overall`. The three ALWAYS sum to exactly 100
+ * (backend-validated, 422 otherwise).
+ *
+ * The axes are non-overlapping by design, so a job weights what the ROLE
+ * needs. Any single axis may be 0 — 0/0/100 is a legitimate "can they hold a
+ * conversation" screen — only an all-zero triple is rejected.
+ */
 export interface JobScoringWeights {
-  technical: number
+  /** Did they answer the question asked and land the expected point? */
+  correctness: number
+  /** Have they lived it — trade-offs, specifics, judgment? */
+  depth: number
+  /** Could a listener follow them — substance + spoken fluency? */
   communication: number
 }
 

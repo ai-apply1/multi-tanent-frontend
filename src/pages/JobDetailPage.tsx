@@ -446,8 +446,9 @@ function OverviewTab({
 
           <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
             <MetaCell label="Score split">
-              <span className="mono">
-                {job.scoringWeights.technical}% /{" "}
+              <span className="mono" title="Correctness / Depth / Communication">
+                {job.scoringWeights.correctness}% /{" "}
+                {job.scoringWeights.depth}% /{" "}
                 {job.scoringWeights.communication}%
               </span>
             </MetaCell>
