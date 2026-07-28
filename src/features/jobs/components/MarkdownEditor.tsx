@@ -63,10 +63,32 @@ export function MarkdownEditor({
     }
   };
 
+  // The library's textarea only grows to fit its content, so the empty space
+  // below a short description didn't focus the editor — clicking there felt
+  // dead. Redirect any mousedown in the editor chrome (but not on the textarea
+  // itself, a toolbar control, or a link) to the textarea, caret at the end.
+  const focusEditorOnEmptyClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (
+      !target.closest(".w-md-editor") ||
+      target.closest("textarea, .w-md-editor-toolbar, a, button")
+    ) {
+      return;
+    }
+    const textarea = event.currentTarget.querySelector<HTMLTextAreaElement>(
+      ".w-md-editor-text-input",
+    );
+    if (!textarea) return;
+    event.preventDefault(); // keep the browser from focusing elsewhere first
+    textarea.focus();
+    const caret = textarea.value.length;
+    textarea.setSelectionRange(caret, caret);
+  };
+
   return (
     // `md-editor-themed` scopes the globals.css bridge that remaps the
     // library's GitHub palette onto the app's theme tokens.
-    <div className="md-editor-themed">
+    <div className="md-editor-themed" onMouseDown={focusEditorOnEmptyClick}>
       {label ? (
         <label
           htmlFor={id}

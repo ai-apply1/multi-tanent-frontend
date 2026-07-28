@@ -443,6 +443,15 @@
 .md-editor-themed .w-md-editor:focus-within {
   box-shadow: 0 0 0 1px var(--primary), 0 0 0 4px var(--accent-ring);
 }
+/* The textarea only grows to fit its content, so the empty space below a short
+   description is the content wrapper, not the textarea — and showed the default
+   arrow. Extend the text (I-beam) cursor across the whole edit surface so the
+   box reads as one field (pairs with the click-to-focus in MarkdownEditor.tsx). */
+.md-editor-themed .w-md-editor-content,
+.md-editor-themed .w-md-editor-area,
+.md-editor-themed .w-md-editor-text {
+  cursor: text;
+}
 /* Same slim pill scrollbars as `.scroll` for the editor's inner panes. */
 .md-editor-themed ::-webkit-scrollbar {
   width: 10px;
