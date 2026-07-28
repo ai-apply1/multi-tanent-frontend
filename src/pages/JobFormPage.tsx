@@ -997,7 +997,13 @@ function WeightSplitBar({
   onChange: (correctness: number, depth: number) => void;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
-  const [dragging, setDragging] = useState<1 | 2 | null>(null);
+  /**
+   * Which divider the pointer is driving. `"stacked"` is the case where BOTH
+   * dividers sit on the same point (depth === 0): the grip under the finger
+   * stands for two of them, and which one the user means is only knowable once
+   * they move — see {@link onPointerMove}.
+   */
+  const [dragging, setDragging] = useState<1 | 2 | "stacked" | null>(null);
 
   const communication = 100 - correctness - depth;
   const positions = [correctness, correctness + depth];
@@ -1028,7 +1034,31 @@ function WeightSplitBar({
   const onPointerMove = (e: React.PointerEvent) => {
     if (!dragging) return;
     const pct = pctFromClientX(e.clientX);
-    if (pct !== null) moveHandle(dragging, pct);
+    if (pct === null) return;
+
+    /*
+     * Resolve a stacked grab by DIRECTION.
+     *
+     * With depth at 0 both dividers render at the same point, one exactly on
+     * top of the other, and each can only travel one way: divider 1 leftwards
+     * (shrinking Correctness) and divider 2 rightwards (growing Depth). Before
+     * this, whichever happened to paint on top swallowed the gesture — so at
+     * Correctness 100 the grip under the finger was the one pinned against the
+     * edge, and the one that could actually move was buried beneath it and
+     * unreachable. The slider read as broken.
+     *
+     * The first movement says which divider was meant, which is also how it
+     * behaves once they separate: pull left and Correctness gives way, push
+     * right and Depth opens up.
+     */
+    if (dragging === "stacked") {
+      if (pct === positions[0]) return; // no direction expressed yet
+      const which = pct < positions[0] ? 1 : 2;
+      setDragging(which);
+      moveHandle(which, pct);
+      return;
+    }
+    moveHandle(dragging, pct);
   };
 
   const startDrag = (which: 1 | 2) => (e: React.PointerEvent) => {
@@ -1037,7 +1067,7 @@ function WeightSplitBar({
     // the click point — a visible jolt when you grab a handle slightly off-centre.
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
-    setDragging(which);
+    setDragging(positions[0] === positions[1] ? "stacked" : which);
   };
 
   const endDrag = () => setDragging(null);
@@ -1046,8 +1076,29 @@ function WeightSplitBar({
   const onTrackPointerDown = (e: React.PointerEvent) => {
     const pct = pctFromClientX(e.clientX);
     if (pct === null) return;
+    const [p0, p1] = positions;
+    /*
+     * Nearest wins — EXCEPT when the two dividers sit on the same point
+     * (depth === 0), where "nearest" is a tie and the old `<=` resolved it to
+     * divider 1 every time. Divider 1 is clamped at `correctness + depth`,
+     * which IS that point, so every click on the far side of it asked the one
+     * divider that cannot go there to go there: a guaranteed no-op. With
+     * Correctness at 60 and Depth at 0, the whole right-hand 40% of the track
+     * silently ignored clicks; at 0/0/100 the entire track did.
+     *
+     * Stacked, the tie is resolved by DIRECTION instead — the same rule the
+     * grip itself uses (see `onPointerMove`), so track and grip agree: left of
+     * the point moves divider 1, right of it moves divider 2. Each can only
+     * travel that way, so the click always lands on the one that can serve it.
+     */
     const nearest =
-      Math.abs(pct - positions[0]) <= Math.abs(pct - positions[1]) ? 1 : 2;
+      p0 === p1
+        ? pct > p0
+          ? 2
+          : 1
+        : Math.abs(pct - p0) <= Math.abs(pct - p1)
+          ? 1
+          : 2;
     moveHandle(nearest, pct);
   };
 
@@ -1080,7 +1131,14 @@ function WeightSplitBar({
       <div
         ref={trackRef}
         onPointerDown={onTrackPointerDown}
-        className="relative h-11 w-full cursor-pointer overflow-hidden rounded-lg border border-line-2 bg-surface"
+        // `touch-none`: without it a touch device reserves the gesture for
+        // page scrolling, then fires pointercancel — which `endDrag` handles
+        // cleanly, so the drag just silently died and the page scrolled
+        // instead. `preventDefault()` in `startDrag` does NOT cover this;
+        // touch-action is the only thing that tells the browser up front. Every
+        // other draggable surface in the app already sets it (HlsPlayer,
+        // video-player, CandidateKanban, JobQuestionsManager, OverviewPage).
+        className="relative h-11 w-full cursor-pointer touch-none overflow-hidden rounded-lg border border-line-2 bg-surface"
       >
         {segments.map((seg, i) => (
           <div
@@ -1166,8 +1224,14 @@ function WeightSplitBar({
             // w-5 is a deliberate ~20px hit target on a 3px visual: the grip
             // has to be grabbable without pixel-hunting, especially on a
             // trackpad. The `group` drives the hover affordance below.
-            className={`group absolute inset-y-0 z-10 flex w-5 -translate-x-1/2 cursor-col-resize items-center justify-center rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] ${
-              dragging && dragging !== which ? "pointer-events-none" : ""
+            // `touch-none` for the same reason as the track — see there.
+            className={`group absolute inset-y-0 z-10 flex w-5 -translate-x-1/2 cursor-col-resize touch-none items-center justify-center rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] ${
+              // Only the divider NOT being driven opts out of hit-testing. A
+              // "stacked" grab has not resolved to one yet, so neither may —
+              // the grip still holds the pointer capture that will resolve it.
+              dragging !== null && dragging !== "stacked" && dragging !== which
+                ? "pointer-events-none"
+                : ""
             }`}
             style={{ left: `${positions[which - 1]}%` }}
           >
@@ -1175,7 +1239,11 @@ function WeightSplitBar({
               // Ringed rather than bare: the second divider sits against the
               // palest segment, where an unringed grip nearly disappears.
               className={`w-[3px] rounded-full bg-[var(--surface)] ring-1 ring-[var(--border)] transition-all group-hover:h-7 group-hover:w-[4px] ${
-                dragging === which ? "h-7 w-[4px]" : "h-6"
+                // A stacked grab shows both grips grabbed, because they are in
+                // the same place and the user is holding both until they move.
+                dragging === which || dragging === "stacked"
+                  ? "h-7 w-[4px]"
+                  : "h-6"
               }`}
             />
           </div>
