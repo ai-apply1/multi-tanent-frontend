@@ -1138,23 +1138,33 @@ function WeightSplitBar({
         // touch-action is the only thing that tells the browser up front. Every
         // other draggable surface in the app already sets it (HlsPlayer,
         // video-player, CandidateKanban, JobQuestionsManager, OverviewPage).
-        className="relative h-11 w-full cursor-pointer touch-none overflow-hidden rounded-lg border border-line-2 bg-surface"
+        // NOT `overflow-hidden`: clipping is scoped to the fills below instead.
+        // The grips are positioned with `-translate-x-1/2`, so a divider parked
+        // at 0% or 100% has half its width outside the track — and a clip here
+        // sliced that half away, leaving ~1.5px of a 3px grip. Dragging
+        // Communication to zero made the handle look like it had vanished, with
+        // nothing left to grab it by. (It also swallowed the keyboard focus
+        // ring, which is exactly the height of the track.)
+        className="relative h-11 w-full cursor-pointer touch-none rounded-lg border border-line-2 bg-surface"
       >
-        {segments.map((seg, i) => (
-          <div
-            key={seg.label}
-            // Animate preset jumps, but NEVER while dragging — a transition
-            // there makes the fill lag the cursor and feel soggy.
-            className={`absolute inset-y-0 ${
-              dragging ? "" : "transition-[left,width] duration-150 ease-out"
-            }`}
-            style={{
-              left: `${i === 0 ? 0 : positions[i - 1]}%`,
-              width: `${seg.value}%`,
-              background: AXIS_FILL[i],
-            }}
-          />
-        ))}
+        {/* The fills, and ONLY the fills, are clipped to the rounded shape. */}
+        <div className="absolute inset-0 overflow-hidden rounded-lg">
+          {segments.map((seg, i) => (
+            <div
+              key={seg.label}
+              // Animate preset jumps, but NEVER while dragging — a transition
+              // there makes the fill lag the cursor and feel soggy.
+              className={`absolute inset-y-0 ${
+                dragging ? "" : "transition-[left,width] duration-150 ease-out"
+              }`}
+              style={{
+                left: `${i === 0 ? 0 : positions[i - 1]}%`,
+                width: `${seg.value}%`,
+                background: AXIS_FILL[i],
+              }}
+            />
+          ))}
+        </div>
 
         {/*
          * Percentages live in ONE layer above every segment, not inside them.
