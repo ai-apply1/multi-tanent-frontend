@@ -103,6 +103,7 @@ import {
   invalidateCandidateDataAndJobCounts,
 } from "@/features/candidates/candidatesCache";
 import { toDisplayScore } from "@/features/candidates/aiScore";
+import { manualMoveBlocker } from "@/features/candidates/manualMove";
 import { useOrgTimezone } from "@/features/organization/useOrgTimezone";
 import {
   INITIAL_REJECT_STATUS_KEY,
@@ -1593,10 +1594,22 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                         {statuses.map((option) => {
                           const isCurrent =
                             option.key === candidate?.currentStatusId?.key;
+                          // Columns that aren't a human's to assert are greyed
+                          // out with the reason on hover, matching the
+                          // candidates table. `candidate` is null only while the
+                          // detail is in flight, and this menu is gated on
+                          // `candidateId` — treat the gap as unblocked and let
+                          // the server have the final word.
+                          const blocked = candidate
+                            ? manualMoveBlocker(option, candidate)
+                            : null;
                           return (
                             <DropdownMenuItem
                               key={option._id}
-                              disabled={isCurrent || statusPending}
+                              disabled={
+                                isCurrent || statusPending || blocked !== null
+                              }
+                              title={blocked ?? undefined}
                               onSelect={() =>
                                 void handleStatusChange(option.key)
                               }

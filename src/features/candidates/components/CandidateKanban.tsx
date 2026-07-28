@@ -20,6 +20,7 @@ import {
   updateCandidateStatus,
 } from "@/features/candidates/candidatesApi"
 import { invalidateCandidateData } from "@/features/candidates/candidatesCache"
+import { manualMoveBlocker } from "@/features/candidates/manualMove"
 import type { KanbanBoard, KanbanCard } from "@/features/candidates/types"
 import { errorMessage } from "@/lib/errors"
 import { cn } from "@/lib/utils"
@@ -131,6 +132,18 @@ export function CandidateKanban({ jobId, onOpenCandidate }: Props) {
     const meta = active.data.current as { card?: KanbanCard; fromKey?: string } | undefined
     const toKey = String(over.id)
     if (!meta?.card || !meta.fromKey || meta.fromKey === toKey) return
+
+    // Lanes that would refuse this card are dimmed during the drag, but they
+    // stay DROPPABLE on purpose: disabling them makes a determined drop end in
+    // a silent no-op, while accepting it and refusing here says why. The server
+    // enforces the same rule regardless — this only saves the round trip.
+    const target = data?.columns.find((c) => c.key === toKey)
+    const blocked = target ? manualMoveBlocker(target, meta.card) : null
+    if (blocked) {
+      toast.error(blocked)
+      return
+    }
+
     moveMutation.mutate({
       candidateId: meta.card._id,
       statusKey: toKey,
@@ -199,6 +212,10 @@ export function CandidateKanban({ jobId, onOpenCandidate }: Props) {
               color={column.color}
               count={column.count}
               cards={column.candidates}
+              // Only while a card is in the air: which lanes would refuse THIS
+              // candidate. Null when nothing is being dragged, so the resting
+              // board looks exactly as it did.
+              blocked={draggingCard ? manualMoveBlocker(column, draggingCard) : null}
               onOpenCandidate={onOpenCandidate}
             />
           ))}
@@ -219,6 +236,7 @@ function KanbanColumnLane({
   color,
   count,
   cards,
+  blocked,
   onOpenCandidate,
 }: {
   columnKey: string
@@ -226,6 +244,8 @@ function KanbanColumnLane({
   color: string | null
   count: number
   cards: KanbanCard[]
+  /** Why the in-flight card can't land here; null when it can (or none is). */
+  blocked: string | null
   onOpenCandidate: (candidateId: string) => void
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: columnKey })
@@ -238,9 +258,14 @@ function KanbanColumnLane({
   return (
     <div
       ref={setNodeRef}
+      title={blocked ?? undefined}
       className={cn(
         "flex w-[280px] flex-shrink-0 flex-col rounded-2xl border border-line bg-surface transition-colors",
-        isOver && "border-primary"
+        // Faded while a card that can't land here is in the air. Not disabled:
+        // the drop is still accepted so `handleDragEnd` can explain the refusal
+        // instead of the card silently snapping back.
+        blocked && "opacity-50",
+        isOver && (blocked ? "border-[var(--danger)]" : "border-primary")
       )}
     >
       <div className="flex items-center justify-between border-b border-line px-4 py-3">
