@@ -56,6 +56,14 @@ export const INVITABLE_STATUS_KEY: BuiltinCandidateStatusKey = "needs_review"
 export const POST_INTERVIEW_REJECT_STATUS_KEY: BuiltinCandidateStatusKey =
   "final_rejected"
 
+/**
+ * The CV-stage auto-rejection column: the vetting engine files a candidate here
+ * when their CV fails a job's hard eligibility gates, BEFORE any interview. The
+ * counterpart to {@link POST_INTERVIEW_REJECT_STATUS_KEY}; use it to detect an
+ * "initial rejection" and surface its reasons.
+ */
+export const INITIAL_REJECT_STATUS_KEY: BuiltinCandidateStatusKey = "rejected"
+
 /** Both terminal rejection columns — for read paths that treat them alike. */
 export const REJECTED_STATUS_KEYS: readonly BuiltinCandidateStatusKey[] = [
   "rejected",
@@ -213,6 +221,25 @@ export interface CandidateDetail extends CandidateBase {
   latestInterviewId: CandidateLatestInterview | null
   /** The parsed-CV cache. `null` until the cv-parse worker finishes. */
   profile: CandidateProfile | null
+  /**
+   * Answers to the job's custom eligibility fields, from both sources: the
+   * applicant-sourced ones written at creation, the resume-sourced ones by the
+   * CV-parse worker. Sparse, so a field the candidate skipped, or one added to
+   * the job after they applied, simply has no entry.
+   */
+  customAnswers?: CandidateFieldAnswer[]
+}
+
+/** One stored answer to one custom eligibility field. */
+export interface CandidateFieldAnswer {
+  /** FK into `job.eligibility.customFields[].key`. */
+  key: string
+  /** The label as it stood when the answer was collected, not as renamed since. */
+  label: string
+  value: string | number | boolean | null
+  source: "applicant" | "resume"
+  /** Resume-sourced only: the CV quote behind the value. '' otherwise. */
+  evidence: string
 }
 
 /**
@@ -266,6 +293,18 @@ export interface ActivityStatusRef {
   key: string
   label: string
   color: string | null
+}
+
+/**
+ * One eligibility gate's outcome on the CV pre-screen, for the drawer's
+ * checklist: `pass` (green tick), `fail` (red, a reason for rejection),
+ * `unknown` (amber, the gate could not be verified). Written by the vetting
+ * engine onto the rejection activity's `meta.checks`.
+ */
+export type VettingCheckStatus = "pass" | "fail" | "unknown"
+export interface VettingCheck {
+  text: string
+  status: VettingCheckStatus
 }
 
 /**
@@ -388,6 +427,13 @@ export interface BulkConfirmRow {
   /** Required server-side: the job's city gate compares against it. */
   city: string
   cvKey: string
+  /**
+   * This row's answers to the job's applicant-sourced custom fields, keyed by
+   * field key. Strings on the wire; the server types them against the job's
+   * own field list. A row missing a REQUIRED answer is skipped server-side
+   * (`missing_custom_answer`), which is why the dialog blocks it first.
+   */
+  customAnswers?: Record<string, string>
 }
 
 /**

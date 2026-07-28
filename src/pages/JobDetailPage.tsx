@@ -5,6 +5,7 @@ import {
   ChevronDown,
   Loader2,
   Pencil,
+  RefreshCw,
   Share2,
   Star,
   Upload,
@@ -16,6 +17,7 @@ import {
 import toast from "react-hot-toast";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Markdown } from "@/components/Markdown";
 import {
   DropdownMenu,
@@ -38,7 +40,10 @@ import {
 } from "@/features/jobs/types";
 import { useOrganization } from "@/features/organization/useOrganization";
 import { UploadCvsDialog } from "@/features/candidates/components/UploadCvsDialog";
-import { getCandidateKanban } from "@/features/candidates/candidatesApi";
+import {
+  getCandidateKanban,
+  reprocessJobThreshold,
+} from "@/features/candidates/candidatesApi";
 import { invalidateCandidateDataAndJobCounts } from "@/features/candidates/candidatesCache";
 import type { KanbanColumn } from "@/features/candidates/types";
 import { getJobTopCandidates } from "@/features/interviews/interviewsApi";
@@ -74,6 +79,7 @@ export function JobDetailPage() {
   const [tab, setTab] = useState<TabId>("overview");
   const [uploadOpen, setUploadOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [reprocessOpen, setReprocessOpen] = useState(false);
 
   const {
     data: job,
@@ -109,6 +115,35 @@ export function JobDetailPage() {
       void queryClient.invalidateQueries({ queryKey: ["job", jobId] });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
       void queryClient.invalidateQueries({ queryKey: ["jobShareLink", jobId] });
+    },
+  });
+
+  // Re-apply the current scoring threshold to this job's already-scored
+  // candidates (shortlist vs reject), silently. Only touches statuses, no
+  // re-scoring and no candidate emails.
+  const reprocessMutation = useMutation({
+    mutationFn: () => reprocessJobThreshold(jobId!),
+    onSuccess: (result) => {
+      setReprocessOpen(false);
+      if (result.moved === 0) {
+        toast.success(
+          result.evaluated === 0
+            ? "No scored candidates to re-evaluate."
+            : `Re-evaluated ${result.evaluated} candidate${result.evaluated === 1 ? "" : "s"}, no changes.`,
+        );
+      } else {
+        toast.success(
+          `Threshold re-applied: ${result.movedToShortlisted} moved to shortlisted, ${result.movedToFinalRejected} to rejected.`,
+        );
+      }
+      // Statuses moved, refresh the board counts, the top-ranked list, and the
+      // candidate-derived surfaces.
+      void queryClient.invalidateQueries({ queryKey: ["candidateKanban", jobId] });
+      void queryClient.invalidateQueries({ queryKey: ["jobTopCandidates", jobId] });
+      invalidateCandidateDataAndJobCounts(queryClient);
+    },
+    onError: (err) => {
+      toast.error(errorMessage(err, "Could not re-apply the threshold."));
     },
   });
 
@@ -240,6 +275,19 @@ export function JobDetailPage() {
           ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setReprocessOpen(true)}
+            disabled={reprocessMutation.isPending}
+          >
+            {reprocessMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" strokeWidth={1.9} />
+            )}
+            Re-apply threshold
+          </Button>
           {transitions.length > 0 ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -291,6 +339,24 @@ export function JobDetailPage() {
       </div>
 
       <JobShareDialog jobId={job._id} open={shareOpen} onOpenChange={setShareOpen} />
+
+      <ConfirmDialog
+        open={reprocessOpen}
+        onOpenChange={(o) => !o && setReprocessOpen(false)}
+        title="Re-apply the scoring threshold?"
+        description={
+          <>
+            This re-checks every already-interviewed candidate for this job
+            against the current threshold ({job.rejectionThreshold}) and moves
+            them between shortlisted and rejected based on their existing
+            interview score. Nobody is re-scored, and no emails are sent.
+          </>
+        }
+        confirmLabel="Re-apply"
+        loadingLabel="Re-applying…"
+        loading={reprocessMutation.isPending}
+        onConfirm={() => reprocessMutation.mutate()}
+      />
 
       {/*
         KPI strip, counted from the job's own board.

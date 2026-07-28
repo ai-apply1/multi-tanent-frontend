@@ -38,6 +38,7 @@ import {
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UserFormDialog } from "@/features/users/components/UserFormDialog";
+import { ResetPasswordDialog } from "@/features/users/components/ResetPasswordDialog";
 import { deleteUser, listUsers, updateUser } from "@/features/users/usersApi";
 import { USER_ROLE_LABELS, type OrgUser } from "@/features/users/types";
 import { useAuth } from "@/features/auth/AuthContext";
@@ -47,6 +48,7 @@ import { formatDateTime } from "@/lib/date";
 import { errorMessage as apiError } from "@/lib/errors";
 import { titleCase } from "@/lib/text";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { ClearFiltersButton } from "@/components/common/ClearFiltersButton";
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 const DEFAULT_PAGE_SIZE = 20;
@@ -68,6 +70,7 @@ export function TeamPage() {
   const [editTarget, setEditTarget] = useState<OrgUser | null>(null);
   const [activationTarget, setActivationTarget] = useState<OrgUser | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<OrgUser | null>(null);
+  const [resetTarget, setResetTarget] = useState<OrgUser | null>(null);
 
   const isOrgAdmin = user?.role === "org_admin";
   const debouncedSearch = useDebouncedValue(search);
@@ -171,6 +174,14 @@ export function TeamPage() {
     setFormOpen(true);
   };
 
+  const filtersActive = Boolean(search || roleFilter || statusFilter);
+  const clearFilters = () => {
+    setSearch("");
+    setRoleFilter("");
+    setStatusFilter("");
+    setPage(1);
+  };
+
   const rows = data?.data ?? [];
   const total = data?.count ?? 0;
   const totalPages = data?.totalPage ?? 0;
@@ -194,6 +205,7 @@ export function TeamPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <ClearFiltersButton active={filtersActive} onClear={clearFilters} />
           <Button size="sm" onClick={openCreate}>
             <Plus className="h-4 w-4" strokeWidth={2.2} />
             Add member
@@ -400,6 +412,16 @@ export function TeamPage() {
                         >
                           {row.isActive ? "Deactivate" : "Reactivate"}
                         </DropdownMenuItem>
+                        {/* Reset password reveals a fresh temp password to hand
+                            over. Never on your own row: the backend 403s a
+                            self-reset (it would sign you out), so we disable it
+                            here to match, the way Deactivate/Delete already do. */}
+                        <DropdownMenuItem
+                          disabled={isSelf}
+                          onSelect={() => setResetTarget(row)}
+                        >
+                          Reset password
+                        </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         {/* Permanent delete — org_admin only (the whole page
                             is), and never on your own row: the backend 403s
@@ -523,6 +545,14 @@ export function TeamPage() {
         loadingLabel="Deleting…"
         loading={deleteMutation.isPending}
         onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget)}
+      />
+
+      {/* Confirms, then reveals the generated temporary password once. Owns its
+          own mutation, so no page-level password state is kept around. */}
+      <ResetPasswordDialog
+        open={Boolean(resetTarget)}
+        onOpenChange={(o) => !o && setResetTarget(null)}
+        user={resetTarget}
       />
     </div>
   );

@@ -52,7 +52,7 @@ import type { NotificationPrefs } from "@/features/users/types";
 import { useAuth } from "@/features/auth/AuthContext";
 import { errorMessage as apiError } from "@/lib/errors";
 import { isHexColor, sameColor } from "@/lib/color";
-import { cn } from "@/lib/utils";
+import { blurOnWheel, cn } from "@/lib/utils";
 import { PLATFORM_NAME } from "@/lib/platform";
 import { trimTransparentEdges } from "@/lib/imageTrim";
 
@@ -60,6 +60,10 @@ const MAX_ATTEMPTS_MIN = 1;
 const MAX_ATTEMPTS_MAX = 10;
 const EXPIRY_DAYS_MIN = 1;
 const EXPIRY_DAYS_MAX = 365;
+
+/** Mirrors the [2, 120] clamp on both the org setting and the job override. */
+const DURATION_MIN = 2;
+const DURATION_MAX = 120;
 
 /**
  * The IANA zones the runtime knows about — the picker's OPTIONS, not the
@@ -520,6 +524,7 @@ export function OrgSettingsPage() {
   const [name, setName] = useState("");
   const [maxAttempts, setMaxAttempts] = useState("");
   const [expiryDays, setExpiryDays] = useState("");
+  const [duration, setDuration] = useState("");
   const [timezone, setTimezone] = useState("");
   // A fresh page never opens covered in red — errors appear once a field has
   // been edited (which also covers a saved timezone this browser doesn't know).
@@ -560,6 +565,7 @@ export function OrgSettingsPage() {
     setName(org.name);
     setMaxAttempts(String(org.settings.maxInterviewAttempts));
     setExpiryDays(String(org.settings.interviewExpiryDays));
+    setDuration(String(org.settings.interviewDurationMinutes));
     setTimezone(org.settings.timezone);
     setTheme(org.theme);
     setTouched({});
@@ -613,6 +619,14 @@ export function OrgSettingsPage() {
     attemptsValue > MAX_ATTEMPTS_MAX
       ? `Enter a whole number between ${MAX_ATTEMPTS_MIN} and ${MAX_ATTEMPTS_MAX}.`
       : null;
+  const durationValue = toInt(duration);
+  const durationError =
+    Number.isNaN(durationValue) ||
+    durationValue < DURATION_MIN ||
+    durationValue > DURATION_MAX
+      ? `Enter a whole number between ${DURATION_MIN} and ${DURATION_MAX}.`
+      : null;
+
   const expiryValue = toInt(expiryDays);
   const expiryError =
     Number.isNaN(expiryValue) ||
@@ -640,7 +654,12 @@ export function OrgSettingsPage() {
       : null;
 
   const hasErrors = Boolean(
-    nameError || attemptsError || expiryError || timezoneError || themeError,
+    nameError ||
+      attemptsError ||
+      expiryError ||
+      durationError ||
+      timezoneError ||
+      themeError,
   );
 
   // Only changed fields are sent. The PATCH is partial and settings are written
@@ -659,6 +678,9 @@ export function OrgSettingsPage() {
     }
     if (expiryValue !== profile.settings.interviewExpiryDays) {
       settings.interviewExpiryDays = expiryValue;
+    }
+    if (durationValue !== profile.settings.interviewDurationMinutes) {
+      settings.interviewDurationMinutes = durationValue;
     }
     if (timezone.trim() !== profile.settings.timezone) {
       settings.timezone = timezone.trim();
@@ -725,6 +747,7 @@ export function OrgSettingsPage() {
     setName(org.name);
     setMaxAttempts(String(org.settings.maxInterviewAttempts));
     setExpiryDays(String(org.settings.interviewExpiryDays));
+    setDuration(String(org.settings.interviewDurationMinutes));
     setTimezone(org.settings.timezone);
     setTheme(org.theme);
     setTouched({});
@@ -740,6 +763,7 @@ export function OrgSettingsPage() {
       name: true,
       maxAttempts: true,
       expiryDays: true,
+      duration: true,
       timezone: true,
     });
     if (!canSave || !org) return;
@@ -1008,6 +1032,7 @@ export function OrgSettingsPage() {
             min={MAX_ATTEMPTS_MIN}
             max={MAX_ATTEMPTS_MAX}
             value={maxAttempts}
+            onWheel={blurOnWheel}
             onChange={(e) => setMaxAttempts(e.target.value)}
             onBlur={() => setTouched((t) => ({ ...t, maxAttempts: true }))}
             disabled={!canWrite}
@@ -1020,7 +1045,7 @@ export function OrgSettingsPage() {
           ) : (
             <p className="mt-1.5 text-[12px] text-ink-muted">
               How many times a candidate may sit an interview before re-invites
-              are refused ({MAX_ATTEMPTS_MIN}–{MAX_ATTEMPTS_MAX}). A job can set
+              are refused ({MAX_ATTEMPTS_MIN} to {MAX_ATTEMPTS_MAX}). A job can set
               its own.
             </p>
           )}
@@ -1037,6 +1062,7 @@ export function OrgSettingsPage() {
             min={EXPIRY_DAYS_MIN}
             max={EXPIRY_DAYS_MAX}
             value={expiryDays}
+            onWheel={blurOnWheel}
             onChange={(e) => setExpiryDays(e.target.value)}
             onBlur={() => setTouched((t) => ({ ...t, expiryDays: true }))}
             disabled={!canWrite}
@@ -1048,8 +1074,38 @@ export function OrgSettingsPage() {
             </p>
           ) : (
             <p className="mt-1.5 text-[12px] text-ink-muted">
-              How long an invite link stays usable ({EXPIRY_DAYS_MIN}–
+              How long an invite link stays usable ({EXPIRY_DAYS_MIN} to{" "}
               {EXPIRY_DAYS_MAX}).
+            </p>
+          )}
+        </div>
+
+        <div>
+          <label htmlFor="org-duration" className={labelBase}>
+            Interview length (minutes)
+          </label>
+          <input
+            id="org-duration"
+            type="number"
+            className={inputBase}
+            min={DURATION_MIN}
+            max={DURATION_MAX}
+            value={duration}
+            onWheel={blurOnWheel}
+            onChange={(e) => setDuration(e.target.value)}
+            onBlur={() => setTouched((t) => ({ ...t, duration: true }))}
+            disabled={!canWrite}
+            aria-invalid={Boolean(touched.duration && durationError)}
+          />
+          {touched.duration && durationError ? (
+            <p className="mt-1.5 text-[12px] text-[var(--danger)]">
+              {durationError}
+            </p>
+          ) : (
+            <p className="mt-1.5 text-[12px] text-ink-muted">
+              How long a screening interview runs ({DURATION_MIN} to{" "}
+              {DURATION_MAX}), counted down on the candidate&apos;s screen. A
+              job can set its own.
             </p>
           )}
         </div>

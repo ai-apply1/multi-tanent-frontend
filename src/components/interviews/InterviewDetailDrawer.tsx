@@ -10,11 +10,13 @@ import axios from "axios";
 import {
   Activity,
   AlertTriangle,
+  Ban,
   Briefcase,
   Calculator,
   Check,
   CheckCircle2,
   ClipboardCheck,
+  ClipboardList,
   Clock,
   ExternalLink,
   EyeOff,
@@ -103,15 +105,21 @@ import {
 import { toDisplayScore } from "@/features/candidates/aiScore";
 import { useOrgTimezone } from "@/features/organization/useOrgTimezone";
 import {
+  INITIAL_REJECT_STATUS_KEY,
   INVITABLE_STATUS_KEY,
   POST_INTERVIEW_REJECT_STATUS_KEY,
   REJECTED_STATUS_KEYS,
   type BuiltinCandidateStatusKey,
   type CandidateActivity,
   type CandidateDetail,
+  type CandidateFieldAnswer,
   type CandidateProfile,
   type CandidateStatus,
+  type VettingCheck,
+  type VettingCheckStatus,
 } from "@/features/candidates/types";
+import { getJob } from "@/features/jobs/jobsApi";
+import type { JobCustomField } from "@/features/jobs/types";
 import {
   formatClock,
   formatScore,
@@ -783,6 +791,240 @@ function ProfileCard({ profile }: { profile: CandidateProfile | null }) {
 
 // ── Main drawer ────────────────────────────────────────────────────────
 
+/**
+ * Read the pre-screen checklist off a rejection activity's `meta`. New rows
+ * store a structured `checks` array (each gate + pass/fail/unknown status);
+ * older rows only have `reasons: string[]` (the failing reasons), rendered as
+ * failed checks. Anything malformed is dropped.
+ */
+function extractVettingChecks(
+  meta: Record<string, unknown> | null | undefined,
+): VettingCheck[] {
+  if (!meta) return [];
+  const raw = meta.checks;
+  if (Array.isArray(raw)) {
+    return raw
+      .map((c): VettingCheck | null => {
+        if (typeof c !== "object" || c === null) return null;
+        const text = (c as { text?: unknown }).text;
+        const status = (c as { status?: unknown }).status;
+        if (typeof text !== "string" || !text) return null;
+        const s: VettingCheckStatus =
+          status === "pass" || status === "unknown" ? status : "fail";
+        return { text, status: s };
+      })
+      .filter((c): c is VettingCheck => c !== null);
+  }
+  // Fallback for pre-checklist rows: the stored `reasons` are all failures.
+  const reasons = meta.reasons;
+  if (Array.isArray(reasons)) {
+    return reasons
+      .filter((r): r is string => typeof r === "string" && r.length > 0)
+      .map((text) => ({ text, status: "fail" as const }));
+  }
+  return [];
+}
+
+/** One row of the pre-screen checklist: a status icon plus the check text. */
+function VettingCheckRow({ check }: { check: VettingCheck }) {
+  return (
+    <div className="flex gap-2.5 text-[13px] leading-snug text-ink-2">
+      {check.status === "pass" ? (
+        <Check
+          className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--success)]"
+          strokeWidth={2.2}
+        />
+      ) : check.status === "unknown" ? (
+        <AlertTriangle
+          className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--warning)]"
+          strokeWidth={2}
+        />
+      ) : (
+        <span
+          className="mt-0.5 flex h-[15px] w-[15px] shrink-0 items-center justify-center rounded-full border-[1.6px] text-[10px] font-bold text-[color:var(--danger)]"
+          style={{ borderColor: "var(--danger)" }}
+        >
+          !
+        </span>
+      )}
+      {check.text}
+    </div>
+  );
+}
+
+/**
+ * The candidate's answers to the job's custom eligibility fields.
+ *
+ * Deliberately SEPARATE from the pre-screen checklist above. That card shows
+ * gates, with a verdict per row; this one shows collected facts. A field HR
+ * marked collect-only never produces a check at all, so without this card it
+ * would be invisible, and a green tick against it would claim a check that
+ * never ran. Each row says where the answer came from, and a resume-sourced
+ * one carries the CV quote behind it so an automatic decision is auditable.
+ */
+function ApplicationAnswersCard({
+  answers,
+  fields,
+}: {
+  answers: CandidateFieldAnswer[];
+  /** The job's configured fields, so one with no answer is still listed. */
+  fields: JobCustomField[];
+}) {
+  /*
+   * Driven by the JOB's field list, not by the stored answers.
+   *
+   * Rendering only what was answered made a configured field vanish from the
+   * drawer entirely whenever it had no value — which is the COMMON case for a
+   * resume-sourced field the CV happens not to mention. HR could not tell
+   * "nobody configured this" from "we looked and the CV was silent", and the
+   * second one is the one that explains why a candidate is sitting in review.
+   *
+   * Any answer whose field is no longer on the job is appended rather than
+   * dropped, so deleting a field never erases what a candidate already told us.
+   */
+  const byKey = new Map(answers.map((a) => [a.key, a]));
+  const rows: Array<{
+    key: string;
+    label: string;
+    answer: CandidateFieldAnswer | null;
+    source: "applicant" | "resume";
+  }> = fields.map((f) => ({
+    key: f.key,
+    label: f.label,
+    answer: byKey.get(f.key) ?? null,
+    source: f.source,
+  }));
+  const configured = new Set(fields.map((f) => f.key));
+  for (const a of answers) {
+    if (!configured.has(a.key)) {
+      rows.push({ key: a.key, label: a.label, answer: a, source: a.source });
+    }
+  }
+
+  if (rows.length === 0) return null;
+  const render = (value: CandidateFieldAnswer["value"]): string => {
+    if (value === null || value === undefined) return "-";
+    if (typeof value === "boolean") return value ? "Yes" : "No";
+    // Grouped, and with the locale PINNED to match the backend's own
+    // `formatNumber` in the vetting engine. A salary shown as "150000" here and
+    // "150,000" in the gate check beside it reads as two different numbers.
+    if (typeof value === "number") {
+      return value.toLocaleString("en-US", { maximumFractionDigits: 2 });
+    }
+    return String(value);
+  };
+
+  return (
+    <div className="rounded-2xl border border-line bg-surface p-[18px]">
+      <div className="mb-3.5 flex items-center gap-2">
+        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent text-primary">
+          <ClipboardList className="h-3.5 w-3.5" strokeWidth={2} />
+        </span>
+        <h4 className="text-[13.5px] font-bold text-ink">
+          Role requirements
+        </h4>
+      </div>
+      {/* Two up from `sm`, matching the contact card above. One field per row
+          wasted most of the width on a drawer this wide, and the list grows
+          with every requirement HR adds. */}
+      <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+        {rows.map((row) => (
+          <div key={row.key} className="grid gap-0.5">
+            {/* Wraps rather than overflows: a long label plus its source chip
+                does not fit a half-width column on one line. */}
+            <dt className="flex flex-wrap items-center gap-x-1.5 text-[12px] text-ink-muted">
+              {row.label}
+              {/*
+               * Names the SOURCE, not the person. Both halves are parallel
+               * ("from the CV" / "from the application"), which is the actual
+               * distinction being drawn, and it needs no pronoun for a
+               * candidate whose gender this product has never been told.
+               */}
+              <span className="text-[11px] text-ink-subtle">
+                {row.source === "resume" ? "from the CV" : "from the application"}
+              </span>
+            </dt>
+            {row.answer ? (
+              <dd className="text-[13.5px] font-semibold text-ink">
+                {render(row.answer.value)}
+              </dd>
+            ) : (
+              /*
+               * Says WHICH kind of nothing this is. A resume field with no
+               * value means the CV was read and did not say; an applicant
+               * field means they were asked and skipped it. Both leave the
+               * candidate parked at review, and HR needs to know which.
+               */
+              <dd className="text-[13.5px] font-semibold text-ink-subtle">
+                {row.source === "resume"
+                  ? "Not found on the CV"
+                  : "Not answered"}
+              </dd>
+            )}
+            {row.answer?.evidence ? (
+              <dd className="text-[12px] italic leading-snug text-ink-muted">
+                “{row.answer.evidence}”
+              </dd>
+            ) : null}
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+/**
+ * CV-stage eligibility checklist, shown in the drawer's no-interview branch
+ * when a candidate sits in the initial `rejected` status. Renders every gate
+ * the vetting engine ran, a tick for a passed check, a red mark for a failed
+ * one (the reason for rejection), an amber warning for one it couldn't verify.
+ * Falls back to a generic line when nothing was recorded, or while it loads.
+ */
+function InitialRejectionCard({
+  checks,
+  loading,
+}: {
+  checks: VettingCheck[];
+  loading: boolean;
+}) {
+  return (
+    <div className="rounded-2xl border border-line bg-surface p-[18px]">
+      <div className="mb-1.5 flex items-center gap-2">
+        <span
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-[color:var(--danger)]"
+          style={{ background: "var(--danger-soft)" }}
+        >
+          <Ban className="h-3.5 w-3.5" strokeWidth={2} />
+        </span>
+        <span className="text-[14px] font-bold">
+          Why this candidate was rejected
+        </span>
+      </div>
+      <p className="mb-3.5 text-[12.5px] leading-relaxed text-ink-muted">
+        Rejected automatically at the CV pre-screen stage, before any interview.
+        Here is how they measured against the job&apos;s hard requirements. The
+        red item(s) are what caused the rejection.
+      </p>
+      {loading ? (
+        <div className="flex items-center gap-2 text-[13px] text-ink-muted">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading checks…
+        </div>
+      ) : checks.length ? (
+        <div className="grid gap-2.5">
+          {checks.map((check, i) => (
+            <VettingCheckRow key={`${i}-${check.text}`} check={check} />
+          ))}
+        </div>
+      ) : (
+        <p className="text-[13px] text-ink-muted">
+          No specific checks were recorded for this rejection.
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp, onOpenChange }: Props) {
   // Reattempt history: `selectedSessionId` overrides which attempt's detail
   // we load; null = follow the prop. Reset whenever the entry point changes.
@@ -797,10 +1039,30 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   const queryClient = useQueryClient();
   const orgTimezone = useOrgTimezone();
 
+  /*
+   * `staleTime: 0` on every query in this drawer — it overrides the global 30s
+   * (main.tsx), and it is load-bearing rather than a tuning preference.
+   *
+   * This component is mounted PERMANENTLY by its host page; opening the drawer
+   * only flips `sessionId`/`candidateId` from null to an id, it does NOT
+   * remount. So "open the drawer" is not a mount that refetches — React Query
+   * simply re-enables the query for that key, and under the global staleTime it
+   * replays a cached entry with NO request. Everything this drawer shows (score,
+   * verdict, funnel status, pre-screen checks) is written by things OUTSIDE this
+   * tab: the scoring worker, the vetting engine, "Re-apply threshold", another
+   * reviewer. So closing and reopening a candidate showed the same stale card
+   * and a status pill that could disagree with the score beside it.
+   *
+   * Zero means every open revalidates. The cached data still paints instantly
+   * (React Query serves it while refetching in the background), so this costs a
+   * request per open, not a loading flash. Same reasoning, and the same fix, as
+   * the candidates table's own `staleTime: 0`.
+   */
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["interview", activeSessionId],
     queryFn: () => getInterview(activeSessionId!),
     enabled: Boolean(activeSessionId),
+    staleTime: 0,
     refetchInterval: (query) =>
       isTranscoding(query.state.data?.recording?.hlsStatus) ? 5000 : false,
   });
@@ -847,6 +1109,8 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
     queryKey: ["interviewAttempts", sessionId],
     queryFn: () => getInterviewAttempts(sessionId!),
     enabled: Boolean(sessionId),
+    // See the staleTime note on the interview query above.
+    staleTime: 0,
   });
   const attempts = attemptsQuery.data ?? [];
   const hasAttempts = attempts.length >= 1;
@@ -861,6 +1125,10 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
     queryKey: ["candidate", candidateId],
     queryFn: () => getCandidate(candidateId!),
     enabled: Boolean(candidateId),
+    // See the staleTime note on the interview query above. This one carries the
+    // funnel status pill, so a stale read is what let the header say one thing
+    // ("Final Rejection") while the score card beside it said another.
+    staleTime: 0,
   });
 
   /*
@@ -879,6 +1147,47 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   const statuses = statusesQuery.data ?? [];
   const candidate = candidateQuery.data ?? null;
   const profile = candidate?.profile ?? null;
+  const customAnswers = candidate?.customAnswers ?? [];
+
+  /*
+   * The job's CONFIGURED custom fields, so the answers card can list one that
+   * has no value instead of silently omitting it. Same `["job", id]` key the
+   * job pages use, so this is usually a cache hit rather than a request.
+   */
+  const jobId = candidate?.jobId ?? null;
+  const jobQuery = useQuery({
+    queryKey: ["job", jobId],
+    queryFn: () => getJob(jobId!),
+    enabled: Boolean(jobId),
+    staleTime: 60_000,
+  });
+  const customFields = jobQuery.data?.eligibility.customFields ?? [];
+
+  // "Initial rejection" = the CV-stage auto-reject column (`rejected`), NOT a
+  // post-interview `final_rejected`. The vetting engine records the WHY on the
+  // rejection ACTIVITY (`meta.reasons`), never on the candidate doc, so we read
+  // it from the unscoped activity feed. Fetched only when the candidate is in
+  // that state and has no interview (the one branch that renders it).
+  const isInitialRejected =
+    candidate?.currentStatusId?.key === INITIAL_REJECT_STATUS_KEY;
+  const rejectionActivitiesQuery = useQuery({
+    queryKey: ["candidateActivities", candidateId, "initial-rejection"],
+    queryFn: () => getCandidateActivities(candidateId!),
+    enabled: Boolean(candidateId) && isInitialRejected && !activeSessionId,
+    // See the staleTime note on the interview query above. A re-vet rewrites
+    // these checks, so a cached read would keep showing the old reasons.
+    staleTime: 0,
+  });
+  // Newest-first feed, so the first transition INTO `rejected` is the current
+  // one; its `meta.reasons` is the vetting engine's verbatim explanation.
+  const initialRejectionRow = rejectionActivitiesQuery.data?.data.find(
+    (a) =>
+      a.type === "status_changed" &&
+      a.toStatus?.key === INITIAL_REJECT_STATUS_KEY,
+  );
+  const initialRejectionChecks = extractVettingChecks(
+    initialRejectionRow?.meta,
+  );
 
   // Local mutation flags
   const [retranscoding, setRetranscoding] = useState(false);
@@ -1395,14 +1704,24 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                 {/* Contact + identity live in the header now, so this state is
                     just the parsed-CV profile and a note. */}
                 <ProfileCard profile={profile} />
+                <ApplicationAnswersCard answers={customAnswers} fields={customFields} />
 
-                <div className="flex items-center gap-3 rounded-2xl border border-dashed border-line bg-surface px-5 py-4 text-[13px] text-ink-muted">
-                  <MicOff className="h-5 w-5 shrink-0 text-ink-subtle" />
-                  <p>
-                    No interview yet. Once this candidate completes one, the
-                    score, video and evaluation appear here.
-                  </p>
-                </div>
+                {isInitialRejected ? (
+                  // Rejected at the CV pre-screen, no interview will ever exist,
+                  // so show WHY here instead of a "no interview yet" note.
+                  <InitialRejectionCard
+                    checks={initialRejectionChecks}
+                    loading={rejectionActivitiesQuery.isLoading}
+                  />
+                ) : (
+                  <div className="flex items-center gap-3 rounded-2xl border border-dashed border-line bg-surface px-5 py-4 text-[13px] text-ink-muted">
+                    <MicOff className="h-5 w-5 shrink-0 text-ink-subtle" />
+                    <p>
+                      No interview yet. Once this candidate completes one, the
+                      score, video and evaluation appear here.
+                    </p>
+                  </div>
+                )}
               </div>
             ) : is404 ? (
               <div className="flex h-72 flex-col items-center justify-center gap-3 px-6 text-center text-sm text-ink-muted">
@@ -1430,6 +1749,14 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                 {profile ? (
                   <div className="mb-4">
                     <ProfileCard profile={profile} />
+                  </div>
+                ) : null}
+                {customAnswers.length > 0 || customFields.length > 0 ? (
+                  <div className="mb-4">
+                    <ApplicationAnswersCard
+                      answers={customAnswers}
+                      fields={customFields}
+                    />
                   </div>
                 ) : null}
 

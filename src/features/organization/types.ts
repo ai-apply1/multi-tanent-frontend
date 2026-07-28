@@ -4,10 +4,15 @@
  * org id anywhere in the request, and no org selector in this app.
  */
 
-/** Org-wide defaults a job may override per-job (`maxAttempts`). */
+/**
+ * Org-wide defaults, two of which a job may override per-job
+ * (`maxAttempts`, `interviewDurationMinutes`).
+ */
 export interface OrganizationSettings {
   maxInterviewAttempts: number
   interviewExpiryDays: number
+  /** Soft length of one screening interview, in minutes. Bounded [2, 120]. */
+  interviewDurationMinutes: number
   /** IANA zone (`@IsTimeZone` on the backend), e.g. "Asia/Karachi". */
   timezone: string
 }
