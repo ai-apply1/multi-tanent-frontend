@@ -267,8 +267,10 @@ export function BulkEmailDialog({
           <DialogTitle>Send email</DialogTitle>
           <DialogDescription>
             Sending to {recipientLabel}. Reminders and invites include each
-            candidate&apos;s own interview link. This does not change their
-            status.
+            candidate&apos;s own interview link.{" "}
+            <span className="font-semibold text-[color:var(--warning)]">
+              This does not change their status.
+            </span>
           </DialogDescription>
         </DialogHeader>
 
