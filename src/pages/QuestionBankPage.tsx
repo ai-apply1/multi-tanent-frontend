@@ -199,7 +199,7 @@ export function QuestionBankPage() {
   }, [isFetching, total, rows.length, page, totalPages]);
 
   return (
-    <div className="mx-auto max-w-[1080px] px-6 py-6 lg:px-8 lg:py-8">
+    <div className="mx-auto max-w-[1240px] px-6 py-6 lg:px-8 lg:py-8">
       {/* Page header */}
       <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
         <div>
