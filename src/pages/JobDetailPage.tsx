@@ -519,14 +519,9 @@ function OverviewTab({
             )}
           </div>
 
-          <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <MetaCell label="Score split">
-              <span className="mono" title="Correctness / Depth / Communication">
-                {job.scoringWeights.correctness}% /{" "}
-                {job.scoringWeights.depth}% /{" "}
-                {job.scoringWeights.communication}%
-              </span>
-            </MetaCell>
+          <ScoreSplit weights={job.scoringWeights} />
+
+          <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
             <MetaCell label="Threshold">
               <span className="mono">{job.rejectionThreshold}</span>
             </MetaCell>
@@ -795,6 +790,68 @@ function MetaCell({ label, children }: { label: string; children: ReactNode }) {
         {label}
       </span>
       <span className="text-[13.5px] text-ink">{children}</span>
+    </div>
+  );
+}
+
+/**
+ * The three scoring axes share ONE hue at three intensities, not three unrelated
+ * colours — they are parts of a single overall score. Mirrors `AXIS_FILL` in
+ * JobFormPage's score-split editor so this read-only view reads as the same
+ * thing the operator set. Kept local (two short literals) rather than shared:
+ * the form owns the editable source of truth.
+ */
+const AXIS_FILL = [
+  "var(--primary)",
+  "color-mix(in oklab, var(--primary) 62%, var(--surface))",
+  "color-mix(in oklab, var(--primary) 28%, var(--surface))",
+] as const;
+
+/**
+ * Read-only score split: a labeled composition bar plus a spelled-out legend,
+ * so which axis owns which weight is legible at a glance. It replaces a bare
+ * "40% / 20% / 40%" whose axis order lived only in a hover `title` — the first
+ * thing a reader saw was three numbers with no idea which was which. Same axis
+ * order, colours and wording as the editor on the job form.
+ */
+function ScoreSplit({ weights }: { weights: Job["scoringWeights"] }) {
+  const axes = [
+    { label: "Correctness", value: weights.correctness },
+    { label: "Depth", value: weights.depth },
+    { label: "Communication", value: weights.communication },
+  ];
+  return (
+    <div className="mt-5">
+      <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle">
+        Score split
+      </div>
+      {/* Composition bar — one segment per axis, width is the weight. The three
+          axes always sum to 100, so the segments tile the whole track. */}
+      <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-surface-2">
+        {axes.map((axis, i) => (
+          <div
+            key={axis.label}
+            style={{ width: `${axis.value}%`, background: AXIS_FILL[i] }}
+          />
+        ))}
+      </div>
+      {/* Legend — dot + name + weight, so nothing depends on a hover. A 0%
+          axis has no band above but is still named here. */}
+      <div className="mt-2.5 flex flex-wrap gap-x-5 gap-y-1.5">
+        {axes.map((axis, i) => (
+          <span key={axis.label} className="flex items-center gap-1.5">
+            <span
+              aria-hidden
+              className="h-2 w-2 shrink-0 rounded-full"
+              style={{ background: AXIS_FILL[i] }}
+            />
+            <span className="text-[12.5px] text-ink-2">{axis.label}</span>
+            <span className="mono text-[12.5px] font-semibold text-ink">
+              {axis.value}%
+            </span>
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
