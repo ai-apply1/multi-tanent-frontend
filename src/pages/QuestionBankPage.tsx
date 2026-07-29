@@ -264,6 +264,7 @@ export function QuestionBankPage() {
               placeholder="Filter by tags…"
               className="w-full max-w-[260px] flex-shrink"
               containerClassName="min-h-[37px] rounded-[9px]"
+              singleLine
             />
             <Select
               value={categoryFilter || ALL}
