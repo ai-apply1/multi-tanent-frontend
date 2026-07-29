@@ -2929,9 +2929,10 @@ function AnswerRow({
               </span>
               <span className="rounded-full border border-line px-2 py-0.5 font-semibold text-ink-2">
                 Depth: {formatScore(scored.depth, { suffix: " / 10" })}
-                {/* Surfaced only when the difficulty normalisation actually
-                    moved the number, so the reviewer is never shown a
-                    "raw → adjusted" pair that says the same thing twice. */}
+                {/* Surfaced only when the judge's calibration (for question
+                    difficulty + role seniority) actually moved the number, so
+                    the reviewer is never shown a "raw → adjusted" pair that
+                    says the same thing twice. */}
                 {typeof scored.depthRaw === "number" &&
                 scored.depthRaw !== scored.depth
                   ? ` (raw ${formatScore(scored.depthRaw)})`

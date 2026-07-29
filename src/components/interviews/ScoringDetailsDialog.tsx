@@ -346,7 +346,7 @@ export function ScoringDetailsDialog({
                     hint={
                       typeof scores.depthRaw === "number" &&
                       scores.depthRaw !== scores.depth
-                        ? `raw ${s1(scores.depthRaw)}, normalised for question difficulty`
+                        ? `raw ${s1(scores.depthRaw)}, calibrated for question difficulty and role seniority`
                         : "trade-offs · specifics · judgment"
                     }
                   />
