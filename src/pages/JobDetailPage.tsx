@@ -523,7 +523,7 @@ function OverviewTab({
             <MetaCell label="Threshold">
               <span className="mono">{job.rejectionThreshold}</span>
             </MetaCell>
-            <MetaCell label="City gate">
+            <MetaCell label="City">
               {job.eligibility.city || <Dash />}
             </MetaCell>
             <MetaCell label="Min. experience">
