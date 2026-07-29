@@ -1062,6 +1062,35 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   }, [sessionId]);
   const activeSessionId = selectedSessionId ?? sessionId;
 
+  // The parents keep this drawer PERMANENTLY mounted and signal open/closed only
+  // by whether they hand it a target (session/candidate); closing just nulls
+  // that. So the Sheet's open flag has to MIRROR the target — re-opening for
+  // every new candidate — not initialise once (that left it stuck closed after
+  // the first dismissal). Keyed on the target's identity, so it also re-opens if
+  // a different candidate arrives mid-close; that also cancels the pending
+  // unmount below. On close we flip it false so the slide-out plays, then defer
+  // the parent's unmount until the exit finishes so ✕ / backdrop / post-delete
+  // all animate out.
+  const targetKey = sessionId || candidateIdProp || null;
+  const [sheetOpen, setSheetOpen] = useState(Boolean(targetKey));
+  const closeTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (!targetKey) return;
+    if (closeTimer.current !== null) {
+      window.clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+    setSheetOpen(true);
+  }, [targetKey]);
+  const closeDrawer = () => {
+    setSheetOpen(false);
+    if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
+    closeTimer.current = window.setTimeout(() => {
+      closeTimer.current = null;
+      onOpenChange(false);
+    }, 320);
+  };
+
   const queryClient = useQueryClient();
   const orgTimezone = useOrgTimezone();
 
@@ -1342,7 +1371,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
       // The candidate's row shows its latest interview's score/status, so a
       // deleted interview leaves those lists (and Overview) stale too.
       invalidateCandidateData(queryClient);
-      onOpenChange(false);
+      closeDrawer();
     },
     onError: (err) =>
       toast.error(errorMessage(err, "Could not delete the interview.")),
@@ -1356,7 +1385,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
       // Delete changes the job's TOTAL candidate count, so this is one of the
       // few sites that also refreshes the Jobs list's "Applicants" column.
       invalidateCandidateDataAndJobCounts(queryClient);
-      onOpenChange(false);
+      closeDrawer();
     },
     onError: (err) =>
       toast.error(errorMessage(err, "Could not delete the candidate.")),
@@ -1424,7 +1453,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
 
   return (
     <>
-      <Sheet open onOpenChange={onOpenChange}>
+      <Sheet open={sheetOpen} onOpenChange={(next) => { if (!next) closeDrawer(); }}>
         <SheetContent
           side="right"
           hideCloseButton
@@ -1515,7 +1544,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
               </div>
               <button
                 type="button"
-                onClick={() => onOpenChange(false)}
+                onClick={() => closeDrawer()}
                 className="inline-flex text-ink-muted hover:text-ink"
                 aria-label="Close"
               >

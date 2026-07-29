@@ -430,11 +430,13 @@ export function JobDetailPage() {
         </TabButton>
       </div>
 
-      {tab === "overview" ? (
-        <OverviewTab job={job} kpi={kpi} columns={boardQuery.data?.columns} />
-      ) : (
-        <JobQuestionsManager job={job} />
-      )}
+      <div key={tab} className="animate-fade-up">
+        {tab === "overview" ? (
+          <OverviewTab job={job} kpi={kpi} columns={boardQuery.data?.columns} />
+        ) : (
+          <JobQuestionsManager job={job} />
+        )}
+      </div>
 
       {/* Upload dialog — mounted once, opened by the header CTA. */}
       <UploadCvsDialog

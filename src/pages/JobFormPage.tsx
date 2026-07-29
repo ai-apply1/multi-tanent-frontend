@@ -575,7 +575,10 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
         </div>
 
         {/* Step card */}
-        <div className="rounded-2xl border border-line bg-surface p-6">
+        <div
+          key={step}
+          className="animate-fade-up rounded-2xl border border-line bg-surface p-6"
+        >
           {step === 0 ? (
             <BasicsStep
               title={title}

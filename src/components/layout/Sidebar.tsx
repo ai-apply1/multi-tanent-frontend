@@ -5,6 +5,7 @@ import {
   ChevronDown,
   LayoutGrid,
   Library,
+  Loader2,
   LogOut,
   Menu,
   PanelLeftClose,
@@ -17,6 +18,7 @@ import {
 import toast from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { useAnimatedOverlay } from "@/hooks/useAnimatedOverlay";
 import { ROUTES, settingsTab } from "@/routes";
 import { useAuth } from "@/features/auth/AuthContext";
 import { useOrganization } from "@/features/organization/useOrganization";
@@ -293,7 +295,10 @@ export function Sidebar() {
   // neutral placeholder rather than anyone's brand.
   const orgName = organization?.name || PLATFORM_NAME;
 
+  const [loggingOut, setLoggingOut] = useState(false);
   const handleLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
     try {
       await logout();
       toast.success("Signed out.");
@@ -436,10 +441,15 @@ export function Sidebar() {
         <button
           type="button"
           onClick={handleLogout}
+          disabled={loggingOut}
           title="Sign out"
-          className="flex h-[30px] w-[30px] items-center justify-center rounded-lg text-ink-muted transition hover:bg-accent hover:text-primary"
+          className="flex h-[30px] w-[30px] items-center justify-center rounded-lg text-ink-muted transition hover:bg-accent hover:text-primary disabled:pointer-events-none disabled:opacity-70"
         >
-          <LogOut className="h-[17px] w-[17px]" />
+          {loggingOut ? (
+            <Loader2 className="h-[17px] w-[17px] animate-spin" />
+          ) : (
+            <LogOut className="h-[17px] w-[17px]" />
+          )}
         </button>
       </div>
     </aside>
@@ -456,13 +466,20 @@ export function MobileNavTrigger() {
   const { data: organization } = useOrganization();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  // Keep the drawer mounted through its close so the backdrop fade + panel
+  // slide-out play (it renders with `{open && …}`, which would otherwise drop
+  // it the instant a link/backdrop closes it).
+  const { mounted, phase } = useAnimatedOverlay(open, 200);
   const location = useLocation();
   const sections = visibleSections(navSections, user?.role);
 
   // Same rule as the desktop sidebar above: never a hardcoded org name.
   const orgName = organization?.name || PLATFORM_NAME;
 
+  const [loggingOut, setLoggingOut] = useState(false);
   const handleLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
     try {
       await logout();
       toast.success("Signed out.");
@@ -486,17 +503,27 @@ export function MobileNavTrigger() {
         <Menu className="h-4 w-4" />
       </button>
 
-      {open ? (
+      {mounted ? (
         <div
           role="dialog"
           aria-modal="true"
           className="fixed inset-0 z-50 bg-black/35"
-          style={{ animation: "om-fade .12s ease" }}
+          style={{
+            animation:
+              phase === "exit"
+                ? "overlay-out .18s ease forwards"
+                : "om-fade .12s ease",
+          }}
           onClick={() => setOpen(false)}
         >
           <div
             className="absolute inset-y-0 left-0 flex w-[236px] max-w-[92%] flex-col bg-surface"
-            style={{ animation: "om-slide .2s cubic-bezier(.2,.7,.2,1)" }}
+            style={{
+              animation:
+                phase === "exit"
+                  ? "sheet-out-right .2s cubic-bezier(.4,0,1,1) forwards"
+                  : "om-slide .2s cubic-bezier(.2,.7,.2,1)",
+            }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex h-[60px] items-center gap-2.5 border-b border-line px-4">
@@ -568,10 +595,15 @@ export function MobileNavTrigger() {
               <button
                 type="button"
                 onClick={handleLogout}
+                disabled={loggingOut}
                 title="Sign out"
-                className="flex h-[30px] w-[30px] items-center justify-center rounded-lg text-ink-muted hover:bg-accent hover:text-primary"
+                className="flex h-[30px] w-[30px] items-center justify-center rounded-lg text-ink-muted hover:bg-accent hover:text-primary disabled:pointer-events-none disabled:opacity-70"
               >
-                <LogOut className="h-[17px] w-[17px]" />
+                {loggingOut ? (
+                  <Loader2 className="h-[17px] w-[17px] animate-spin" />
+                ) : (
+                  <LogOut className="h-[17px] w-[17px]" />
+                )}
               </button>
             </div>
           </div>
