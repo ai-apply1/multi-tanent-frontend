@@ -790,13 +790,18 @@ function ProfileCard({ profile }: { profile: CandidateProfile | null }) {
 // ── Main drawer ────────────────────────────────────────────────────────
 
 /**
- * Read the pre-screen checklist off a rejection activity's `meta`. New rows
+ * Read the pre-screen checklist off a vetting activity's `meta`. New rows
  * store a structured `checks` array (each gate + pass/fail/unknown status);
- * older rows only have `reasons: string[]` (the failing reasons), rendered as
- * failed checks. Anything malformed is dropped.
+ * older rows only have `reasons: string[]`, rendered with
+ * `reasonsFallbackStatus`. That status depends on which VERDICT wrote the
+ * row: a rejection's reasons are genuine failures (`fail`, the default), but
+ * a review park's reasons are by definition the gates that could NOT be
+ * verified — callers on that path pass `unknown` so a legacy park note isn't
+ * painted as a row of red misses. Anything malformed is dropped.
  */
 function extractVettingChecks(
   meta: Record<string, unknown> | null | undefined,
+  reasonsFallbackStatus: VettingCheckStatus = "fail",
 ): VettingCheck[] {
   if (!meta) return [];
   const raw = meta.checks;
@@ -813,12 +818,11 @@ function extractVettingChecks(
       })
       .filter((c): c is VettingCheck => c !== null);
   }
-  // Fallback for pre-checklist rows: the stored `reasons` are all failures.
   const reasons = meta.reasons;
   if (Array.isArray(reasons)) {
     return reasons
       .filter((r): r is string => typeof r === "string" && r.length > 0)
-      .map((text) => ({ text, status: "fail" as const }));
+      .map((text) => ({ text, status: reasonsFallbackStatus }));
   }
   return [];
 }
@@ -1051,6 +1055,87 @@ function InitialRejectionCard({
   );
 }
 
+/**
+ * The `needs_review` counterpart of {@link InitialRejectionCard}: same
+ * checklist, the OTHER vetting verdict. Usually nothing failed outright — one
+ * or more gates could not be verified (no parsed profile, a CV that places
+ * the candidate in another country, an unmatched university…), so the engine
+ * parked the candidate instead of auto-deciding; the amber rows are the exact
+ * things a human must check before using Invite or Reject in the header.
+ *
+ * `reconsidered` is the OTHER way into this column: HR pulled an auto-
+ * rejected candidate back to look at them again. No park note exists then —
+ * the checklist shown is the original rejection's, and the copy must say so
+ * rather than claim the engine "could not decide". The lead paragraph is
+ * gated on actually HAVING checks: a hand-moved candidate (or one whose parse
+ * died before vetting) has no checklist, and asserting a park that never
+ * happened would send HR hunting for reasons that don't exist.
+ */
+function NeedsReviewCard({
+  checks,
+  loading,
+  error,
+  reconsidered,
+}: {
+  checks: VettingCheck[];
+  loading: boolean;
+  error: boolean;
+  reconsidered: boolean;
+}) {
+  return (
+    <div className="rounded-2xl border border-line bg-surface p-[18px]">
+      <div className="mb-1.5 flex items-center gap-2">
+        <span
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-[color:var(--warning)]"
+          style={{ background: "var(--warning-soft)" }}
+        >
+          <AlertTriangle className="h-3.5 w-3.5" strokeWidth={2} />
+        </span>
+        <span className="text-[14px] font-bold">
+          Why this candidate needs review
+        </span>
+      </div>
+      {loading ? (
+        <div className="flex items-center gap-2 text-[13px] text-ink-muted">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading checks…
+        </div>
+      ) : error ? (
+        // An error is NOT an empty history — saying "nothing was recorded"
+        // here would be a factual claim built on a failed request.
+        <p className="text-[13px] text-ink-muted">
+          The pre-screen checks could not be loaded. Close and reopen this
+          panel to retry.
+        </p>
+      ) : checks.length ? (
+        <>
+          <p className="mb-3.5 text-[12.5px] leading-relaxed text-ink-muted">
+            {reconsidered
+              ? "The CV pre-screen rejected this candidate, and they were " +
+                "moved back here to be reconsidered. This is the original " +
+                "checklist — the red item(s) are what caused that rejection."
+              : "The CV pre-screen could not auto-decide, so this candidate " +
+                "is parked for your call. The amber item(s) are what could " +
+                "not be verified automatically — check them, then Invite or " +
+                "Reject from the header."}
+          </p>
+          <div className="grid gap-2.5">
+            {checks.map((check, i) => (
+              <VettingCheckRow key={`${i}-${check.text}`} check={check} />
+            ))}
+          </div>
+        </>
+      ) : (
+        <p className="text-[13px] text-ink-muted">
+          No pre-screen checklist was recorded for this candidate. The CV may
+          still be processing, or they were moved here by hand — decide with
+          Invite or Reject in the header.
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp, onOpenChange }: Props) {
   // Reattempt history: `selectedSessionId` overrides which attempt's detail
   // we load; null = follow the prop. Reset whenever the entry point changes.
@@ -1217,24 +1302,37 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   };
 
 
-  // "Initial rejection" = the CV-stage auto-reject column (`rejected`), NOT a
-  // post-interview `final_rejected`. The vetting engine records the WHY on the
-  // rejection ACTIVITY (`meta.reasons`), never on the candidate doc, so we read
-  // it from the unscoped activity feed. Fetched only when the candidate is in
-  // that state and has no interview (the one branch that renders it).
+  // The vetting engine records its WHY on an ACTIVITY, never on the candidate
+  // doc, so both verdict cards read the unscoped activity feed. The two
+  // verdicts file it on DIFFERENT rows: a rejection rides the status_changed
+  // row INTO `rejected`, while a review park has NO transition (`needs_review`
+  // is where the candidate already sits) — the engine leaves a note_added row
+  // with `meta.verdict === "review"` instead. Fetched only in those two
+  // states with no interview (the one branch that renders either card).
   const isInitialRejected =
     candidate?.currentStatusId?.key === INITIAL_REJECT_STATUS_KEY;
-  const rejectionActivitiesQuery = useQuery({
-    queryKey: ["candidateActivities", candidateId, "initial-rejection"],
-    queryFn: () => getCandidateActivities(candidateId!),
-    enabled: Boolean(candidateId) && isInitialRejected && !activeSessionId,
+  const isNeedsReview =
+    candidate?.currentStatusId?.key === INVITABLE_STATUS_KEY;
+  const vettingActivitiesQuery = useQuery({
+    queryKey: ["candidateActivities", candidateId, "vetting"],
+    // limit 100 (the server's max), not the default 25: the park note is
+    // written at CV-parse time, i.e. it is one of the OLDEST rows in a
+    // newest-first feed, and `needs_review` is a working column that keeps
+    // accruing rows (emails, moves) while the candidate waits. At 25 the note
+    // could silently fall off page 1 and the card would claim nothing was
+    // ever recorded.
+    queryFn: () => getCandidateActivities(candidateId!, { limit: 100 }),
+    enabled:
+      Boolean(candidateId) &&
+      (isInitialRejected || isNeedsReview) &&
+      !activeSessionId,
     // See the staleTime note on the interview query above. A re-vet rewrites
     // these checks, so a cached read would keep showing the old reasons.
     staleTime: 0,
   });
   // Newest-first feed, so the first transition INTO `rejected` is the current
   // one; its `meta.reasons` is the vetting engine's verbatim explanation.
-  const initialRejectionRow = rejectionActivitiesQuery.data?.data.find(
+  const initialRejectionRow = vettingActivitiesQuery.data?.data.find(
     (a) =>
       a.type === "status_changed" &&
       a.toStatus?.key === INITIAL_REJECT_STATUS_KEY,
@@ -1242,6 +1340,24 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   const initialRejectionChecks = extractVettingChecks(
     initialRejectionRow?.meta,
   );
+  // The park note. Matched on `meta.verdict` rather than on note_added-by-AI:
+  // the engine files its withheld-email notes under the same type and actor,
+  // and those carry no checklist. Newest-first again, so after a re-vet the
+  // fresh park note wins over the original one. Legacy park notes stored only
+  // `reasons` — for a REVIEW verdict those are unverifiable gates, not
+  // failures, hence the `unknown` fallback (amber, matching the card's copy).
+  const needsReviewRow = vettingActivitiesQuery.data?.data.find(
+    (a) => a.type === "note_added" && a.meta?.verdict === "review",
+  );
+  // No park note but a rejection checklist in the same feed = the OTHER route
+  // into `needs_review`: HR pulled an auto-rejected candidate back via
+  // "Reconsider candidate" / the status menu. Show the original rejection's
+  // checklist under honest copy instead of claiming nothing was recorded.
+  const needsReviewReconsidered =
+    !needsReviewRow && initialRejectionChecks.length > 0;
+  const needsReviewChecks = needsReviewRow
+    ? extractVettingChecks(needsReviewRow.meta, "unknown")
+    : initialRejectionChecks;
 
   // Local mutation flags
   const [retranscoding, setRetranscoding] = useState(false);
@@ -1777,7 +1893,18 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                   // so show WHY here instead of a "no interview yet" note.
                   <InitialRejectionCard
                     checks={initialRejectionChecks}
-                    loading={rejectionActivitiesQuery.isLoading}
+                    loading={vettingActivitiesQuery.isLoading}
+                  />
+                ) : isNeedsReview ? (
+                  // Parked by the vetting engine for a human decision — show
+                  // WHAT it could not verify instead of the generic note. Once
+                  // HR invites and the interview happens, this state (and the
+                  // card) is gone, so nothing else is displaced.
+                  <NeedsReviewCard
+                    checks={needsReviewChecks}
+                    loading={vettingActivitiesQuery.isLoading}
+                    error={vettingActivitiesQuery.isError}
+                    reconsidered={needsReviewReconsidered}
                   />
                 ) : (
                   <div className="flex items-center gap-3 rounded-2xl border border-dashed border-line bg-surface px-5 py-4 text-[13px] text-ink-muted">
