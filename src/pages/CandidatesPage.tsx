@@ -192,7 +192,9 @@ export function CandidatesPage() {
   // history state on its first run, and a later dropdown change must not flip
   // this on.
   const location = useLocation();
-  const [cameFromJob] = useState(() => Boolean(location.state?.fromJob));
+  const [cameFromJob, setCameFromJob] = useState(() =>
+    Boolean(location.state?.fromJob),
+  );
 
   // ── URL-backed view state ───────────────────────────────────────────
   // Filters, pagination and the open candidate drawer all live in the query
@@ -217,6 +219,33 @@ export function CandidatesPage() {
     () => searchParams.get("status") ?? ALL,
   );
   const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
+
+  // Leaving the job scope by NAVIGATION. React Router keeps this page mounted
+  // when the sidebar's "Candidates" (or a browser Back) lands on the plain
+  // `/dashboard/candidates` — same route, only the query string differs — so the
+  // filters and the drill-in chrome would otherwise survive and the URL-sync
+  // effect below would just re-push them into the URL. When a real navigation
+  // (a new `location.key`) drops us on a URL barer than the view still holds,
+  // adopt it: clear the filters and the "came from a job" flag. Gated on the key
+  // so it never fires in the window where local state legitimately leads the URL
+  // — mid-typing, before the sync effect writes — which would wipe the keystroke.
+  const [syncedKey, setSyncedKey] = useState(location.key);
+  if (location.key !== syncedKey) {
+    setSyncedKey(location.key);
+    const urlHasNoFilters =
+      !searchParams.get("job") &&
+      !searchParams.get("status") &&
+      !searchParams.get("q");
+    const viewHasFilters =
+      jobFilter !== ALL || statusFilter !== ALL || search.trim() !== "";
+    if (urlHasNoFilters && viewHasFilters) {
+      setSearch("");
+      setStatusFilter(ALL);
+      setJobFilter(ALL);
+      setPage(1);
+      setCameFromJob(false);
+    }
+  }
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<CandidateListItem | null>(
@@ -647,6 +676,10 @@ export function CandidatesPage() {
     setSearch("");
     setStatusFilter(ALL);
     if (!routeJobId) setJobFilter(ALL);
+    // Clearing the filters also leaves the job scope: the operator asked for the
+    // plain, org-wide list, so drop the drill-in chrome — and, crucially, keep it
+    // dropped so it does NOT reappear when they pick a job in the filter again.
+    setCameFromJob(false);
     resetPage();
   };
 
