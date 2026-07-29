@@ -95,16 +95,22 @@ export function BulkEmailDialog({
   )
 
   // Seed the editor from the chosen template. Keyed by purpose so switching
-  // templates loads that template's copy.
+  // templates loads that template's copy. `open` is BOTH a gate and a dep:
+  // the close-reset below blanks `purpose` and nulls `seededFor` so a reopen
+  // starts as a fresh compose, but `selected` (the other dep) is usually the
+  // SAME object on reopen — the templates query serves its cache within the
+  // global staleTime, so no other dep re-fires this effect. Without `open`
+  // here, a quick reopen kept the previous compose and sent `purpose: ""`,
+  // which the server's enum check rejects.
   const seededFor = useRef<string | null>(null)
   useEffect(() => {
-    if (!selected) return
+    if (!open || !selected) return
     if (seededFor.current === selected.purpose) return
     seededFor.current = selected.purpose
     setPurpose(selected.purpose)
     setSubject(selected.subject)
     setBody(selected.body)
-  }, [selected])
+  }, [open, selected])
 
   // For a single recipient, inline the tokens we already know (name, job) into
   // the copy sent to the preview endpoint, so the preview reads as their mail.
@@ -191,7 +197,10 @@ export function BulkEmailDialog({
     mutationFn: () =>
       sendCandidateEmail({
         candidateIds,
-        purpose: purpose as BulkEmailPurpose,
+        // `selected.purpose`, not the resettable `purpose` state: the active
+        // tab and the live preview both render from `selected`, so this is
+        // the one value that can never disagree with what HR is looking at.
+        purpose: (selected?.purpose ?? purpose) as BulkEmailPurpose,
         subject,
         body,
       }),
@@ -241,8 +250,12 @@ export function BulkEmailDialog({
     }
   }
 
+  // `selected` is required: the footer's Send button renders even on the
+  // "could not load templates" branch, where subject/body can still hold a
+  // previous open's copy but there is no template to send as.
   const canSend =
     count > 0 &&
+    Boolean(selected) &&
     Boolean(subject.trim()) &&
     Boolean(body.trim()) &&
     !sendMutation.isPending
