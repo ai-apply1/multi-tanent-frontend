@@ -1760,6 +1760,13 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                           tower past the parent menu. */}
                       <DropdownMenuSubContent className="max-h-72 w-52 overflow-y-auto">
                         <DropdownMenuLabel>Move to</DropdownMenuLabel>
+                        {/* Same note as the candidates table's menu: a manual
+                            move writes the status only, no email goes out. */}
+                        <p className="px-2 pb-1.5 text-[11.5px] leading-snug text-ink-muted">
+                          A move never emails the candidate — use{" "}
+                          <span className="font-medium">Send email</span> to
+                          notify them.
+                        </p>
                         {statuses.map((option) => {
                           const isCurrent =
                             option.key === candidate?.currentStatusId?.key;
