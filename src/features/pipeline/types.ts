@@ -81,13 +81,20 @@ export interface UpdateStatusPayload {
  * absent here (custom columns, `applied`, `needs_review`, `interviewing`,
  * `scored`, `hired`) never auto-email, so they don't get a dead toggle.
  */
-export const STAGE_AUTO_EMAILS: Record<string, string> = {
-  invited: "Controls the interview invite email and the follow-up reminders.",
-  rejected: "Controls the automatic rejection email sent at the CV screen.",
-  shortlisted: "Controls the “you’re shortlisted” email sent after scoring.",
-  final_rejected:
-    "Controls the rejection email sent after the interview is scored.",
-}
+export const STAGE_AUTO_EMAILS: Record<string, string> = Object.assign(
+  // Null prototype on purpose: this map is indexed by ORG-AUTHORED status
+  // keys, and "constructor" is a legal key under the slug rule — on a plain
+  // literal it would answer truthy from Object.prototype and paint a live
+  // switch on a custom column that never auto-emails.
+  Object.create(null) as Record<string, string>,
+  {
+    invited: "Controls the interview invite email and the follow-up reminders.",
+    rejected: "Controls the automatic rejection email sent at the CV screen.",
+    shortlisted: "Controls the “you’re shortlisted” email sent after scoring.",
+    final_rejected:
+      "Controls the rejection email sent after the interview is scored.",
+  },
+)
 
 /**
  * Stride used when a drag-and-drop reorder renumbers the board — the whole

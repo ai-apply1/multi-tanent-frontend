@@ -127,8 +127,9 @@ export interface CandidateStatus {
    * Per-stage switch for the AUTOMATIC candidate emails this column
    * triggers (invite + follow-up reminders on `invited`, rejection on
    * `rejected`, shortlist on `shortlisted`, final rejection on
-   * `final_rejected`). Editable from the pipeline settings dialog. Manual
-   * HR sends are never affected.
+   * `final_rejected`). Edited from the inline "Auto emails" switch on the
+   * pipeline settings screen (behind a confirm dialog). Manual HR sends
+   * are never affected.
    *
    * Optional because rows that predate the field come back without it;
    * treat absent as `true` (enabled) — the backend's schema default and

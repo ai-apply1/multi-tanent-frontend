@@ -101,6 +101,15 @@ export function PipelinePage() {
    */
   const [autoEmailTarget, setAutoEmailTarget] =
     useState<CandidateStatus | null>(null);
+  /**
+   * Open flag SEPARATE from the target: closing clears only this, never the
+   * target, because the dialog stays mounted through its ~160ms close
+   * animation — deriving the title/label from a nulled target would flip
+   * the copy to the "off" branch mid-fade (after confirming "Turn on", the
+   * last thing read would be "Turn off automatic emails?"). The stale
+   * target after close is harmless; the next click replaces it.
+   */
+  const [autoEmailOpen, setAutoEmailOpen] = useState(false);
 
   const {
     data: statuses,
@@ -189,7 +198,7 @@ export function PipelinePage() {
     },
     // Close on either outcome — success is done, and on error the toast
     // says why; leaving the dialog up would only cover it.
-    onSettled: () => setAutoEmailTarget(null),
+    onSettled: () => setAutoEmailOpen(false),
   });
 
   /** The direction the dialog is offering: the opposite of today. */
@@ -319,7 +328,10 @@ export function PipelinePage() {
                     deleteMutation.isPending &&
                     deleteMutation.variables === status._id
                   }
-                  onToggleAutoEmails={() => setAutoEmailTarget(status)}
+                  onToggleAutoEmails={() => {
+                    setAutoEmailTarget(status);
+                    setAutoEmailOpen(true);
+                  }}
                   togglingAutoEmails={
                     autoEmailsMutation.isPending &&
                     autoEmailsMutation.variables?.id === status._id
@@ -348,9 +360,9 @@ export function PipelinePage() {
           BEFORE it applies. `autoEmailNext` is the direction on offer (the
           opposite of the row's current value). */}
       <ConfirmDialog
-        open={Boolean(autoEmailTarget)}
+        open={autoEmailOpen}
         onOpenChange={(o) => {
-          if (!o && !autoEmailsMutation.isPending) setAutoEmailTarget(null);
+          if (!o && !autoEmailsMutation.isPending) setAutoEmailOpen(false);
         }}
         title={
           autoEmailNext
@@ -624,7 +636,9 @@ function StatusRow({
             type="button"
             role="switch"
             aria-checked={status.autoEmailsEnabled !== false}
-            aria-label={`Automatic emails for ${status.label}`}
+            // Starts with the visible "Auto emails" label so speech-input
+            // users can target it by what they see (WCAG 2.5.3).
+            aria-label={`Auto emails for ${status.label}`}
             disabled={togglingAutoEmails || disabled}
             onClick={onToggleAutoEmails}
             className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
