@@ -75,7 +75,7 @@ import {
 } from "@/features/candidates/types";
 import { JOB_OPTIONS_QUERY_KEY, listJobOptions } from "@/features/jobs/jobsApi";
 import { useOrgTimezone } from "@/features/organization/useOrgTimezone";
-import { ROUTES, jobDetail } from "@/routes";
+import { jobDetail } from "@/routes";
 import { formatDate } from "@/lib/date";
 import { errorMessage } from "@/lib/errors";
 import { cn } from "@/lib/utils";
@@ -328,10 +328,11 @@ export function CandidatesPage() {
         // route carries it as a query param.
         if (routeJobId) next.delete("job");
         else put("job", jobFilter, jobFilter === ALL);
-        // Persist the drill-in marker so a REFRESH restores the job-scoped
-        // chrome — `state.fromJob` can't, since this very `replace` wipes it
-        // from history state. Written only while actually inside a job (the
-        // same gate as `jobInFocus`); "All jobs" or the org-wide list drops it,
+        // Persist the drill-in marker so a REFRESH keeps the button reading
+        // "Back to job" (a real drill-in) instead of "Go to job" (a plain
+        // filter pick) — `state.fromJob` can't, since this very `replace` wipes
+        // it from history state. Written only for a drill-in that's still inside
+        // a job; a filter pick, "All jobs", or the org-wide list drops it,
         // keeping the URL honest.
         put("from", "job", !(cameFromJob && jobFilter !== ALL));
         return next;
@@ -399,14 +400,6 @@ export function CandidatesPage() {
         : jobsLoading
           ? "Loading…"
           : "Job not listed";
-
-  // The job-scoped view: the operator drilled into ONE job (`cameFromJob`) and
-  // the list is still narrowed to it. This gates the whole "you're inside this
-  // job" chrome — the breadcrumb, the job name in the title, the "Back to job"
-  // button — so the plain, sidebar-reached list never grows them just because
-  // someone picked a value in the Job filter. It follows the filter: switching
-  // jobs re-points the trail, "All jobs" collapses it back to the org-wide list.
-  const jobInFocus = cameFromJob && jobFilter !== ALL;
 
   // Re-seed when the URL's job changes under a mounted page (job A → job B).
   // The `useState` initialisers above only cover the mount. Keyed on
@@ -699,10 +692,12 @@ export function CandidatesPage() {
     resetPage();
   };
 
-  const headline =
-    jobInFocus && selectedJob
-      ? `Candidates · ${selectedJob.title}`
-      : "Candidates";
+  // The job name rides in the headline whenever a job is in view — a drill-in
+  // OR a plain Job-filter pick — matching the card title ("Applicants") and the
+  // job button below. Only that button's wording still reflects HOW you arrived.
+  const headline = selectedJob
+    ? `Candidates · ${selectedJob.title}`
+    : "Candidates";
   const subtitle = routeJobId
     ? "Applicants for this job, CVs, pre-screen verdicts, interview results and funnel stage."
     : "Every applicant across your jobs CVs, pre-screen verdicts, interview results, and where each one sits in the funnel.";
@@ -714,32 +709,6 @@ export function CandidatesPage() {
 
   return (
     <div className="mx-auto max-w-[1240px] px-6 py-6 lg:px-8 lg:py-8">
-      {jobInFocus ? (
-        <nav
-          aria-label="Breadcrumb"
-          className="mb-3.5 flex items-center gap-2 text-[13px] text-ink-muted"
-        >
-          <Link to={ROUTES.JOBS} className="font-medium hover:text-ink">
-            Jobs
-          </Link>
-          <span className="text-ink-subtle">/</span>
-          {selectedJob ? (
-            <Link
-              to={jobDetail(selectedJob._id)}
-              className="font-medium hover:text-ink"
-            >
-              {selectedJob.title}
-            </Link>
-          ) : (
-            <span className="font-medium">
-              {jobsLoading ? "Loading…" : "Job"}
-            </span>
-          )}
-          <span className="text-ink-subtle">/</span>
-          <span className="font-semibold text-ink">Candidates</span>
-        </nav>
-      ) : null}
-
       <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
         <div>
           <div className="flex items-center gap-2.5">
@@ -755,11 +724,14 @@ export function CandidatesPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {jobInFocus && selectedJob ? (
+          {selectedJob ? (
+            // Shown whenever a job is in view — a drill-in OR a plain Job-filter
+            // pick. `cameFromJob` only chooses the wording: "Back to job"
+            // retraces a real drill-in, "Go to job" jumps to the filtered job.
             <Button variant="secondary" size="sm" asChild>
               <Link to={jobDetail(selectedJob._id)}>
                 <ArrowLeft className="h-4 w-4" strokeWidth={1.7} />
-                Back to job
+                {cameFromJob ? "Back to job" : "Go to job"}
               </Link>
             </Button>
           ) : null}
