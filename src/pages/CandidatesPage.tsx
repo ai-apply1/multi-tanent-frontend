@@ -1500,6 +1500,14 @@ function CandidateRow({
                   the viewport and it reads as a detached floating list. */}
               <DropdownMenuSubContent className="max-h-72 w-52 overflow-y-auto">
                 <DropdownMenuLabel>Move to</DropdownMenuLabel>
+                {/* A manual move writes the status and nothing else — the
+                    backend sends no email on this path, so say it at the
+                    moment of the decision, not in a doc nobody reads. */}
+                <p className="px-2 pb-1.5 text-[11.5px] leading-snug text-ink-muted">
+                  A move never emails the candidate — use{" "}
+                  <span className="font-medium">Send email</span> to notify
+                  them.
+                </p>
                 {statuses.map((option) => {
                   const isCurrent = option.key === status?.key;
                   // Columns that aren't a human's to assert are disabled rather
