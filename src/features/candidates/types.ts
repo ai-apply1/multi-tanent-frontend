@@ -251,6 +251,15 @@ export interface CandidateDetail extends CandidateBase {
    * Null when the job's salary gate is off, so the question was never asked.
    */
   expectedSalaryMin?: number | null
+  /**
+   * Would they move for the role? Their own answer from the apply form.
+   *
+   * `null`/absent means NOT ASKED, which is different from "no": the job may
+   * be remote, may have no city gate, or the gate may have been switched on
+   * after they applied. The drawer therefore hides the row entirely rather
+   * than rendering a "No" nobody said.
+   */
+  willingToRelocate?: boolean | null
 }
 
 /**
@@ -263,6 +272,14 @@ export interface CandidateProfile {
   primaryRoleEvidence?: string
   seniority?: "junior" | "mid" | "senior" | "lead" | "unknown"
   yearsOfExperience?: number
+  /**
+   * The candidate's own base city AS WRITTEN ON THE CV, `''` when it states
+   * none. Not the same field as the candidate row's `city`, which is what they
+   * typed on the apply form. The two disagreeing is the ordinary case of
+   * someone who moved and never updated their CV header, so the drawer SHOWS
+   * the disagreement and nothing gates on it.
+   */
+  city?: string
   summary?: string
   /** Advisory AI read on how the CV fits the job — informational only. */
   jobFit?: {

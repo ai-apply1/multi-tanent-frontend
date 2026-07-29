@@ -213,6 +213,11 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
 
   // ── Eligibility & vetting
   const [city, setCity] = useState(job?.eligibility.city ?? "");
+  // Defaults ON for a new job. `?? true` also covers a job saved before this
+  // flag existed, whose stored block has no value for it.
+  const [considerRelocators, setConsiderRelocators] = useState(
+    job?.eligibility.considerRelocators ?? true,
+  );
   const [minYearsExperience, setMinYearsExperience] = useState(
     job?.eligibility.minYearsExperience == null
       ? ""
@@ -323,6 +328,9 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
   const buildEligibility = (): JobEligibilityPayload => {
     const eligibility: JobEligibilityPayload = {};
     if (city.trim()) eligibility.city = city.trim();
+    // Sent unconditionally, like the two gate blocks below: eligibility is
+    // REPLACE-semantics, so omitting it would reset the server to the default.
+    eligibility.considerRelocators = considerRelocators;
     if (parsedMinYears !== undefined) {
       eligibility.minYearsExperience = parsedMinYears;
     }
@@ -618,6 +626,9 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
             <EligibilityStep
               city={city}
               setCity={setCity}
+              workMode={workMode}
+              considerRelocators={considerRelocators}
+              setConsiderRelocators={setConsiderRelocators}
               minYearsExperience={minYearsExperience}
               setMinYearsExperience={setMinYearsExperience}
               minYearsError={minYearsError}
@@ -997,7 +1008,13 @@ function WeightSplitBar({
   onChange: (correctness: number, depth: number) => void;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
-  const [dragging, setDragging] = useState<1 | 2 | null>(null);
+  /**
+   * Which divider the pointer is driving. `"stacked"` is the case where BOTH
+   * dividers sit on the same point (depth === 0): the grip under the finger
+   * stands for two of them, and which one the user means is only knowable once
+   * they move — see {@link onPointerMove}.
+   */
+  const [dragging, setDragging] = useState<1 | 2 | "stacked" | null>(null);
 
   const communication = 100 - correctness - depth;
   const positions = [correctness, correctness + depth];
@@ -1028,7 +1045,31 @@ function WeightSplitBar({
   const onPointerMove = (e: React.PointerEvent) => {
     if (!dragging) return;
     const pct = pctFromClientX(e.clientX);
-    if (pct !== null) moveHandle(dragging, pct);
+    if (pct === null) return;
+
+    /*
+     * Resolve a stacked grab by DIRECTION.
+     *
+     * With depth at 0 both dividers render at the same point, one exactly on
+     * top of the other, and each can only travel one way: divider 1 leftwards
+     * (shrinking Correctness) and divider 2 rightwards (growing Depth). Before
+     * this, whichever happened to paint on top swallowed the gesture — so at
+     * Correctness 100 the grip under the finger was the one pinned against the
+     * edge, and the one that could actually move was buried beneath it and
+     * unreachable. The slider read as broken.
+     *
+     * The first movement says which divider was meant, which is also how it
+     * behaves once they separate: pull left and Correctness gives way, push
+     * right and Depth opens up.
+     */
+    if (dragging === "stacked") {
+      if (pct === positions[0]) return; // no direction expressed yet
+      const which = pct < positions[0] ? 1 : 2;
+      setDragging(which);
+      moveHandle(which, pct);
+      return;
+    }
+    moveHandle(dragging, pct);
   };
 
   const startDrag = (which: 1 | 2) => (e: React.PointerEvent) => {
@@ -1037,7 +1078,7 @@ function WeightSplitBar({
     // the click point — a visible jolt when you grab a handle slightly off-centre.
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
-    setDragging(which);
+    setDragging(positions[0] === positions[1] ? "stacked" : which);
   };
 
   const endDrag = () => setDragging(null);
@@ -1046,8 +1087,29 @@ function WeightSplitBar({
   const onTrackPointerDown = (e: React.PointerEvent) => {
     const pct = pctFromClientX(e.clientX);
     if (pct === null) return;
+    const [p0, p1] = positions;
+    /*
+     * Nearest wins — EXCEPT when the two dividers sit on the same point
+     * (depth === 0), where "nearest" is a tie and the old `<=` resolved it to
+     * divider 1 every time. Divider 1 is clamped at `correctness + depth`,
+     * which IS that point, so every click on the far side of it asked the one
+     * divider that cannot go there to go there: a guaranteed no-op. With
+     * Correctness at 60 and Depth at 0, the whole right-hand 40% of the track
+     * silently ignored clicks; at 0/0/100 the entire track did.
+     *
+     * Stacked, the tie is resolved by DIRECTION instead — the same rule the
+     * grip itself uses (see `onPointerMove`), so track and grip agree: left of
+     * the point moves divider 1, right of it moves divider 2. Each can only
+     * travel that way, so the click always lands on the one that can serve it.
+     */
     const nearest =
-      Math.abs(pct - positions[0]) <= Math.abs(pct - positions[1]) ? 1 : 2;
+      p0 === p1
+        ? pct > p0
+          ? 2
+          : 1
+        : Math.abs(pct - p0) <= Math.abs(pct - p1)
+          ? 1
+          : 2;
     moveHandle(nearest, pct);
   };
 
@@ -1080,23 +1142,40 @@ function WeightSplitBar({
       <div
         ref={trackRef}
         onPointerDown={onTrackPointerDown}
-        className="relative h-11 w-full cursor-pointer overflow-hidden rounded-lg border border-line-2 bg-surface"
+        // `touch-none`: without it a touch device reserves the gesture for
+        // page scrolling, then fires pointercancel — which `endDrag` handles
+        // cleanly, so the drag just silently died and the page scrolled
+        // instead. `preventDefault()` in `startDrag` does NOT cover this;
+        // touch-action is the only thing that tells the browser up front. Every
+        // other draggable surface in the app already sets it (HlsPlayer,
+        // video-player, CandidateKanban, JobQuestionsManager, OverviewPage).
+        // NOT `overflow-hidden`: clipping is scoped to the fills below instead.
+        // The grips are positioned with `-translate-x-1/2`, so a divider parked
+        // at 0% or 100% has half its width outside the track — and a clip here
+        // sliced that half away, leaving ~1.5px of a 3px grip. Dragging
+        // Communication to zero made the handle look like it had vanished, with
+        // nothing left to grab it by. (It also swallowed the keyboard focus
+        // ring, which is exactly the height of the track.)
+        className="relative h-11 w-full cursor-pointer touch-none rounded-lg border border-line-2 bg-surface"
       >
-        {segments.map((seg, i) => (
-          <div
-            key={seg.label}
-            // Animate preset jumps, but NEVER while dragging — a transition
-            // there makes the fill lag the cursor and feel soggy.
-            className={`absolute inset-y-0 ${
-              dragging ? "" : "transition-[left,width] duration-150 ease-out"
-            }`}
-            style={{
-              left: `${i === 0 ? 0 : positions[i - 1]}%`,
-              width: `${seg.value}%`,
-              background: AXIS_FILL[i],
-            }}
-          />
-        ))}
+        {/* The fills, and ONLY the fills, are clipped to the rounded shape. */}
+        <div className="absolute inset-0 overflow-hidden rounded-lg">
+          {segments.map((seg, i) => (
+            <div
+              key={seg.label}
+              // Animate preset jumps, but NEVER while dragging — a transition
+              // there makes the fill lag the cursor and feel soggy.
+              className={`absolute inset-y-0 ${
+                dragging ? "" : "transition-[left,width] duration-150 ease-out"
+              }`}
+              style={{
+                left: `${i === 0 ? 0 : positions[i - 1]}%`,
+                width: `${seg.value}%`,
+                background: AXIS_FILL[i],
+              }}
+            />
+          ))}
+        </div>
 
         {/*
          * Percentages live in ONE layer above every segment, not inside them.
@@ -1166,8 +1245,14 @@ function WeightSplitBar({
             // w-5 is a deliberate ~20px hit target on a 3px visual: the grip
             // has to be grabbable without pixel-hunting, especially on a
             // trackpad. The `group` drives the hover affordance below.
-            className={`group absolute inset-y-0 z-10 flex w-5 -translate-x-1/2 cursor-col-resize items-center justify-center rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] ${
-              dragging && dragging !== which ? "pointer-events-none" : ""
+            // `touch-none` for the same reason as the track — see there.
+            className={`group absolute inset-y-0 z-10 flex w-5 -translate-x-1/2 cursor-col-resize touch-none items-center justify-center rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] ${
+              // Only the divider NOT being driven opts out of hit-testing. A
+              // "stacked" grab has not resolved to one yet, so neither may —
+              // the grip still holds the pointer capture that will resolve it.
+              dragging !== null && dragging !== "stacked" && dragging !== which
+                ? "pointer-events-none"
+                : ""
             }`}
             style={{ left: `${positions[which - 1]}%` }}
           >
@@ -1175,7 +1260,11 @@ function WeightSplitBar({
               // Ringed rather than bare: the second divider sits against the
               // palest segment, where an unringed grip nearly disappears.
               className={`w-[3px] rounded-full bg-[var(--surface)] ring-1 ring-[var(--border)] transition-all group-hover:h-7 group-hover:w-[4px] ${
-                dragging === which ? "h-7 w-[4px]" : "h-6"
+                // A stacked grab shows both grips grabbed, because they are in
+                // the same place and the user is holding both until they move.
+                dragging === which || dragging === "stacked"
+                  ? "h-7 w-[4px]"
+                  : "h-6"
               }`}
             />
           </div>
@@ -1416,6 +1505,9 @@ function ScoringStep({
 function EligibilityStep({
   city,
   setCity,
+  workMode,
+  considerRelocators,
+  setConsiderRelocators,
   minYearsExperience,
   setMinYearsExperience,
   minYearsError,
@@ -1426,6 +1518,9 @@ function EligibilityStep({
 }: {
   city: string;
   setCity: (v: string) => void;
+  workMode: string;
+  considerRelocators: boolean;
+  setConsiderRelocators: (v: boolean) => void;
   minYearsExperience: string;
   setMinYearsExperience: (v: string) => void;
   minYearsError: string;
@@ -1472,6 +1567,18 @@ function EligibilityStep({
   const cityTriggerCls =
     "h-11 rounded-lg border-[var(--field-border)] bg-surface px-3.5 text-[14px]";
 
+  /*
+   * A remote role has no office to come to, so where a candidate lives cannot
+   * decide whether they can do the job. The whole city control is replaced by a
+   * note rather than left visible-but-ignored, because a filter that appears to
+   * work and silently does nothing is worse than no filter.
+   *
+   * The stored value is deliberately NOT cleared here: a job flipped to remote
+   * and back keeps what HR configured. The server independently refuses to run
+   * the gate for a remote job (`cityGateApplies`), so nothing rests on this UI.
+   */
+  const isRemote = workMode === "remote";
+
   return (
     <div>
       <StepHead
@@ -1484,39 +1591,76 @@ function EligibilityStep({
             <label htmlFor="job-city" className={LABEL_CLASS}>
               City
             </label>
-            <Select value={citySelectValue} onValueChange={handleCityChange}>
-              <SelectTrigger id="job-city" className={cityTriggerCls}>
-                <SelectValue placeholder="Any city" />
-              </SelectTrigger>
-              <SelectContent className="max-h-72">
-                <SelectItem value={ANY_CITY_VALUE}>
-                  Any city (no requirement)
-                </SelectItem>
-                {PAKISTAN_CITIES.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {c}
-                  </SelectItem>
-                ))}
-                <SelectItem value={OTHER_CITY_VALUE}>
-                  Other (not listed)
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            {isOther ? (
-              <input
-                ref={otherCityRef}
-                type="text"
-                value={city}
-                maxLength={120}
-                onChange={(e) => setCity(e.target.value)}
-                placeholder="Enter the required city"
-                aria-label="Enter the required city"
-                className={`${FIELD_CLASS} mt-2`}
-              />
-            ) : null}
-            <p className={HELP_CLASS}>
-              A hard gate, pick “Any city” for no city requirement.
-            </p>
+            {isRemote ? (
+              <p className="rounded-lg border border-dashed border-[var(--field-border)] px-3.5 py-3 text-[13px] text-ink-muted">
+                Not used for remote roles. Nobody is filtered on where they
+                live.
+              </p>
+            ) : (
+              <>
+                <Select value={citySelectValue} onValueChange={handleCityChange}>
+                  <SelectTrigger id="job-city" className={cityTriggerCls}>
+                    <SelectValue placeholder="Any city" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72">
+                    <SelectItem value={ANY_CITY_VALUE}>
+                      Any city (no requirement)
+                    </SelectItem>
+                    {PAKISTAN_CITIES.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value={OTHER_CITY_VALUE}>
+                      Other (not listed)
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                {isOther ? (
+                  <input
+                    ref={otherCityRef}
+                    type="text"
+                    value={city}
+                    maxLength={120}
+                    onChange={(e) => setCity(e.target.value)}
+                    placeholder="Enter the required city"
+                    aria-label="Enter the required city"
+                    className={`${FIELD_CLASS} mt-2`}
+                  />
+                ) : null}
+                <p className={HELP_CLASS}>
+                  A hard gate, pick “Any city” for no city requirement.
+                </p>
+                {/* Only meaningful once there IS a city to be in the wrong one
+                    of. Hidden rather than disabled on "Any city", because a
+                    live control that governs a gate nobody set is noise. */}
+                {city.trim() ? (
+                  <div className="mt-3">
+                    <label
+                      htmlFor="job-consider-relocators"
+                      className="flex cursor-pointer items-center gap-2 text-[13px] font-semibold text-ink"
+                    >
+                      <input
+                        id="job-consider-relocators"
+                        type="checkbox"
+                        checked={considerRelocators}
+                        onChange={(e) =>
+                          setConsiderRelocators(e.target.checked)
+                        }
+                        className="h-3.5 w-3.5 rounded border-[var(--field-border)] accent-[var(--primary)]"
+                      />
+                      Also consider candidates willing to relocate
+                    </label>
+                    <p className={HELP_CLASS}>
+                      Someone in another city who says they would move goes to
+                      your review queue instead of being rejected. They are
+                      never auto-invited. Turn this off if the role needs
+                      someone already living there.
+                    </p>
+                  </div>
+                ) : null}
+              </>
+            )}
           </div>
           <div>
             <label htmlFor="job-min-years" className={LABEL_CLASS}>
