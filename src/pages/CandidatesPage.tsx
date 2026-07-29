@@ -191,9 +191,18 @@ export function CandidatesPage() {
   // org-wide list. Captured ONCE at mount: the URL-sync effect below wipes
   // history state on its first run, and a later dropdown change must not flip
   // this on.
+  //
+  // `state.fromJob` is in-memory history state, so it only survives the FIRST
+  // navigation — that same URL-sync `replace` drops it, so a plain refresh
+  // would reload with no state and silently lose the chrome. The effect
+  // therefore promotes the marker into the URL as `?from=job`; seeding from
+  // EITHER source means the initial drill-in and a later reload both light up
+  // the chrome.
   const location = useLocation();
-  const [cameFromJob, setCameFromJob] = useState(() =>
-    Boolean(location.state?.fromJob),
+  const [cameFromJob, setCameFromJob] = useState(
+    () =>
+      Boolean(location.state?.fromJob) ||
+      new URLSearchParams(location.search).get("from") === "job",
   );
 
   // ── URL-backed view state ───────────────────────────────────────────
@@ -319,6 +328,12 @@ export function CandidatesPage() {
         // route carries it as a query param.
         if (routeJobId) next.delete("job");
         else put("job", jobFilter, jobFilter === ALL);
+        // Persist the drill-in marker so a REFRESH restores the job-scoped
+        // chrome — `state.fromJob` can't, since this very `replace` wipes it
+        // from history state. Written only while actually inside a job (the
+        // same gate as `jobInFocus`); "All jobs" or the org-wide list drops it,
+        // keeping the URL honest.
+        put("from", "job", !(cameFromJob && jobFilter !== ALL));
         return next;
       },
       { replace: true },
@@ -330,6 +345,7 @@ export function CandidatesPage() {
     pageSize,
     jobFilter,
     routeJobId,
+    cameFromJob,
     setSearchParams,
   ]);
 
