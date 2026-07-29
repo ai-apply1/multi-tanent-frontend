@@ -199,7 +199,7 @@ export function QuestionBankPage() {
   }, [isFetching, total, rows.length, page, totalPages]);
 
   return (
-    <div className="mx-auto max-w-[1080px] px-6 py-6 lg:px-8 lg:py-8">
+    <div className="mx-auto max-w-[1240px] px-6 py-6 lg:px-8 lg:py-8">
       {/* Page header */}
       <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
         <div>
@@ -233,68 +233,77 @@ export function QuestionBankPage() {
             {total} {total === 1 ? "question" : "questions"}
           </div>
           <div className="flex-1" />
-          <div className="relative w-full max-w-[260px] flex-shrink">
-            <Search
-              className="pointer-events-none absolute left-3 top-1/2 h-[15px] w-[15px] -translate-y-1/2 text-ink-subtle"
-              strokeWidth={1.7}
-            />
-            <input
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
+          {/* The four filters travel as one group pinned to the right and kept
+              on a single line (sm+). Grouping them in a min-w-0 nowrap box lets
+              the search and tags fields shrink to absorb tight width — e.g. the
+              ~15px a vertical scrollbar steals once the list fills — instead of
+              the difficulty select dropping to a second row. Keeps the toolbar
+              identical between the loading skeleton and the loaded list. */}
+          <div className="flex min-w-0 flex-wrap items-center gap-3 sm:flex-nowrap">
+            <div className="relative w-full max-w-[260px] flex-shrink">
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 h-[15px] w-[15px] -translate-y-1/2 text-ink-subtle"
+                strokeWidth={1.7}
+              />
+              <input
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setPage(1);
+                }}
+                placeholder="Search questions…"
+                className="h-[37px] w-full rounded-[9px] border border-[var(--field-border)] bg-surface pl-9 pr-3 text-[13px] text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)]"
+              />
+            </div>
+            <TagsInput
+              value={tagFilter}
+              onChange={(next) => {
+                setTagFilter(next);
                 setPage(1);
               }}
-              placeholder="Search questions…"
-              className="h-[37px] w-full rounded-[9px] border border-[var(--field-border)] bg-surface pl-9 pr-3 text-[13px] text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)]"
+              placeholder="Filter by tags…"
+              className="w-full max-w-[260px] flex-shrink"
+              containerClassName="min-h-[37px] rounded-[9px]"
             />
+            <Select
+              value={categoryFilter || ALL}
+              onValueChange={(v) => {
+                setCategoryFilter(v === ALL ? "" : v);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="h-[37px] w-[160px] flex-shrink-0 rounded-[9px] border-[var(--field-border)] bg-surface text-[13px]">
+                <SelectValue placeholder="All categories" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>All categories</SelectItem>
+                {(categoriesQuery.data ?? []).map((c) => (
+                  <SelectItem key={c._id} value={c._id}>
+                    {c.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={difficultyFilter || ALL}
+              onValueChange={(v) => {
+                setDifficultyFilter(v === ALL ? "" : (v as DifficultyLevel));
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="h-[37px] w-[160px] flex-shrink-0 rounded-[9px] border-[var(--field-border)] bg-surface text-[13px]">
+                <SelectValue placeholder="All difficulties" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>All difficulties</SelectItem>
+                {DIFFICULTY_LEVELS.map((d) => (
+                  <SelectItem key={d} value={d}>
+                    {DIFFICULTY_LABELS[d]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-          <Select
-            value={categoryFilter || ALL}
-            onValueChange={(v) => {
-              setCategoryFilter(v === ALL ? "" : v);
-              setPage(1);
-            }}
-          >
-            <SelectTrigger className="h-[37px] w-[160px] rounded-[9px] border-[var(--field-border)] bg-surface text-[13px]">
-              <SelectValue placeholder="All categories" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>All categories</SelectItem>
-              {(categoriesQuery.data ?? []).map((c) => (
-                <SelectItem key={c._id} value={c._id}>
-                  {c.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select
-            value={difficultyFilter || ALL}
-            onValueChange={(v) => {
-              setDifficultyFilter(v === ALL ? "" : (v as DifficultyLevel));
-              setPage(1);
-            }}
-          >
-            <SelectTrigger className="h-[37px] w-[160px] rounded-[9px] border-[var(--field-border)] bg-surface text-[13px]">
-              <SelectValue placeholder="All difficulties" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>All difficulties</SelectItem>
-              {DIFFICULTY_LEVELS.map((d) => (
-                <SelectItem key={d} value={d}>
-                  {DIFFICULTY_LABELS[d]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <TagsInput
-            value={tagFilter}
-            onChange={(next) => {
-              setTagFilter(next);
-              setPage(1);
-            }}
-            placeholder="Filter by tags…"
-            className="min-w-[220px] flex-1 basis-[220px]"
-          />
         </div>
 
         {/* Rows */}

@@ -13,6 +13,7 @@ import { Briefcase, Check, ChevronDown, Loader2, Search } from "lucide-react";
 import { listJobs } from "@/features/jobs/jobsApi";
 import { JOB_STATUS_LABELS, type JobStatus } from "@/features/jobs/types";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { useAnimatedOverlay } from "@/hooks/useAnimatedOverlay";
 import { jobDetail } from "@/routes";
 import { cn } from "@/lib/utils";
 
@@ -65,6 +66,9 @@ export function JobSwitcher({
 }: JobSwitcherProps) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  // Hold the panel mounted through its close so the pop-out plays — it renders
+  // with `{open && …}`, which would otherwise drop it the instant it closes.
+  const { mounted, phase } = useAnimatedOverlay(open, 140);
   const [search, setSearch] = useState("");
   const [active, setActive] = useState(0);
   /** Panel x-offset from the trigger, in px. 0 = left-aligned under the
@@ -134,20 +138,24 @@ export function JobSwitcher({
     effectiveSearch,
   ]);
 
-  // Close → wipe the session, so the next open starts on the full unfiltered
-  // list instead of replaying the last search.
+  // Fully closed (past the exit animation) → wipe the session, so the next open
+  // starts on the full unfiltered list instead of replaying the last search.
+  // Gated on `mounted`, not `open`, so the clear doesn't flash the list back to
+  // unfiltered mid-fade while the panel is still animating out.
   useEffect(() => {
-    if (open) return;
+    if (mounted) return;
     setSearch("");
     setActive(0);
-  }, [open]);
+  }, [mounted]);
 
-  // Open → put the caret in the search box. The panel mounts in the same
-  // commit, so by the time this effect runs the input is in the DOM.
+  // Open → put the caret in the search box. Gated on `mounted` (not `open`)
+  // because the animated mount lands a commit after `open` flips, so the input
+  // isn't in the DOM yet on the `open` change — by the time `mounted` is true it
+  // is.
   useEffect(() => {
-    if (!open) return;
+    if (!mounted) return;
     inputRef.current?.focus();
-  }, [open]);
+  }, [mounted]);
 
   /*
    * Open → position the panel horizontally. There is no positioning library
@@ -286,7 +294,7 @@ export function JobSwitcher({
         />
       </button>
 
-      {open ? (
+      {mounted ? (
         <div
           // `left` is measured, not a class — see the layout effect above.
           style={{ left: offsetLeft }}
@@ -306,7 +314,10 @@ export function JobSwitcher({
           onMouseDown={(event) => {
             if (event.target !== inputRef.current) event.preventDefault();
           }}
-          className="absolute top-full z-50 mt-2 w-[340px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-line bg-popover text-popover-foreground shadow-[0_12px_34px_rgba(13,11,11,0.16)]"
+          className={cn(
+            "absolute top-full z-50 mt-2 w-[340px] max-w-[calc(100vw-2rem)] origin-top-left overflow-hidden rounded-xl border border-line bg-popover text-popover-foreground shadow-[0_12px_34px_rgba(13,11,11,0.16)]",
+            phase === "exit" ? "animate-dropdown-out" : "animate-dropdown-in",
+          )}
         >
           <p className="border-b border-line px-3 py-2.5 text-[12px] font-semibold text-ink">
             Switch job

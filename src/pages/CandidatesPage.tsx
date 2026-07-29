@@ -142,6 +142,27 @@ function isProcessing(row: CandidateListItem): boolean {
   );
 }
 
+/**
+ * The `{{token}}` values we can fill from a single candidate row, used to
+ * personalize the compose dialog's live preview. Only the tokens we actually
+ * know are returned — `orgName`, the interview link, dates and duration are
+ * left for the server to render (real org, sample link) so the preview never
+ * shows a made-up value we don't have.
+ */
+function candidatePreviewMergeValues(
+  fullName: string,
+  jobTitle: string | null,
+): Record<string, string> {
+  const values: Record<string, string> = {};
+  const name = fullName.trim();
+  if (name) {
+    values.candidateName = name;
+    values.firstName = name.split(/\s+/)[0];
+  }
+  if (jobTitle?.trim()) values.jobTitle = jobTitle.trim();
+  return values;
+}
+
 /** Two initials, uppercased. Empty string collapses to a single dash. */
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -200,6 +221,13 @@ export function CandidatesPage() {
     ids: string[];
     label: string;
     fromSelection: boolean;
+    /**
+     * Real token values to personalize the compose dialog's live preview.
+     * Set only for a single-row send (we know that one candidate's name and
+     * job); omitted for a multi-select send, where one set of values can't
+     * speak for everyone.
+     */
+    mergeValues?: Record<string, string>;
   } | null>(null);
   const [exporting, setExporting] = useState(false);
 
@@ -936,6 +964,10 @@ export function CandidatesPage() {
                         ids: [row._id],
                         label: row.fullName || "this candidate",
                         fromSelection: false,
+                        mergeValues: candidatePreviewMergeValues(
+                          row.fullName,
+                          jobsById.get(row.jobId)?.title ?? null,
+                        ),
                       })
                     }
                     onChangeStatus={(statusKey) =>
@@ -1087,6 +1119,7 @@ export function CandidatesPage() {
         }}
         candidateIds={emailState?.ids ?? []}
         recipientLabel={emailState?.label ?? ""}
+        previewMergeValues={emailState?.mergeValues}
         onSent={() => {
           // A send launched from the multi-select bar clears the selection;
           // a single-row send leaves any selection untouched.

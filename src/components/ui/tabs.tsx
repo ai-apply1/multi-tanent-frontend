@@ -42,6 +42,10 @@ export const TabsContent = React.forwardRef<
     ref={ref}
     className={cn(
       "ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+      // Content settles up each time its tab becomes active, matching the
+      // page-enter feel. Only the active panel is in the DOM, so this replays
+      // on every switch.
+      "data-[state=active]:animate-fade-up",
       className
     )}
     {...props}
