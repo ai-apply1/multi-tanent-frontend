@@ -23,7 +23,6 @@ import {
   GripVertical,
   Loader2,
   Lock,
-  MailX,
   Pencil,
   Plus,
   RotateCw,
@@ -35,10 +34,14 @@ import {
   deleteStatusColumn,
   listCandidateStatuses,
   reorderStatusColumns,
+  updateStatusColumn,
 } from "@/features/pipeline/pipelineApi";
 import type { CandidateStatus } from "@/features/candidates/types";
 import { StatusDialog } from "@/features/pipeline/components/StatusDialog";
-import { STAGE_ORDER_STEP } from "@/features/pipeline/types";
+import {
+  STAGE_AUTO_EMAILS,
+  STAGE_ORDER_STEP,
+} from "@/features/pipeline/types";
 import { errorMessage } from "@/lib/errors";
 
 const FALLBACK_COLOR = "#64748B";
@@ -89,6 +92,15 @@ export function PipelinePage() {
   const [deleteTarget, setDeleteTarget] = useState<CandidateStatus | null>(
     null,
   );
+  /**
+   * Row whose "Auto emails" switch was clicked — the flip is NOT applied
+   * until the confirm dialog is accepted (the switch controls real
+   * candidate email, so it should never toggle on a stray click). The
+   * direction is derived from the row's current value: the dialog always
+   * offers the opposite.
+   */
+  const [autoEmailTarget, setAutoEmailTarget] =
+    useState<CandidateStatus | null>(null);
 
   const {
     data: statuses,
@@ -150,6 +162,40 @@ export function PipelinePage() {
     // so leaving the dialog up to retry would only cover the toast.
     onSettled: () => setDeleteTarget(null),
   });
+
+  /**
+   * The row's "Auto emails" switch, applied only after the confirm dialog
+   * is accepted. Not optimistic — the dialog shows "Saving…" until the
+   * server answers, and the response row replaces the cached one, so the
+   * switch only ever settles on confirmed state.
+   */
+  const autoEmailsMutation = useMutation({
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+      updateStatusColumn(id, { autoEmailsEnabled: enabled }),
+    onSuccess: (saved) => {
+      queryClient.setQueryData<CandidateStatus[]>(
+        ["candidateStatuses"],
+        (rows) => rows?.map((r) => (r._id === saved._id ? saved : r)),
+      );
+      toast.success(
+        saved.autoEmailsEnabled === false
+          ? `Automatic emails off for "${saved.label}".`
+          : `Automatic emails on for "${saved.label}".`,
+      );
+    },
+    onError: (err) => {
+      toast.error(errorMessage(err, "Could not update automatic emails."));
+      queryClient.invalidateQueries({ queryKey: ["candidateStatuses"] });
+    },
+    // Close on either outcome — success is done, and on error the toast
+    // says why; leaving the dialog up would only cover it.
+    onSettled: () => setAutoEmailTarget(null),
+  });
+
+  /** The direction the dialog is offering: the opposite of today. */
+  const autoEmailNext = autoEmailTarget
+    ? autoEmailTarget.autoEmailsEnabled === false
+    : false;
 
   const busy = reorderMutation.isPending || deleteMutation.isPending;
 
@@ -273,6 +319,11 @@ export function PipelinePage() {
                     deleteMutation.isPending &&
                     deleteMutation.variables === status._id
                   }
+                  onToggleAutoEmails={() => setAutoEmailTarget(status)}
+                  togglingAutoEmails={
+                    autoEmailsMutation.isPending &&
+                    autoEmailsMutation.variables?.id === status._id
+                  }
                 />
               ))}
             </SortableContext>
@@ -291,6 +342,62 @@ export function PipelinePage() {
           status={editTarget}
         />
       ) : null}
+
+      {/* The "Auto emails" switch's confirmation — carries the full
+          explanation the old hover tooltip held, so the consequence is read
+          BEFORE it applies. `autoEmailNext` is the direction on offer (the
+          opposite of the row's current value). */}
+      <ConfirmDialog
+        open={Boolean(autoEmailTarget)}
+        onOpenChange={(o) => {
+          if (!o && !autoEmailsMutation.isPending) setAutoEmailTarget(null);
+        }}
+        title={
+          autoEmailNext
+            ? "Turn automatic emails back on?"
+            : "Turn off automatic emails?"
+        }
+        description={
+          autoEmailTarget ? (
+            <>
+              {/* The stage, rendered as it appears on the board. */}
+              <span className="mb-2.5 flex flex-wrap items-center gap-2">
+                <span
+                  className="inline-flex items-center rounded-full px-2.5 py-1 text-[12.5px] font-semibold"
+                  style={{
+                    background: `color-mix(in oklab, ${
+                      autoEmailTarget.color ?? FALLBACK_COLOR
+                    }, white 88%)`,
+                    color: autoEmailTarget.color ?? FALLBACK_COLOR,
+                  }}
+                >
+                  {autoEmailTarget.label}
+                </span>
+              </span>
+              {STAGE_AUTO_EMAILS[autoEmailTarget.key]}{" "}
+              {autoEmailNext
+                ? "The system will start emailing candidates at this stage " +
+                  "again. Emails that were skipped while it was off are NOT " +
+                  "sent — reach those candidates with Send Interview invite " +
+                  "or a bulk email."
+                : "While off, candidates still move to this stage but get no " +
+                  "email — you email them yourself (Send Interview invite or " +
+                  "bulk email). Turning it back on later won't send the " +
+                  "missed emails."}
+            </>
+          ) : null
+        }
+        confirmLabel={autoEmailNext ? "Turn on" : "Turn off"}
+        loadingLabel="Saving…"
+        loading={autoEmailsMutation.isPending}
+        onConfirm={() =>
+          autoEmailTarget &&
+          autoEmailsMutation.mutate({
+            id: autoEmailTarget._id,
+            enabled: autoEmailNext,
+          })
+        }
+      />
 
       <ConfirmDialog
         open={Boolean(deleteTarget)}
@@ -340,6 +447,12 @@ interface StatusRowProps {
   onEdit: () => void;
   onDelete: () => void;
   deleting: boolean;
+  /**
+   * The "Auto emails" switch was clicked (rows in STAGE_AUTO_EMAILS only).
+   * Opens the page's confirm dialog — the flip is applied there, never here.
+   */
+  onToggleAutoEmails: () => void;
+  togglingAutoEmails: boolean;
 }
 
 /**
@@ -402,6 +515,8 @@ function StatusRow({
   onEdit,
   onDelete,
   deleting,
+  onToggleAutoEmails,
+  togglingAutoEmails,
   sortableRef,
   style,
   isDragging,
@@ -411,6 +526,8 @@ function StatusRow({
 }: StatusRowViewProps) {
   const color = status.color ?? FALLBACK_COLOR;
   const pinned = status.isProtected;
+  /** Set only for the four stages that send an automatic email. */
+  const autoEmailCopy = STAGE_AUTO_EMAILS[status.key];
   return (
     <div
       ref={sortableRef}
@@ -481,18 +598,6 @@ function StatusRow({
               Frozen
             </span>
           ) : null}
-          {/* Muted stage — the admin switched its automatic emails off in
-              the edit dialog. `=== false` on purpose: rows that predate
-              the field are enabled (the backend default), so no badge. */}
-          {status.autoEmailsEnabled === false ? (
-            <span
-              title="Candidates moved to this stage get no automatic email — send it yourself via Send invite or bulk email"
-              className="inline-flex items-center gap-1 rounded-full bg-ink-faint px-2 py-0.5 text-[11px] font-semibold text-ink-2"
-            >
-              <MailX className="h-[10px] w-[10px]" strokeWidth={1.9} />
-              Auto emails off
-            </span>
-          ) : null}
         </div>
         {/* What the column is for — set in the edit dialog. Rendered only
             when present, so rows without one stay a single line. */}
@@ -502,6 +607,42 @@ function StatusRow({
           </p>
         ) : null}
       </div>
+      {/* The stage's automatic-email switch, inline so muting is one click
+          from the board. Only the four stages that actually send one
+          (invited / rejected / shortlisted / final_rejected) get it — on
+          any other column it would be a switch wired to nothing. The click
+          only OPENS the confirm dialog (which carries the full explanation);
+          the flip is applied there. `!== false` on purpose: rows that
+          predate the field are enabled (the backend default). Same switch
+          anatomy as the app's other on/off toggles (UserFormDialog). */}
+      {autoEmailCopy ? (
+        <div className="flex items-center gap-2">
+          <span className="text-[12.5px] font-semibold text-ink-muted">
+            Auto emails
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={status.autoEmailsEnabled !== false}
+            aria-label={`Automatic emails for ${status.label}`}
+            disabled={togglingAutoEmails || disabled}
+            onClick={onToggleAutoEmails}
+            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
+              status.autoEmailsEnabled !== false
+                ? "bg-primary"
+                : "bg-[var(--line-2)]"
+            } ${togglingAutoEmails || disabled ? "cursor-not-allowed opacity-50" : ""}`}
+          >
+            <span
+              className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                status.autoEmailsEnabled !== false
+                  ? "translate-x-5"
+                  : "translate-x-0.5"
+              }`}
+            />
+          </button>
+        </div>
+      ) : null}
       <button
         type="button"
         onClick={onEdit}

@@ -16,7 +16,6 @@ import {
   updateStatusColumn,
 } from "@/features/pipeline/pipelineApi";
 import {
-  STAGE_AUTO_EMAILS,
   STATUS_COLORS,
   STATUS_KEY_PATTERN,
   slugifyStatusKey,
@@ -75,16 +74,6 @@ export function StatusDialog({
     status?.color ?? STATUS_COLORS[0]!.hex,
   );
   const [isTerminal, setIsTerminal] = useState(status?.isTerminal ?? false);
-  /**
-   * The stage's automatic-email switch. Only the stages in
-   * `STAGE_AUTO_EMAILS` ever auto-email, so only they get the toggle —
-   * a switch on a stage that never sends would be a dead control. Absent
-   * on legacy rows means enabled (the backend default).
-   */
-  const autoEmailCopy = status ? STAGE_AUTO_EMAILS[status.key] : undefined;
-  const [autoEmailsEnabled, setAutoEmailsEnabled] = useState(
-    status?.autoEmailsEnabled ?? true,
-  );
   /** Stop auto-deriving the key once the user has typed one themselves. */
   const [keyTouched, setKeyTouched] = useState(isEdit);
 
@@ -100,9 +89,6 @@ export function StatusDialog({
           // Only custom columns may change terminality — the server ignores
           // the flag on protected built-ins, so don't send it for those.
           ...(pinned ? {} : { isTerminal }),
-          // Only for stages that actually auto-email; a dead flag on the
-          // others would just be noise in the payload.
-          ...(autoEmailCopy ? { autoEmailsEnabled } : {}),
         });
       }
       return createStatusColumn({
@@ -295,33 +281,6 @@ export function StatusDialog({
                     scored, not when one is abandoned. Only a person can.
                     Leave this off and a candidate parked here can still be
                     moved on automatically.
-                  </span>
-                </span>
-              </label>
-            ) : null}
-
-            {/* The stage's automatic-email switch — only the stages that
-                actually send one (invited / rejected / shortlisted /
-                final_rejected) get the toggle; on every other column it
-                would be a switch wired to nothing. Same consequence-first
-                wording rule as the freeze checkbox above. */}
-            {autoEmailCopy ? (
-              <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-line p-3">
-                <input
-                  type="checkbox"
-                  checked={autoEmailsEnabled}
-                  onChange={(e) => setAutoEmailsEnabled(e.target.checked)}
-                  className="mt-0.5 h-[15px] w-[15px] accent-[var(--accent,#003fbc)]"
-                />
-                <span>
-                  <span className="block text-[13.5px] font-semibold text-ink">
-                    Automatic emails
-                  </span>
-                  <span className="mt-0.5 block text-[12px] text-ink-muted">
-                    {autoEmailCopy} When off, candidates still move to this
-                    stage but get no email — you email them yourself (Send
-                    invite or bulk email). Turning it back on won't send the
-                    missed emails.
                   </span>
                 </span>
               </label>

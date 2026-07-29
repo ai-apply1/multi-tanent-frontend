@@ -77,8 +77,8 @@ export interface UpdateStatusPayload {
 /**
  * The builtin stages that send an AUTOMATIC email to the candidate, mapped
  * to a plain-language line describing exactly what their toggle controls.
- * Drives the "Automatic emails" switch in the status dialog: stages absent
- * here (custom columns, `applied`, `needs_review`, `interviewing`,
+ * Drives the inline "Auto emails" switch on the pipeline page rows: stages
+ * absent here (custom columns, `applied`, `needs_review`, `interviewing`,
  * `scored`, `hired`) never auto-email, so they don't get a dead toggle.
  */
 export const STAGE_AUTO_EMAILS: Record<string, string> = {
