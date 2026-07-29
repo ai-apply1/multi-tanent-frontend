@@ -66,6 +66,27 @@ export interface UpdateStatusPayload {
   description?: string
   color?: string
   isTerminal?: boolean
+  /**
+   * The stage's automatic-email switch. Only sent for the stages that
+   * actually auto-email (see {@link STAGE_AUTO_EMAILS}) — the server
+   * accepts it on any row, but on the others it is a dead flag.
+   */
+  autoEmailsEnabled?: boolean
+}
+
+/**
+ * The builtin stages that send an AUTOMATIC email to the candidate, mapped
+ * to a plain-language line describing exactly what their toggle controls.
+ * Drives the "Automatic emails" switch in the status dialog: stages absent
+ * here (custom columns, `applied`, `needs_review`, `interviewing`,
+ * `scored`, `hired`) never auto-email, so they don't get a dead toggle.
+ */
+export const STAGE_AUTO_EMAILS: Record<string, string> = {
+  invited: "Controls the interview invite email and the follow-up reminders.",
+  rejected: "Controls the automatic rejection email sent at the CV screen.",
+  shortlisted: "Controls the “you’re shortlisted” email sent after scoring.",
+  final_rejected:
+    "Controls the rejection email sent after the interview is scored.",
 }
 
 /**

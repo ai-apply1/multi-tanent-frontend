@@ -23,6 +23,7 @@ import {
   GripVertical,
   Loader2,
   Lock,
+  MailX,
   Pencil,
   Plus,
   RotateCw,
@@ -478,6 +479,18 @@ function StatusRow({
             >
               <Lock className="h-[10px] w-[10px]" strokeWidth={1.9} />
               Frozen
+            </span>
+          ) : null}
+          {/* Muted stage — the admin switched its automatic emails off in
+              the edit dialog. `=== false` on purpose: rows that predate
+              the field are enabled (the backend default), so no badge. */}
+          {status.autoEmailsEnabled === false ? (
+            <span
+              title="Candidates moved to this stage get no automatic email — send it yourself via Send invite or bulk email"
+              className="inline-flex items-center gap-1 rounded-full bg-ink-faint px-2 py-0.5 text-[11px] font-semibold text-ink-2"
+            >
+              <MailX className="h-[10px] w-[10px]" strokeWidth={1.9} />
+              Auto emails off
             </span>
           ) : null}
         </div>
