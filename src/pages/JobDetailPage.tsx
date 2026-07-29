@@ -421,10 +421,17 @@ export function JobDetailPage() {
             pre-filtered to THIS job (`?job=<id>`), which is exactly what
             CandidatesPage reads to scope its rows. This is the destination the
             retired per-job board route now redirects to, so we go there
-            directly and skip the redirect hop. */}
+            directly and skip the redirect hop. `state.fromJob` marks it as a
+            deliberate drill-in, so that page shows its "back to job" chrome —
+            the breadcrumb, the job name in its title, the Back to job button —
+            which a manual pick in its own Job filter must NOT trigger. */}
         <TabButton
           active={false}
-          onClick={() => navigate(`${ROUTES.CANDIDATES}?job=${job._id}`)}
+          onClick={() =>
+            navigate(`${ROUTES.CANDIDATES}?job=${job._id}`, {
+              state: { fromJob: true },
+            })
+          }
         >
           Candidates
         </TabButton>

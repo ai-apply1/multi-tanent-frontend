@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import {
   keepPreviousData,
@@ -182,6 +182,18 @@ export function CandidatesPage() {
   // seeds the filter. Without this the job id in the URL would be ignored.
   const { jobId: routeJobId } = useParams<{ jobId: string }>();
 
+  // Was this page reached by DRILLING INTO a specific job — the Job detail
+  // page's Candidates tab, the Jobs list's "View candidates", or a stale
+  // per-job link, each of which navigates here with `state.fromJob`? That is
+  // what earns the job-scoped chrome (breadcrumb, the job name in the title,
+  // the "Back to job" button). Merely choosing a job in the Job filter on the
+  // plain sidebar → Candidates page is NOT a drill-in and must stay the
+  // org-wide list. Captured ONCE at mount: the URL-sync effect below wipes
+  // history state on its first run, and a later dropdown change must not flip
+  // this on.
+  const location = useLocation();
+  const [cameFromJob] = useState(() => Boolean(location.state?.fromJob));
+
   // ── URL-backed view state ───────────────────────────────────────────
   // Filters, pagination and the open candidate drawer all live in the query
   // string, so a refresh (or a shared link) restores the exact view instead of
@@ -342,6 +354,14 @@ export function CandidatesPage() {
         : jobsLoading
           ? "Loading…"
           : "Job not listed";
+
+  // The job-scoped view: the operator drilled into ONE job (`cameFromJob`) and
+  // the list is still narrowed to it. This gates the whole "you're inside this
+  // job" chrome — the breadcrumb, the job name in the title, the "Back to job"
+  // button — so the plain, sidebar-reached list never grows them just because
+  // someone picked a value in the Job filter. It follows the filter: switching
+  // jobs re-points the trail, "All jobs" collapses it back to the org-wide list.
+  const jobInFocus = cameFromJob && jobFilter !== ALL;
 
   // Re-seed when the URL's job changes under a mounted page (job A → job B).
   // The `useState` initialisers above only cover the mount. Keyed on
@@ -630,9 +650,10 @@ export function CandidatesPage() {
     resetPage();
   };
 
-  const headline = selectedJob
-    ? `Candidates · ${selectedJob.title}`
-    : "Candidates";
+  const headline =
+    jobInFocus && selectedJob
+      ? `Candidates · ${selectedJob.title}`
+      : "Candidates";
   const subtitle = routeJobId
     ? "Applicants for this job, CVs, pre-screen verdicts, interview results and funnel stage."
     : "Every applicant across your jobs CVs, pre-screen verdicts, interview results, and where each one sits in the funnel.";
@@ -644,7 +665,7 @@ export function CandidatesPage() {
 
   return (
     <div className="mx-auto max-w-[1240px] px-6 py-6 lg:px-8 lg:py-8">
-      {routeJobId ? (
+      {jobInFocus ? (
         <nav
           aria-label="Breadcrumb"
           className="mb-3.5 flex items-center gap-2 text-[13px] text-ink-muted"
@@ -685,7 +706,7 @@ export function CandidatesPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {routeJobId && selectedJob ? (
+          {jobInFocus && selectedJob ? (
             <Button variant="secondary" size="sm" asChild>
               <Link to={jobDetail(selectedJob._id)}>
                 <ArrowLeft className="h-4 w-4" strokeWidth={1.7} />
