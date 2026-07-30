@@ -32,6 +32,7 @@ import {
   Play,
   RefreshCw,
   Send,
+  ShieldCheck,
   Sparkles,
   Star,
   Tag,
@@ -2010,7 +2011,25 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                           onJump={jumpToRecording}
                         />
 
-                        {/* 2. All evaluations, below the video: overall score,
+                        {/* 2. Interview integrity — the tab-switch /
+                            fullscreen-exit signals the candidate app records
+                            while they answer. Rendered outside the `data.scores`
+                            guard below so it shows for every submitted
+                            interview, scored or not. */}
+                        <ProctoringSummaryCard
+                          fullscreenExitCount={
+                            data.proctoring?.fullscreenExitCount ?? 0
+                          }
+                          tabHiddenCount={data.proctoring?.tabHiddenCount ?? 0}
+                          graceUsedSec={data.proctoring?.graceUsedSec ?? 0}
+                          integrityScore={
+                            typeof data.scores?.integrity?.score === "number"
+                              ? data.scores.integrity.score
+                              : null
+                          }
+                        />
+
+                        {/* 3. All evaluations, below the video: overall score,
                             highlights / areas / score breakdown, then the
                             per-question deep dive. When the recording isn't
                             scored yet, the actionable scoring banner takes
@@ -3122,6 +3141,175 @@ export function formatOvertime(totalSec: number): string {
   if (m === 0) return `${rem}s`;
   if (rem === 0) return `${m}m`;
   return `${m}m ${rem}s`;
+}
+
+/**
+ * Interview-integrity panel for the drawer. Surfaces the proctoring signals the
+ * candidate app captures during the interview — fullscreen exits, tab switches,
+ * and any time run past the limit — plus the AI integrity score once scoring has
+ * run. The counts come straight from `data.proctoring`, which the admin detail
+ * endpoint returns for every interview, so this renders for scored and unscored
+ * submissions alike. Flag-only by design: it never gates a candidate, it just
+ * shows HR what happened, mirroring the "noted for your reviewer" wording the
+ * candidate sees mid-interview. Clean sessions collapse to a single reassuring
+ * line so a spotless interview stays quiet rather than shouting a wall of zeros.
+ */
+function ProctoringSummaryCard({
+  fullscreenExitCount,
+  tabHiddenCount,
+  graceUsedSec,
+  integrityScore,
+}: {
+  fullscreenExitCount: number;
+  tabHiddenCount: number;
+  graceUsedSec: number;
+  integrityScore: number | null;
+}) {
+  const exits = Math.max(0, Math.round(fullscreenExitCount));
+  const switches = Math.max(0, Math.round(tabHiddenCount));
+  const overtime = Math.max(0, Math.round(graceUsedSec));
+  const flagged = exits > 0 || switches > 0 || overtime > 0;
+
+  return (
+    <div className="rounded-2xl border border-line bg-surface p-[18px]">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <span
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+            style={{
+              background: flagged
+                ? "var(--warning-soft)"
+                : "var(--success-soft)",
+              color: flagged ? "var(--warning)" : "var(--success)",
+            }}
+          >
+            <ShieldCheck className="h-4 w-4" strokeWidth={1.9} />
+          </span>
+          <div>
+            <p className="text-sm font-semibold text-ink">
+              Interview integrity
+            </p>
+            <p className="text-[11.5px] text-ink-subtle">
+              Tab &amp; fullscreen activity recorded during the interview
+            </p>
+          </div>
+        </div>
+        {integrityScore !== null ? (
+          <span
+            className={cn(
+              "mono shrink-0 rounded-full border px-2.5 py-1 text-[12px] font-semibold",
+              integrityScore < 6
+                ? "border-[color-mix(in_srgb,var(--warning),transparent_60%)] text-[color:var(--warning)]"
+                : "border-line text-ink-2",
+            )}
+            style={
+              integrityScore < 6
+                ? { background: "var(--warning-soft)" }
+                : undefined
+            }
+          >
+            {integrityScore}
+            <span className="text-[10px] font-normal text-ink-subtle">
+              {" "}
+              / 10
+            </span>
+          </span>
+        ) : null}
+      </div>
+
+      {flagged ? (
+        <div className="flex flex-wrap gap-2">
+          <StatTile
+            kind="fullscreen"
+            value={exits}
+            label={`fullscreen exit${exits === 1 ? "" : "s"}`}
+            warn={exits > 0}
+          />
+          <StatTile
+            kind="tab"
+            value={switches}
+            label={`tab switch${switches === 1 ? "" : "es"}`}
+            warn={switches > 0}
+          />
+          {overtime > 0 ? (
+            <StatTile
+              kind="time"
+              value={formatOvertime(overtime)}
+              label="over the time limit"
+              warn
+            />
+          ) : null}
+        </div>
+      ) : (
+        <div
+          className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-[13px] font-medium"
+          style={{ background: "var(--success-soft)", color: "var(--success)" }}
+        >
+          <CheckCircle2 className="h-4 w-4 shrink-0" strokeWidth={1.9} />
+          Stayed in fullscreen the whole time — no tab switches recorded.
+        </div>
+      )}
+
+      <p className="mt-3 text-[11px] leading-snug text-ink-subtle">
+        {flagged
+          ? "Noted while the candidate was taking the interview. These are review flags only — they never auto-fail a candidate."
+          : "Proctoring ran for this interview and found nothing to flag."}
+      </p>
+    </div>
+  );
+}
+
+/** One stat inside the integrity card — icon chip, count, and caption. The
+ *  `warn` tint fires only when this particular signal fired, so a "0 tab
+ *  switches" tile stays neutral next to a flagged "2 fullscreen exits". */
+function StatTile({
+  kind,
+  value,
+  label,
+  warn,
+}: {
+  kind: "fullscreen" | "tab" | "time";
+  value: number | string;
+  label: string;
+  warn: boolean;
+}) {
+  const Icon = kind === "fullscreen" ? Maximize : kind === "tab" ? EyeOff : Clock;
+  return (
+    <div
+      className={cn(
+        "flex min-w-[128px] flex-1 items-center gap-2.5 rounded-xl border px-3 py-2.5",
+        warn
+          ? "border-[color-mix(in_srgb,var(--warning),transparent_65%)]"
+          : "border-line bg-card",
+      )}
+      style={warn ? { background: "var(--warning-soft)" } : undefined}
+    >
+      <span
+        className={cn(
+          "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg",
+          warn ? "text-[color:var(--warning)]" : "bg-surface text-ink-subtle",
+        )}
+        style={
+          warn
+            ? { background: "color-mix(in srgb, var(--warning), transparent 82%)" }
+            : undefined
+        }
+      >
+        <Icon className="h-3.5 w-3.5" strokeWidth={1.8} />
+      </span>
+      <div className="min-w-0 leading-tight">
+        <p
+          className={cn(
+            "mono text-[15px] font-semibold",
+            warn ? "text-[color:var(--warning)]" : "text-ink",
+          )}
+        >
+          {value}
+        </p>
+        <p className="truncate text-[11px] text-ink-subtle">{label}</p>
+      </div>
+    </div>
+  );
 }
 
 /** Proctoring-signal badge — kept exported so other views can reuse the tint. */
