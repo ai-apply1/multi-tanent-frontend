@@ -550,13 +550,13 @@ export function CandidatesPage() {
    * generic line.
    */
   const inviteMutation = useMutation({
-    mutationFn: (id: string) => sendCandidateInvite(id),
-    onSuccess: (res) => {
+    mutationFn: ({ id }: { id: string; reinvite: boolean }) =>
+      sendCandidateInvite(id),
+    onSuccess: (res, { reinvite }) => {
       toast.success(
-        `Invite sent, attempt ${res.attemptNumber}, link expires ${formatDate(
-          res.expiresAt,
-          tz,
-        )}.`,
+        `Invite ${reinvite ? "re-sent" : "sent"}, attempt ${
+          res.attemptNumber
+        }, link expires ${formatDate(res.expiresAt, tz)}.`,
       );
       invalidateCandidates();
       queryClient.invalidateQueries({ queryKey: ["candidate", res.candidateId] });
@@ -566,6 +566,11 @@ export function CandidatesPage() {
       toast.error(errorMessage(err, "Could not send the invite."));
     },
   });
+
+  // True while the invite confirm dialog targets an already-invited candidate
+  // (an interview attempt already exists). Drives the dialog's "resend" wording
+  // and the flag threaded to the mutation for its toast — see `isReinvite`.
+  const invitingReinvite = inviteTarget ? isReinvite(inviteTarget) : false;
 
   // ── selection ───────────────────────────────────────────────────────
 
@@ -1138,19 +1143,40 @@ export function CandidatesPage() {
         onOpenChange={(open) => {
           if (!open) setInviteTarget(null);
         }}
-        title={`Invite ${inviteTarget?.fullName || "this candidate"} to interview?`}
-        description={
-          <>
-            This sends <strong>{inviteTarget?.fullName}</strong> an interview
-            invite. It generates a secure interview link, emails it to them, and
-            moves them to <strong>Invited</strong>.
-          </>
+        title={
+          invitingReinvite
+            ? `Resend interview invite to ${
+                inviteTarget?.fullName || "this candidate"
+              }?`
+            : `Invite ${
+                inviteTarget?.fullName || "this candidate"
+              } to interview?`
         }
-        confirmLabel="Send invite"
-        loadingLabel="Sending…"
+        description={
+          invitingReinvite ? (
+            <>
+              This emails <strong>{inviteTarget?.fullName}</strong> a fresh
+              interview link and voids the previous one. If they&apos;ve already
+              taken the interview, use <strong>Reattempt interview</strong> from
+              their profile instead.
+            </>
+          ) : (
+            <>
+              This sends <strong>{inviteTarget?.fullName}</strong> an interview
+              invite. It generates a secure interview link, emails it to them,
+              and moves them to <strong>Invited</strong>.
+            </>
+          )
+        }
+        confirmLabel={invitingReinvite ? "Resend invite" : "Send invite"}
+        loadingLabel={invitingReinvite ? "Resending…" : "Sending…"}
         loading={inviteMutation.isPending}
         onConfirm={() => {
-          if (inviteTarget) inviteMutation.mutate(inviteTarget._id);
+          if (inviteTarget)
+            inviteMutation.mutate({
+              id: inviteTarget._id,
+              reinvite: invitingReinvite,
+            });
         }}
       />
 
@@ -1293,6 +1319,18 @@ function CandidatesTableSkeleton() {
   );
 }
 
+/**
+ * Whether inviting this candidate RE-SENDS an existing attempt's link rather
+ * than sending a first-time invite. `latestInterviewId` is populated the moment
+ * a first invite mints the (pending) interview doc, so its presence is exactly
+ * "already invited at least once". Mirrors the backend `/candidates/:id/invite`,
+ * which re-mints the current attempt's link when one exists and opens attempt 1
+ * when none does — so the label tracks what the click will actually do.
+ */
+function isReinvite(row: Pick<CandidateListItem, "latestInterviewId">): boolean {
+  return row.latestInterviewId !== null;
+}
+
 function CandidateRow({
   row,
   tz,
@@ -1325,9 +1363,14 @@ function CandidateRow({
   onDelete: () => void;
 }) {
   const status = row.currentStatusId;
-  // Always offered — the invite endpoint now accepts any status (it only
-  // refuses on a closed job / spent attempt cap, with a clear message).
+  // Always offered — the invite endpoint takes any funnel status; it only
+  // refuses on a closed job, a spent attempt cap, or an attempt that's already
+  // been started (a clear message then points to "Reattempt" in the drawer).
   const canInvite = true;
+  // First-time invite vs. re-sending an existing attempt's link — the same
+  // endpoint either way, but the label should say which so the row reads
+  // truthfully (an already-invited candidate showing "Send invite" misleads).
+  const reinvite = isReinvite(row);
   const scoreState = aiScoreState(row.latestInterviewId);
 
   return (
@@ -1485,8 +1528,12 @@ function CandidateRow({
             ) : null}
             {canInvite ? (
               <DropdownMenuItem onSelect={onInvite}>
-                <Send className="h-4 w-4" />
-                Send Interview invite
+                {reinvite ? (
+                  <RefreshCw className="h-4 w-4" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                {reinvite ? "Resend invite" : "Send Interview invite"}
               </DropdownMenuItem>
             ) : null}
             <DropdownMenuItem onSelect={onSendEmail}>
