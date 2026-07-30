@@ -127,6 +127,7 @@ import {
 import type {
   AdminInterviewAttempt,
   AdminInterviewQuestionItem,
+  InterviewRecording,
   InterviewScores,
   Recommendation,
   ScoredAnswer,
@@ -151,6 +152,140 @@ function isScoringInFlight(s?: ScoringStatus | null): boolean {
 
 function isTranscoding(s?: string | null): boolean {
   return s === "pending" || s === "processing";
+}
+
+/**
+ * Below this fraction of the interview, the recording is treated as not
+ * covering it and the reviewer is told.
+ *
+ * 0.9 rather than 1.0 because a small shortfall is normal and meaningless: the
+ * recorder starts a beat after `startedAt` is stamped, and the last seconds
+ * after the final answer are cut when the recorder stops for submit. A tenth of
+ * the interview missing is not that.
+ */
+const RECORDING_COVERAGE_FLOOR = 0.9;
+
+/** `1h 04m`, `7m 20s`, `12s` — a duration a reviewer can read at a glance. */
+function formatDurationSec(sec: number): string {
+  const total = Math.max(0, Math.round(sec));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m`;
+  if (m > 0) return `${m}m ${String(s).padStart(2, "0")}s`;
+  return `${s}s`;
+}
+
+interface RecordingCoverage {
+  /** Render the notice at all? */
+  incomplete: boolean
+  recordedSec: number
+  expectedSec: number
+  /** Recorder generations the recording is stitched from (1 = uninterrupted). */
+  generationCount: number
+  /** One sentence stating what is actually missing. */
+  headline: string
+  /** Why the reviewer should care, given the scores sit right next to it. */
+  detail: string
+}
+
+/**
+ * Does the video actually back up the scores it is shown beside?
+ *
+ * This exists because of a specific way the drawer could mislead. Answer audio
+ * is uploaded and confirmed per question the moment each one ends, and it
+ * survives a page reload; the webcam recording is one long stream that does not.
+ * So a candidate who reloads mid-interview could be fully transcribed, fully
+ * scored, and recommended — next to a video covering a fraction of the session,
+ * with nothing on screen saying so. A reviewer reading the score first (which is
+ * what a score is for) had no way to know.
+ *
+ * The recording no longer loses that footage (each generation is kept and the
+ * generations are stitched), but the wall-clock while the page was reloading is
+ * genuinely unrecorded, and a truncated or failed upload is still possible. So
+ * the honest thing is to state the coverage either way.
+ */
+function assessRecordingCoverage(
+  recording: InterviewRecording | undefined,
+  hasAnyVideo: boolean,
+): RecordingCoverage {
+  const recordedSec = Math.max(0, recording?.durationSec ?? 0);
+  const expectedSec = Math.max(0, recording?.expectedDurationSec ?? 0);
+  const generationCount = Math.max(0, recording?.generationCount ?? 0);
+  const stitched = generationCount > 1;
+  // Only claim a shortfall when both numbers are known. `expectedSec` is 0 for
+  // an interview that never started, and `recordedSec` is 0 while a transcode
+  // is still resolving the real length — neither is evidence of a gap.
+  const short =
+    hasAnyVideo &&
+    recordedSec > 0 &&
+    expectedSec > 0 &&
+    recordedSec / expectedSec < RECORDING_COVERAGE_FLOOR;
+
+  if (!short && !stitched) {
+    return {
+      incomplete: false,
+      recordedSec,
+      expectedSec,
+      generationCount,
+      headline: "",
+      detail: "",
+    };
+  }
+
+  const coverage =
+    short && expectedSec > 0
+      ? `${formatDurationSec(recordedSec)} of this ${formatDurationSec(expectedSec)} interview`
+      : "";
+  const headline = short
+    ? `This recording covers ${coverage}.`
+    : `This recording is stitched from ${generationCount} separate parts.`;
+  const detail = stitched
+    ? "The candidate's page reloaded during the interview, so the camera restarted " +
+      (generationCount > 2 ? `${generationCount - 1} times` : "once") +
+      " and the time in between was not captured. Their answers were still recorded and scored in full, so the scores below cover more of the interview than the video does."
+    : "Part of the session is missing from the video — the upload was cut short, or the camera stopped early. Their answers were still recorded and scored in full, so the scores below cover more of the interview than the video does.";
+
+  return {
+    incomplete: true,
+    recordedSec,
+    expectedSec,
+    generationCount,
+    headline,
+    detail,
+  };
+}
+
+/**
+ * The coverage warning. Rendered TWICE on purpose — above the player and again
+ * directly above the score card — because the failure it describes is a reviewer
+ * trusting a score without noticing the video behind it is partial, and plenty
+ * of reviewers never scroll up to the video at all.
+ */
+function RecordingCoverageNotice({
+  coverage,
+  className,
+}: {
+  coverage: RecordingCoverage;
+  className?: string;
+}) {
+  if (!coverage.incomplete) return null;
+  return (
+    <div
+      role="note"
+      className={cn(
+        "flex items-start gap-2.5 rounded-xl border px-3 py-2.5 text-[12.5px] leading-relaxed",
+        "border-[color:var(--warning)]/35 bg-[color:var(--warning)]/[0.07] text-ink",
+        className,
+      )}
+    >
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--warning)]" />
+      <p>
+        <span className="font-semibold">{coverage.headline}</span>{" "}
+        <span className="text-ink-muted">{coverage.detail}</span>
+      </p>
+    </div>
+  );
 }
 
 function initialsFor(name?: string, email?: string) {
@@ -1554,6 +1689,11 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   const recording = data?.recording;
   const hlsStatus = recording?.hlsStatus ?? null;
   const durationSec = recording?.durationSec ?? 0;
+  const rawUrls = data?.webcamVideoUrls ?? [];
+  const coverage = assessRecordingCoverage(
+    recording,
+    hlsReady || rawUrls.length > 0,
+  );
   const done = data?.status === "submitted";
   const overallScore100 =
     typeof data?.scores?.overall === "number"
@@ -1995,11 +2135,12 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                         <ResponsesTab
                           videoSectionRef={videoSectionRef}
                           hlsUrl={data.webcamHlsUrl}
-                          rawUrl={data.webcamVideoUrl}
+                          rawUrls={rawUrls}
                           hlsStatus={hlsStatus}
                           hlsProgress={recording?.hlsProgress ?? 0}
                           hlsError={recording?.hlsError ?? ""}
                           durationSec={durationSec}
+                          coverage={coverage}
                           chapters={chapters}
                           playerApiRef={playerApiRef}
                           questions={questions}
@@ -2017,6 +2158,11 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                             this slot. */}
                         {data.scores ? (
                           <>
+                            {/* Repeated from above the player on purpose: this
+                                is the spot a reviewer actually reads, and the
+                                whole point is that a score must not be read as
+                                a complete interview when the video isn't one. */}
+                            <RecordingCoverageNotice coverage={coverage} />
                             <AiScoreCard
                               overall={data.scores.overall}
                               recommendation={resolveVerdict(data.scores)}
@@ -2399,14 +2545,66 @@ function EvaluationTab({
 
 // ── Responses tab ──────────────────────────────────────────────────────
 
+/**
+ * The raw-recording fallback player(s) — used before the HLS bundle exists, or
+ * when its transcode failed.
+ *
+ * Plural because a recording made across a mid-interview page reload is several
+ * separate files until the transcode joins them into one timeline. Each is
+ * playable on its own, so they are listed in recording order and labelled; the
+ * chapters and the seek-to-question actions stay disabled until the bundle is
+ * ready, because only then is there a single timeline for an offset to mean
+ * anything against.
+ */
+function RawRecordingParts({
+  urls,
+  durationSec,
+  candidateName,
+}: {
+  urls: string[];
+  durationSec: number;
+  candidateName: string;
+}) {
+  if (urls.length === 0) return null;
+  const who = candidateName || "candidate";
+  if (urls.length === 1) {
+    return (
+      <VideoPlayer
+        src={urls[0]}
+        knownDurationSec={durationSec}
+        ariaLabel={`Webcam recording for ${who}`}
+      />
+    );
+  }
+  return (
+    <div className="grid w-full gap-3">
+      {urls.map((url, i) => (
+        <div key={url} className="grid gap-1.5">
+          <div className="text-[11px] font-semibold tracking-wide text-white/60 uppercase">
+            Part {i + 1} of {urls.length}
+          </div>
+          <VideoPlayer
+            src={url}
+            // No per-part duration to pass: `durationSec` is the total across
+            // every part, and handing it to one player would stretch its
+            // timeline over footage it doesn't contain.
+            ariaLabel={`Webcam recording for ${who}, part ${i + 1} of ${urls.length}`}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ResponsesTab({
   videoSectionRef,
   hlsUrl,
-  rawUrl,
+  rawUrls,
   hlsStatus,
   hlsProgress,
   hlsError,
   durationSec,
+  coverage,
   chapters,
   playerApiRef,
   questions,
@@ -2418,11 +2616,13 @@ function ResponsesTab({
 }: {
   videoSectionRef: React.MutableRefObject<HTMLElement | null>;
   hlsUrl: string;
-  rawUrl: string;
+  /** One per un-transcoded recorder generation, in recording order. */
+  rawUrls: string[];
   hlsStatus: string | null;
   hlsProgress: number;
   hlsError: string;
   durationSec: number;
+  coverage: RecordingCoverage;
   chapters: Array<{ atSec: number; label: string }>;
   playerApiRef: React.MutableRefObject<VideoPlayerHandle | null>;
   questions: AdminInterviewQuestionItem[];
@@ -2454,6 +2654,7 @@ function ResponsesTab({
         ref={videoSectionRef as React.RefObject<HTMLElement>}
         className="scroll-mt-4"
       >
+        <RecordingCoverageNotice coverage={coverage} className="mb-2.5" />
         <div className="overflow-hidden rounded-xl bg-black">
           {hlsUrl ? (
             <div className="aspect-video">
@@ -2486,15 +2687,11 @@ function ResponsesTab({
                 )}
                 Retry streaming conversion
               </Button>
-              {rawUrl ? (
-                <div className="w-full">
-                  <VideoPlayer
-                    src={rawUrl}
-                    knownDurationSec={durationSec}
-                    ariaLabel={`Webcam recording for ${candidateName || "candidate"}`}
-                  />
-                </div>
-              ) : null}
+              <RawRecordingParts
+                urls={rawUrls}
+                durationSec={durationSec}
+                candidateName={candidateName}
+              />
             </div>
           ) : isTranscoding(hlsStatus) ? (
             <div className="flex aspect-video flex-col items-center justify-center gap-3 p-6 text-center text-[13px] text-white/80">
@@ -2503,21 +2700,17 @@ function ResponsesTab({
                 Preparing a streamable version of this recording…
                 {hlsProgress ? ` ${Math.round(hlsProgress)}%` : ""}
               </p>
-              {rawUrl ? (
-                <div className="w-full">
-                  <VideoPlayer
-                    src={rawUrl}
-                    knownDurationSec={durationSec}
-                    ariaLabel={`Webcam recording for ${candidateName || "candidate"}`}
-                  />
-                </div>
-              ) : null}
+              <RawRecordingParts
+                urls={rawUrls}
+                durationSec={durationSec}
+                candidateName={candidateName}
+              />
             </div>
-          ) : rawUrl ? (
-            <VideoPlayer
-              src={rawUrl}
-              knownDurationSec={durationSec}
-              ariaLabel={`Webcam recording for ${candidateName || "candidate"}`}
+          ) : rawUrls.length > 0 ? (
+            <RawRecordingParts
+              urls={rawUrls}
+              durationSec={durationSec}
+              candidateName={candidateName}
             />
           ) : (
             <div className="flex aspect-video items-center justify-center p-6 text-center text-[13px] text-white/70">
