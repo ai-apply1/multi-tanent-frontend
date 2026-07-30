@@ -224,6 +224,11 @@ export function OverviewPage() {
     () => combinedStats.map((s) => s.id),
     [combinedStats],
   );
+  // No metric or manual cards at all. Drives whether the "No metrics yet"
+  // prompt takes over the whole body (only when nothing else needs the
+  // operator) or stays scoped to the KPI slot above the funnel + awaiting
+  // columns (whenever candidates are still awaiting a decision).
+  const hasNoStats = combinedStats.length === 0;
 
   const [createOpen, setCreateOpen] = useState(false);
   // Cards being edited (null = the edit dialog is closed).
@@ -238,7 +243,7 @@ export function OverviewPage() {
 
   // Awaiting your decision: reuse the shared candidates list endpoint scoped to
   // the `scored` status. Guarded on `user` so it never fires before sign-in.
-  const { data: awaitingData } = useQuery({
+  const { data: awaitingData, isLoading: awaitingLoading } = useQuery({
     queryKey: ["awaiting-decision"],
     queryFn: () => listCandidates({ statusKey: "scored", limit: 5 }),
     enabled: Boolean(user),
@@ -435,7 +440,10 @@ export function OverviewPage() {
 
       {/* KPI grid — filter metrics and manual cards flow together so drag
           reorder can move either kind and the layout matches the design. */}
-      {isLoading ? (
+      {isLoading || (hasNoStats && awaitingLoading) ? (
+        // Hold the skeleton until BOTH queries settle when there are no cards:
+        // the awaiting list is what decides between the full-bleed empty state
+        // and the scoped one, so deciding early would flash the wrong layout.
         <OverviewSkeleton />
       ) : isError ? (
         <div className="rounded-2xl border border-line bg-surface">
@@ -448,25 +456,10 @@ export function OverviewPage() {
             </Button>
           </div>
         </div>
-      ) : !stats || stats.length === 0 ? (
-        <div className="rounded-2xl border border-line bg-surface">
-          <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
-            <span className="flex h-[50px] w-[50px] items-center justify-center rounded-[14px] bg-accent text-primary">
-              <LayoutGrid className="h-[26px] w-[26px]" strokeWidth={1.6} />
-            </span>
-            <h3 className="text-[16px] font-semibold">No metrics yet</h3>
-            <p className="max-w-[340px] text-[13.5px] text-ink-muted">
-              Add a live metric, for example the number of applicants at
-              pre-screened, to start building your pipeline funnel.
-            </p>
-            <div className="flex flex-wrap items-center justify-center gap-2">
-              <Button size="sm" onClick={() => setCreateOpen(true)}>
-                <Plus className="h-4 w-4" />
-                Add metric
-              </Button>
-            </div>
-          </div>
-        </div>
+      ) : hasNoStats && awaiting.length === 0 ? (
+        // Nothing to show at all — no metrics AND no one awaiting a decision.
+        // Only then does the empty state take over the whole dashboard body.
+        <NoMetricsCard onAdd={() => setCreateOpen(true)} />
       ) : (
         <>
           {/* Select / bulk-delete toolbar (only relevant to filter metrics). */}
@@ -505,37 +498,48 @@ export function OverviewPage() {
             </div>
           ) : null}
 
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={handleDragEnd}
-          >
-            <SortableContext items={combinedIds} strategy={rectSortingStrategy}>
-              {/* auto-FILL (not auto-fit) + a capped max track: a single card
-                  stays one column wide instead of stretching across the whole
-                  row, and every card gets the SAME width (210–260px) whether
-                  there's one or many. */}
-              <div className="mb-4 grid min-w-0 grid-cols-1 gap-3 overflow-hidden sm:grid-cols-2 md:[grid-template-columns:repeat(auto-fill,minmax(210px,260px))]">
-                {metricStats.map((stat) => (
-                  <SortableStatCard
-                    key={stat.id}
-                    stat={stat}
-                    selected={selectedIds.has(stat.id)}
-                    onToggleSelect={() => toggleSelect(stat.id)}
-                    onEdit={() => setEditMetricTarget(stat)}
-                    onDelete={() => setDeleteTarget(stat)}
-                  />
-                ))}
-                {manualStats.map((stat) => (
-                  <SortableManualCard
-                    key={stat.id}
-                    stat={stat}
-                    onDelete={() => setDeleteTarget(stat)}
-                  />
-                ))}
-              </div>
-            </SortableContext>
-          </DndContext>
+          {hasNoStats ? (
+            // Reached here only because candidates are awaiting a decision (the
+            // full-bleed empty state above already handles "nothing at all").
+            // Keep the "No metrics yet" prompt in the KPI slot so the funnel +
+            // awaiting columns below stay visible instead of being hidden.
+            <NoMetricsCard onAdd={() => setCreateOpen(true)} className="mb-4" />
+          ) : (
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext
+                items={combinedIds}
+                strategy={rectSortingStrategy}
+              >
+                {/* auto-FILL (not auto-fit) + a capped max track: a single card
+                    stays one column wide instead of stretching across the whole
+                    row, and every card gets the SAME width (210–260px) whether
+                    there's one or many. */}
+                <div className="mb-4 grid min-w-0 grid-cols-1 gap-3 overflow-hidden sm:grid-cols-2 md:[grid-template-columns:repeat(auto-fill,minmax(210px,260px))]">
+                  {metricStats.map((stat) => (
+                    <SortableStatCard
+                      key={stat.id}
+                      stat={stat}
+                      selected={selectedIds.has(stat.id)}
+                      onToggleSelect={() => toggleSelect(stat.id)}
+                      onEdit={() => setEditMetricTarget(stat)}
+                      onDelete={() => setDeleteTarget(stat)}
+                    />
+                  ))}
+                  {manualStats.map((stat) => (
+                    <SortableManualCard
+                      key={stat.id}
+                      stat={stat}
+                      onDelete={() => setDeleteTarget(stat)}
+                    />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
+          )}
 
           {/* Two-column: pipeline funnel + awaiting-decision list. Render even
               when metricStats is empty so the shell is present; the funnel body
@@ -737,6 +741,42 @@ export function OverviewPage() {
           if (!open) setDrawerCandidateId(null);
         }}
       />
+    </div>
+  );
+}
+
+/**
+ * "No metrics yet" prompt. Rendered full-bleed as the whole dashboard body when
+ * there's nothing else to act on, and — once candidates are awaiting a decision
+ * — in the KPI grid's slot above the funnel + awaiting-decision columns, so the
+ * empty-metrics message stays scoped to the metrics area instead of hiding the
+ * awaiting list. `className` lets the scoped variant add its bottom margin.
+ */
+function NoMetricsCard({
+  onAdd,
+  className,
+}: {
+  onAdd: () => void;
+  className?: string;
+}) {
+  return (
+    <div className={cn("rounded-2xl border border-line bg-surface", className)}>
+      <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
+        <span className="flex h-[50px] w-[50px] items-center justify-center rounded-[14px] bg-accent text-primary">
+          <LayoutGrid className="h-[26px] w-[26px]" strokeWidth={1.6} />
+        </span>
+        <h3 className="text-[16px] font-semibold">No metrics yet</h3>
+        <p className="max-w-[340px] text-[13.5px] text-ink-muted">
+          Add a live metric, for example the number of applicants at
+          pre-screened, to start building your pipeline funnel.
+        </p>
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <Button size="sm" onClick={onAdd}>
+            <Plus className="h-4 w-4" />
+            Add metric
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
