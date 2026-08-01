@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react"
-import { useMutation, useQuery } from "@tanstack/react-query"
-import { Loader2, Plus } from "lucide-react"
-import toast from "react-hot-toast"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Loader2, Plus } from "lucide-react";
+import toast from "react-hot-toast";
 import {
   Dialog,
   DialogContent,
@@ -9,16 +9,16 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
-import { Button } from "@/components/ui/button"
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import {
   fetchEmailTemplates,
   previewEmailTemplate,
   type EmailTemplateItem,
-} from "@/features/organization/emailTemplatesApi"
-import { sendCandidateEmail } from "@/features/candidates/candidatesApi"
-import type { BulkEmailPurpose } from "@/features/candidates/types"
-import { errorMessage } from "@/lib/errors"
+} from "@/features/organization/emailTemplatesApi";
+import { sendCandidateEmail } from "@/features/candidates/candidatesApi";
+import type { BulkEmailPurpose } from "@/features/candidates/types";
+import { errorMessage } from "@/lib/errors";
 
 /**
  * Which candidate templates this compose dialog offers, in display order.
@@ -30,10 +30,10 @@ const ALLOWED_PURPOSES: BulkEmailPurpose[] = [
   "invite",
   "shortlist",
   "rejection",
-]
+];
 
 const inputBase =
-  "h-11 w-full rounded-lg border border-[var(--field-border)] bg-surface px-3.5 text-[14px] text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)]"
+  "h-11 w-full rounded-lg border border-[var(--field-border)] bg-surface px-3.5 text-[14px] text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)]";
 
 /**
  * Compose + send one email template to a set of candidates. HR picks a
@@ -48,152 +48,220 @@ export function BulkEmailDialog({
   onOpenChange,
   candidateIds,
   recipientLabel,
+  previewMergeValues,
   onSent,
 }: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  candidateIds: string[]
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  candidateIds: string[];
   /** Human recipient summary, e.g. "8 candidates" or a single name. */
-  recipientLabel: string
-  onSent?: () => void
+  recipientLabel: string;
+  /**
+   * Real `{{token}}` values to fill into the LIVE PREVIEW only, so a single
+   * recipient's send shows their own name and job instead of the generic
+   * "Alex Morgan" sample. Preview-only: the actual send always ships the raw
+   * template with tokens, and the backend fills every candidate's true values
+   * (name, job, freshly minted interview link) per recipient. Empty/absent for
+   * a multi-select send, where a single set of values would be a lie.
+   */
+  previewMergeValues?: Record<string, string>;
+  onSent?: () => void;
 }) {
-  const count = candidateIds.length
+  const count = candidateIds.length;
 
   const query = useQuery({
     queryKey: ["email-templates"],
     queryFn: fetchEmailTemplates,
     enabled: open,
-  })
+  });
   // Only the candidate-facing templates, in ALLOWED_PURPOSES order.
   const templates = useMemo(() => {
-    const all = query.data?.templates ?? []
-    return ALLOWED_PURPOSES.map((p) =>
-      all.find((t) => t.purpose === p),
-    ).filter((t): t is EmailTemplateItem => Boolean(t))
-  }, [query.data])
+    const all = query.data?.templates ?? [];
+    return ALLOWED_PURPOSES.map((p) => all.find((t) => t.purpose === p)).filter(
+      (t): t is EmailTemplateItem => Boolean(t),
+    );
+  }, [query.data]);
 
-  const [purpose, setPurpose] = useState<string>("")
-  const [subject, setSubject] = useState("")
-  const [body, setBody] = useState("")
-  const [activeField, setActiveField] = useState<"subject" | "body">("body")
-  const subjectRef = useRef<HTMLInputElement>(null)
-  const bodyRef = useRef<HTMLTextAreaElement>(null)
+  const [purpose, setPurpose] = useState<string>("");
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const [activeField, setActiveField] = useState<"subject" | "body">("body");
+  const subjectRef = useRef<HTMLInputElement>(null);
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
 
   const selected: EmailTemplateItem | undefined = useMemo(
     () => templates.find((t) => t.purpose === purpose) ?? templates[0],
     [templates, purpose],
-  )
+  );
 
   // Seed the editor from the chosen template. Keyed by purpose so switching
-  // templates loads that template's copy.
-  const seededFor = useRef<string | null>(null)
+  // templates loads that template's copy. `open` is BOTH a gate and a dep:
+  // the close-reset below blanks `purpose` and nulls `seededFor` so a reopen
+  // starts as a fresh compose, but `selected` (the other dep) is usually the
+  // SAME object on reopen — the templates query serves its cache within the
+  // global staleTime, so no other dep re-fires this effect. Without `open`
+  // here, a quick reopen kept the previous compose and sent `purpose: ""`,
+  // which the server's enum check rejects.
+  const seededFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!selected) return
-    if (seededFor.current === selected.purpose) return
-    seededFor.current = selected.purpose
-    setPurpose(selected.purpose)
-    setSubject(selected.subject)
-    setBody(selected.body)
-  }, [selected])
+    if (!open || !selected) return;
+    if (seededFor.current === selected.purpose) return;
+    seededFor.current = selected.purpose;
+    setPurpose(selected.purpose);
+    setSubject(selected.subject);
+    setBody(selected.body);
+  }, [open, selected]);
 
-  // Reset to a fresh compose each time the dialog is reopened.
-  useEffect(() => {
-    if (!open) {
-      seededFor.current = null
-      setPurpose("")
-    }
-  }, [open])
+  // For a single recipient, inline the tokens we already know (name, job) into
+  // the copy sent to the preview endpoint, so the preview reads as their mail.
+  // Tokens we can't fill client-side (interviewUrl, dates, duration) stay as
+  // `{{tokens}}` and the server renders them with its samples, exactly as
+  // before. Whitespace-tolerant so `{{ candidateName }}` matches too.
+  const mergeEntries = useMemo(
+    () => Object.entries(previewMergeValues ?? {}).filter(([, v]) => v.trim()),
+    [previewMergeValues],
+  );
+  const applyMerge = useCallback(
+    (text: string) =>
+      mergeEntries.reduce(
+        // A function replacement (not a string) so a `$` in the value is a
+        // literal, not a `$&`/`$1` back-reference pattern.
+        (acc, [token, value]) =>
+          acc.replace(
+            new RegExp(`\\{\\{\\s*${token}\\s*\\}\\}`, "g"),
+            () => value,
+          ),
+        text,
+      ),
+    [mergeEntries],
+  );
 
   // ── Live preview (debounced, server-rendered so it matches the sent mail) ──
-  const [previewHtml, setPreviewHtml] = useState("")
-  const [previewSubject, setPreviewSubject] = useState("")
-  const [previewing, setPreviewing] = useState(false)
-  const previewKeyRef = useRef("")
+  const [previewHtml, setPreviewHtml] = useState("");
+  const [previewSubject, setPreviewSubject] = useState("");
+  const [previewing, setPreviewing] = useState(false);
+  const [previewError, setPreviewError] = useState(false);
+  const previewKeyRef = useRef("");
   useEffect(() => {
-    if (!open || !selected) return
-    const key = `${selected.purpose} ${subject} ${body}`
-    if (key === previewKeyRef.current) return
+    if (!open || !selected) return;
+    const subjectForPreview = applyMerge(subject);
+    const bodyForPreview = applyMerge(body);
+    const key = `${selected.purpose} ${subjectForPreview} ${bodyForPreview}`;
+    if (key === previewKeyRef.current) return;
 
-    let cancelled = false
+    let cancelled = false;
     const id = setTimeout(() => {
-      setPreviewing(true)
-      previewEmailTemplate({ purpose: selected.purpose, subject, body })
+      setPreviewing(true);
+      previewEmailTemplate({
+        purpose: selected.purpose,
+        subject: subjectForPreview,
+        body: bodyForPreview,
+      })
         .then((r) => {
-          if (cancelled) return
-          previewKeyRef.current = key
-          setPreviewHtml(r.html)
-          setPreviewSubject(r.subject)
+          if (cancelled) return;
+          previewKeyRef.current = key;
+          setPreviewHtml(r.html);
+          setPreviewSubject(r.subject);
+          setPreviewError(false);
         })
-        .catch(() => undefined)
+        .catch(() => {
+          // Don't blow away an already-rendered preview on a refresh error;
+          // the render only shows the error state when there's nothing yet.
+          if (!cancelled) setPreviewError(true);
+        })
         .finally(() => {
-          if (!cancelled) setPreviewing(false)
-        })
-    }, 300)
+          if (!cancelled) setPreviewing(false);
+        });
+    }, 300);
     return () => {
-      cancelled = true
-      clearTimeout(id)
+      cancelled = true;
+      clearTimeout(id);
+    };
+  }, [open, selected, subject, body, applyMerge]);
+
+  // Reset to a fresh compose each time the dialog is reopened. This component
+  // stays mounted after close (the dialog content unmounts, not us), so the
+  // preview state must be cleared too — otherwise reopening for a DIFFERENT
+  // candidate would flash the previous one's rendered mail before the new
+  // preview arrives. Clearing `previewKeyRef` forces a re-fetch even when the
+  // copy is identical.
+  useEffect(() => {
+    if (!open) {
+      seededFor.current = null;
+      setPurpose("");
+      previewKeyRef.current = "";
+      setPreviewHtml("");
+      setPreviewSubject("");
+      setPreviewError(false);
     }
-  }, [open, selected, subject, body])
+  }, [open]);
 
   const sendMutation = useMutation({
     mutationFn: () =>
       sendCandidateEmail({
         candidateIds,
-        purpose: purpose as BulkEmailPurpose,
+        // `selected.purpose`, not the resettable `purpose` state: the active
+        // tab and the live preview both render from `selected`, so this is
+        // the one value that can never disagree with what HR is looking at.
+        purpose: (selected?.purpose ?? purpose) as BulkEmailPurpose,
         subject,
         body,
       }),
     onSuccess: (res) => {
-      const firstReason = res.skipped[0]?.reason
+      const firstReason = res.skipped[0]?.reason;
       if (res.sent > 0 && res.skipped.length === 0) {
         toast.success(
           `Email sent to ${res.sent} candidate${res.sent === 1 ? "" : "s"}.`,
-        )
+        );
       } else if (res.sent > 0) {
         toast.success(
           `Sent to ${res.sent}, skipped ${res.skipped.length}.` +
             (firstReason ? ` First skip: ${firstReason}` : ""),
-        )
+        );
       } else {
         toast.error(
           firstReason
             ? `Nothing sent. ${firstReason}`
             : "No emails could be sent.",
-        )
+        );
       }
-      onSent?.()
-      onOpenChange(false)
+      onSent?.();
+      onOpenChange(false);
     },
     onError: (err) =>
       toast.error(errorMessage(err, "Could not send the email.")),
-  })
+  });
 
   /** Insert text at the cursor of the active field. */
   const insertAtCursor = (text: string) => {
     if (activeField === "subject") {
-      const el = subjectRef.current
-      const at = el?.selectionStart ?? subject.length
-      setSubject(subject.slice(0, at) + text + subject.slice(at))
+      const el = subjectRef.current;
+      const at = el?.selectionStart ?? subject.length;
+      setSubject(subject.slice(0, at) + text + subject.slice(at));
       requestAnimationFrame(() => {
-        el?.focus()
-        el?.setSelectionRange(at + text.length, at + text.length)
-      })
+        el?.focus();
+        el?.setSelectionRange(at + text.length, at + text.length);
+      });
     } else {
-      const el = bodyRef.current
-      const at = el?.selectionStart ?? body.length
-      setBody(body.slice(0, at) + text + body.slice(at))
+      const el = bodyRef.current;
+      const at = el?.selectionStart ?? body.length;
+      setBody(body.slice(0, at) + text + body.slice(at));
       requestAnimationFrame(() => {
-        el?.focus()
-        el?.setSelectionRange(at + text.length, at + text.length)
-      })
+        el?.focus();
+        el?.setSelectionRange(at + text.length, at + text.length);
+      });
     }
-  }
+  };
 
+  // `selected` is required: the footer's Send button renders even on the
+  // "could not load templates" branch, where subject/body can still hold a
+  // previous open's copy but there is no template to send as.
   const canSend =
     count > 0 &&
+    Boolean(selected) &&
     Boolean(subject.trim()) &&
     Boolean(body.trim()) &&
-    !sendMutation.isPending
+    !sendMutation.isPending;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -202,8 +270,10 @@ export function BulkEmailDialog({
           <DialogTitle>Send email</DialogTitle>
           <DialogDescription>
             Sending to {recipientLabel}. Reminders and invites include each
-            candidate&apos;s own interview link. This does not change their
-            status.
+            candidate&apos;s own interview link.{" "}
+            <span className="font-semibold text-[color:var(--warning)]">
+              Their status does not update automatically; an admin must do it.
+            </span>
           </DialogDescription>
         </DialogHeader>
 
@@ -222,14 +292,14 @@ export function BulkEmailDialog({
               {/* Template picker */}
               <div className="scroll mb-4 flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-line bg-surface-3 p-1">
                 {templates.map((t) => {
-                  const isActive = t.purpose === selected?.purpose
+                  const isActive = t.purpose === selected?.purpose;
                   return (
                     <button
                       key={t.purpose}
                       type="button"
                       onClick={() => {
-                        seededFor.current = null
-                        setPurpose(t.purpose)
+                        seededFor.current = null;
+                        setPurpose(t.purpose);
                       }}
                       className={
                         "shrink-0 whitespace-nowrap rounded-full px-3.5 py-2 text-[13px] font-semibold transition-colors " +
@@ -240,7 +310,7 @@ export function BulkEmailDialog({
                     >
                       {t.label}
                     </button>
-                  )
+                  );
                 })}
               </div>
 
@@ -300,8 +370,8 @@ export function BulkEmailDialog({
                   </button>
                 </div>
                 <p className="mt-2 text-[11.5px] text-ink-subtle">
-                  A field left with no value keeps its {"{{token}}"} visible. Put
-                  a button on its own line as [[button: Label | url]].
+                  A field left with no value keeps its {"{{token}}"} visible.
+                  Put a button on its own line as [[button: Label | url]].
                 </p>
               </div>
             </div>
@@ -319,29 +389,65 @@ export function BulkEmailDialog({
                 ) : null}
               </div>
               <div className="overflow-hidden rounded-2xl border border-line bg-white">
-                {previewSubject ? (
-                  <div className="flex items-baseline gap-2.5 border-b border-[#edecf2] bg-[#fbfbfd] px-5 py-3.5">
-                    <span className="shrink-0 text-[12px] font-medium text-[#9a96a4]">
-                      Subject
-                    </span>
-                    <span
-                      className="truncate text-[14px] font-semibold text-[#1a1622]"
-                      title={previewSubject}
-                    >
-                      {previewSubject}
-                    </span>
+                {previewHtml ? (
+                  <>
+                    {previewSubject ? (
+                      <div className="flex items-baseline gap-2.5 border-b border-[#edecf2] bg-[#fbfbfd] px-5 py-3.5">
+                        <span className="shrink-0 text-[12px] font-medium text-[#9a96a4]">
+                          Subject
+                        </span>
+                        <span
+                          className="truncate text-[14px] font-semibold text-[#1a1622]"
+                          title={previewSubject}
+                        >
+                          {previewSubject}
+                        </span>
+                      </div>
+                    ) : null}
+                    <iframe
+                      title="Email preview"
+                      sandbox=""
+                      srcDoc={previewHtml}
+                      className="h-[440px] w-full"
+                    />
+                  </>
+                ) : previewError ? (
+                  // Fixed colours (not theme tokens): this box is always the
+                  // white email canvas, in either app theme.
+                  <div className="flex h-[440px] flex-col items-center justify-center gap-1.5 px-6 text-center">
+                    <p className="text-[13px] font-medium text-[#b4453a]">
+                      Could not build the preview.
+                    </p>
+                    <p className="text-[12px] text-[#9a96a4]">
+                      Your draft is safe. It will retry as you keep typing.
+                    </p>
                   </div>
-                ) : null}
-                <iframe
-                  title="Email preview"
-                  sandbox=""
-                  srcDoc={previewHtml}
-                  className="h-[440px] w-full"
-                />
+                ) : (
+                  // First render after opening: the server preview is still on
+                  // its way (300ms debounce + round-trip), so show a loader
+                  // instead of a blank white pane that reads as broken.
+                  <div className="flex h-[440px] flex-col items-center justify-center gap-2.5 text-[#9a96a4]">
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    <span className="text-[12.5px]">Building preview...</span>
+                  </div>
+                )}
               </div>
               <p className="mt-2 text-[11.5px] text-ink-subtle">
-                Preview uses sample values. Each candidate gets their own name,
-                job and link.
+                {mergeEntries.length > 0 ? (
+                  <>
+                    Personalized for{" "}
+                    <span className="font-medium text-ink-2">
+                      {previewMergeValues?.candidateName ?? recipientLabel}
+                    </span>
+                    . The interview link and dates shown are samples; the real
+                    ones are filled in when you send.
+                  </>
+                ) : (
+                  <>
+                    Preview uses sample values. Each candidate gets their own
+                    name, job and link.
+                  </>
+                )}
               </p>
             </div>
           </div>
@@ -369,5 +475,5 @@ export function BulkEmailDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
+  );
 }

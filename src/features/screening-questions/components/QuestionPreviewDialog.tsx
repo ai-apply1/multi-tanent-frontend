@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Plus, Star, X } from "lucide-react"
 import toast from "react-hot-toast"
@@ -106,14 +106,27 @@ export function QuestionPreviewDialog({
     })
   }
 
+  // Keep DialogContent mounted through the CLOSE animation. The parent drives
+  // `open` AND `question` from one piece of state (`previewQuestion`), so on
+  // close both flip — false / null — in the same render. Dropping to the
+  // Content-less branch the instant `question` turns null would unmount the
+  // dialog before Radix could run `animate-dialog-out`, so it would just vanish
+  // instead of fading. Holding the last non-null question keeps Content mounted
+  // while `open` goes false and the exit animation plays; Radix unmounts it when
+  // the animation ends.
+  const lastQuestion = useRef(question)
+  if (question) lastQuestion.current = question
+  const shown = question ?? lastQuestion.current
+
   // Nothing to render without a question — but Radix still needs the Dialog
   // root mounted so the open/close transition stays owned by this component.
-  if (!question) {
+  if (!shown) {
     return <Dialog open={open} onOpenChange={onOpenChange} />
   }
 
-  // Prefer the live copy; fall back to the prop until the first fetch lands.
-  const live = liveQuery.data ?? question
+  // Prefer the live copy; fall back to the retained question until the first
+  // fetch lands (and while closing, when the live query is disabled).
+  const live = liveQuery.data ?? shown
 
   // variants[0] (first still-askable) is the canonical wording; the rest are
   // the synonyms. Retired wordings are hidden — neither served nor generated.
@@ -122,7 +135,7 @@ export function QuestionPreviewDialog({
   const synonyms = askable.slice(1)
 
   const handleEdit = () => {
-    onEdit(question)
+    onEdit(shown)
   }
 
   return (

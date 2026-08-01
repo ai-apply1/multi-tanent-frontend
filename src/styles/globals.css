@@ -233,6 +233,39 @@
   --radius-xl: 16px;
   --radius-pill: 999px;
 
+  /* ---- Motion ----------------------------------------------------------- */
+  /* One source of truth for the app's transitions so every modal, drawer and  */
+  /* page-change shares the same curve/feel. Enter uses an ease-out "settle"   */
+  /* (cubic-bezier(.22,1,.36,1)); exit is a touch quicker on ease-in so        */
+  /* dismissals feel snappy. Consumed as `animate-*` utilities and via         */
+  /* `data-[state=open|closed]:` on the Radix Dialog/Sheet primitives — Radix  */
+  /* holds the node mounted until the exit animation's `animationend` fires,   */
+  /* so close animates too. `prefers-reduced-motion` collapses them below.     */
+  /* fade-up (page enter) intentionally has NO fill-mode: it must not leave a   */
+  /* lingering `transform` on the routed wrapper (that would become the         */
+  /* containing block for any `position:fixed` descendant).                     */
+  --animate-fade-up: fade-up 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+  --animate-overlay-in: overlay-in 0.2s ease forwards;
+  --animate-overlay-out: overlay-out 0.18s ease forwards;
+  --animate-dialog-in: dialog-in 0.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  --animate-dialog-out: dialog-out 0.16s cubic-bezier(0.4, 0, 1, 1) forwards;
+  --animate-sheet-in-right: sheet-in-right 0.32s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  --animate-sheet-out-right: sheet-out-right 0.26s cubic-bezier(0.4, 0, 1, 1) forwards;
+  --animate-sheet-in-left: sheet-in-left 0.32s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  --animate-sheet-out-left: sheet-out-left 0.26s cubic-bezier(0.4, 0, 1, 1) forwards;
+  --animate-sheet-in-top: sheet-in-top 0.3s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  --animate-sheet-out-top: sheet-out-top 0.24s cubic-bezier(0.4, 0, 1, 1) forwards;
+  --animate-sheet-in-bottom: sheet-in-bottom 0.3s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  --animate-sheet-out-bottom: sheet-out-bottom 0.24s cubic-bezier(0.4, 0, 1, 1) forwards;
+  /* Popovers — snappier than modals. Menus zoom from their trigger corner
+     (transform-origin set on the element via the Radix `*-transform-origin`
+     var); Selects fade only, because they carry a `data-[side]:translate-*`
+     offset a transform animation would stomp. */
+  --animate-dropdown-in: dropdown-in 0.14s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  --animate-dropdown-out: dropdown-out 0.1s ease-in forwards;
+  --animate-fade-in: overlay-in 0.14s ease forwards;
+  --animate-fade-out: overlay-out 0.1s ease-in forwards;
+
   /* Platform default typeface for the first paint before branding resolves.
      `applyTenantTheme` overrides `--font-sans` with the org's chosen font (this
      is the default, Plus Jakarta Sans, so an unbranded paint already matches
@@ -380,6 +413,44 @@
 @keyframes om-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes om-pop { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes om-slide { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@keyframes om-pop-out { from { opacity: 1; transform: translateY(0) scale(1); } to { opacity: 0; transform: translateY(-6px) scale(0.98); } }
+
+/* ---- Shared motion: page transitions + modal/drawer open & close ---- */
+/* Page enter — routed content settles up on navigation (DashboardLayout). */
+@keyframes fade-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+/* Overlay backdrops (Dialog + Sheet). */
+@keyframes overlay-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes overlay-out { from { opacity: 1; } to { opacity: 0; } }
+/* Centered modal box (fade + subtle zoom). */
+@keyframes dialog-in { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
+@keyframes dialog-out { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.96); } }
+/* Menus / dropdowns (fade + tight zoom from the trigger corner). */
+@keyframes dropdown-in { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
+@keyframes dropdown-out { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.96); } }
+/* Edge drawers / side panels — one pair per side. */
+@keyframes sheet-in-right { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@keyframes sheet-out-right { from { transform: translateX(0); } to { transform: translateX(100%); } }
+@keyframes sheet-in-left { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+@keyframes sheet-out-left { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+@keyframes sheet-in-top { from { transform: translateY(-100%); } to { transform: translateY(0); } }
+@keyframes sheet-out-top { from { transform: translateY(0); } to { transform: translateY(-100%); } }
+@keyframes sheet-in-bottom { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes sheet-out-bottom { from { transform: translateY(0); } to { transform: translateY(100%); } }
+
+/* Accessibility: users who ask for less motion still get the state change
+   (things appear and dismiss), just without the travel — movement collapses
+   to a near-instant opacity swap. Scoped to the motion utilities above so
+   functional spinners/loaders (`animate-spin`, progress bars) keep running. */
+@media (prefers-reduced-motion: reduce) {
+  [class*="animate-fade-"],
+  [class*="animate-overlay-"],
+  [class*="animate-dialog-"],
+  [class*="animate-sheet-"],
+  [class*="animate-dropdown-"] {
+    animation-duration: 0.001ms !important;
+    animation-timing-function: linear !important;
+  }
+}
 /* Indeterminate progress: a sliding segment for work whose percentage isn't
    knowable yet (a queued/unmeasurable transcode phase). Honest "busy" motion
    instead of a bar frozen at 0%, which reads as hung. */

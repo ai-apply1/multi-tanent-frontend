@@ -22,7 +22,7 @@ export const DialogOverlay = React.forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      "fixed inset-0 z-50 bg-[rgba(13,11,11,0.45)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+      "fixed inset-0 z-50 bg-[rgba(13,11,11,0.45)] data-[state=open]:animate-overlay-in data-[state=closed]:animate-overlay-out",
       className
     )}
     {...props}
@@ -54,12 +54,15 @@ export const DialogContent = React.forwardRef<
         the centered dialog box + the click-outside catcher below. */}
     <DialogPrimitive.Content
       ref={ref}
-      // `group` so the inner visual dialog can read the
-      // open/closed animation state from Content's data-state via
-      // Tailwind's group-data variants — without `group` the
-      // animation classes on the inner box would have no source of
-      // truth (Radix sets data-state on Content, not its children).
-      className="group fixed inset-0 z-50 overflow-y-auto overscroll-contain"
+      // The fade+zoom lives HERE, on Content, not on the inner box —
+      // Radix sets `data-state` on Content and its Presence watches
+      // THIS node's animation to decide when to unmount. Animating the
+      // node Radix owns is what makes the CLOSE animation play at all
+      // (an animation on a child would be torn down before it runs).
+      // Content is full-screen + transparent, so fading/zooming it
+      // reads as the centered box fading/zooming; the backdrop is the
+      // separate Overlay above and fades on its own.
+      className="fixed inset-0 z-50 overflow-y-auto overscroll-contain data-[state=open]:animate-dialog-in data-[state=closed]:animate-dialog-out"
       // Radix's default outside-click handler fires on clicks
       // OUTSIDE Content. Now that Content fills the viewport there
       // are no clicks outside it, so this handler never fires —
@@ -94,10 +97,7 @@ export const DialogContent = React.forwardRef<
             the dialog. */}
         <div
           className={cn(
-            "relative z-10 grid w-full max-w-lg gap-4 border border-line bg-card p-6 shadow-[0_24px_70px_rgba(13,11,11,0.28)] sm:rounded-2xl duration-200",
-            "group-data-[state=open]:animate-in group-data-[state=closed]:animate-out",
-            "group-data-[state=closed]:fade-out-0 group-data-[state=open]:fade-in-0",
-            "group-data-[state=closed]:zoom-out-95 group-data-[state=open]:zoom-in-95",
+            "relative z-10 grid w-full max-w-lg gap-4 border border-line bg-card p-6 shadow-[0_24px_70px_rgba(13,11,11,0.28)] sm:rounded-2xl",
             className
           )}
         >

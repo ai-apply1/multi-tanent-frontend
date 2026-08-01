@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { useDeferredClose } from "@/hooks/useAnimatedOverlay";
 import type { CandidateStatus } from "@/features/candidates/types";
 import {
   createStatusColumn,
@@ -48,6 +49,14 @@ export function StatusDialog({
   /** Built-in row: name and colour are editable, board position is not. */
   const pinned = !!status?.isProtected;
   const queryClient = useQueryClient();
+
+  // The parent mounts this on open and unmounts on close, so Radix would never
+  // see `closed` and the exit animation would be skipped. Own the open flag and
+  // defer the parent's unmount until the dialog has animated out.
+  const { open: dialogOpen, close } = useDeferredClose(() => onOpenChange(false), {
+    initialOpen: open,
+    durationMs: 200,
+  });
 
   /**
    * The form is seeded from `status` in the state INITIALISERS, not in a
@@ -95,7 +104,7 @@ export function StatusDialog({
       // and change-status menu would otherwise show a stale column list.
       queryClient.invalidateQueries({ queryKey: ["candidateStatuses"] });
       toast.success(isEdit ? "Status updated." : "Status created.");
-      onOpenChange(false);
+      close();
     },
     onError: (err) => {
       toast.error(
@@ -124,7 +133,7 @@ export function StatusDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={dialogOpen} onOpenChange={(next) => { if (!next) close(); }}>
       <DialogContent className="max-w-[540px] gap-0 p-0" hideCloseButton>
         <form onSubmit={handleSubmit}>
           <div className="px-6 pb-[14px] pt-[22px]">
@@ -283,7 +292,7 @@ export function StatusDialog({
               type="button"
               variant="secondary"
               size="sm"
-              onClick={() => onOpenChange(false)}
+              onClick={() => close()}
               disabled={mutation.isPending}
             >
               Cancel

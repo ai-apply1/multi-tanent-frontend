@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import {
   keepPreviousData,
@@ -75,7 +75,7 @@ import {
 } from "@/features/candidates/types";
 import { JOB_OPTIONS_QUERY_KEY, listJobOptions } from "@/features/jobs/jobsApi";
 import { useOrgTimezone } from "@/features/organization/useOrgTimezone";
-import { ROUTES, jobDetail } from "@/routes";
+import { jobDetail } from "@/routes";
 import { formatDate } from "@/lib/date";
 import { errorMessage } from "@/lib/errors";
 import { cn } from "@/lib/utils";
@@ -142,6 +142,27 @@ function isProcessing(row: CandidateListItem): boolean {
   );
 }
 
+/**
+ * The `{{token}}` values we can fill from a single candidate row, used to
+ * personalize the compose dialog's live preview. Only the tokens we actually
+ * know are returned — `orgName`, the interview link, dates and duration are
+ * left for the server to render (real org, sample link) so the preview never
+ * shows a made-up value we don't have.
+ */
+function candidatePreviewMergeValues(
+  fullName: string,
+  jobTitle: string | null,
+): Record<string, string> {
+  const values: Record<string, string> = {};
+  const name = fullName.trim();
+  if (name) {
+    values.candidateName = name;
+    values.firstName = name.split(/\s+/)[0];
+  }
+  if (jobTitle?.trim()) values.jobTitle = jobTitle.trim();
+  return values;
+}
+
 /** Two initials, uppercased. Empty string collapses to a single dash. */
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -160,6 +181,29 @@ export function CandidatesPage() {
   // candidates". On the latter the job is the whole point of the URL, so it
   // seeds the filter. Without this the job id in the URL would be ignored.
   const { jobId: routeJobId } = useParams<{ jobId: string }>();
+
+  // Was this page reached by DRILLING INTO a specific job — the Job detail
+  // page's Candidates tab, the Jobs list's "View candidates", or a stale
+  // per-job link, each of which navigates here with `state.fromJob`? That is
+  // what earns the job-scoped chrome (breadcrumb, the job name in the title,
+  // the "Back to job" button). Merely choosing a job in the Job filter on the
+  // plain sidebar → Candidates page is NOT a drill-in and must stay the
+  // org-wide list. Captured ONCE at mount: the URL-sync effect below wipes
+  // history state on its first run, and a later dropdown change must not flip
+  // this on.
+  //
+  // `state.fromJob` is in-memory history state, so it only survives the FIRST
+  // navigation — that same URL-sync `replace` drops it, so a plain refresh
+  // would reload with no state and silently lose the chrome. The effect
+  // therefore promotes the marker into the URL as `?from=job`; seeding from
+  // EITHER source means the initial drill-in and a later reload both light up
+  // the chrome.
+  const location = useLocation();
+  const [cameFromJob, setCameFromJob] = useState(
+    () =>
+      Boolean(location.state?.fromJob) ||
+      new URLSearchParams(location.search).get("from") === "job",
+  );
 
   // ── URL-backed view state ───────────────────────────────────────────
   // Filters, pagination and the open candidate drawer all live in the query
@@ -185,6 +229,33 @@ export function CandidatesPage() {
   );
   const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
 
+  // Leaving the job scope by NAVIGATION. React Router keeps this page mounted
+  // when the sidebar's "Candidates" (or a browser Back) lands on the plain
+  // `/dashboard/candidates` — same route, only the query string differs — so the
+  // filters and the drill-in chrome would otherwise survive and the URL-sync
+  // effect below would just re-push them into the URL. When a real navigation
+  // (a new `location.key`) drops us on a URL barer than the view still holds,
+  // adopt it: clear the filters and the "came from a job" flag. Gated on the key
+  // so it never fires in the window where local state legitimately leads the URL
+  // — mid-typing, before the sync effect writes — which would wipe the keystroke.
+  const [syncedKey, setSyncedKey] = useState(location.key);
+  if (location.key !== syncedKey) {
+    setSyncedKey(location.key);
+    const urlHasNoFilters =
+      !searchParams.get("job") &&
+      !searchParams.get("status") &&
+      !searchParams.get("q");
+    const viewHasFilters =
+      jobFilter !== ALL || statusFilter !== ALL || search.trim() !== "";
+    if (urlHasNoFilters && viewHasFilters) {
+      setSearch("");
+      setStatusFilter(ALL);
+      setJobFilter(ALL);
+      setPage(1);
+      setCameFromJob(false);
+    }
+  }
+
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<CandidateListItem | null>(
     null,
@@ -200,6 +271,13 @@ export function CandidatesPage() {
     ids: string[];
     label: string;
     fromSelection: boolean;
+    /**
+     * Real token values to personalize the compose dialog's live preview.
+     * Set only for a single-row send (we know that one candidate's name and
+     * job); omitted for a multi-select send, where one set of values can't
+     * speak for everyone.
+     */
+    mergeValues?: Record<string, string>;
   } | null>(null);
   const [exporting, setExporting] = useState(false);
 
@@ -250,6 +328,13 @@ export function CandidatesPage() {
         // route carries it as a query param.
         if (routeJobId) next.delete("job");
         else put("job", jobFilter, jobFilter === ALL);
+        // Persist the drill-in marker so a REFRESH keeps the button reading
+        // "Back to job" (a real drill-in) instead of "Go to job" (a plain
+        // filter pick) — `state.fromJob` can't, since this very `replace` wipes
+        // it from history state. Written only for a drill-in that's still inside
+        // a job; a filter pick, "All jobs", or the org-wide list drops it,
+        // keeping the URL honest.
+        put("from", "job", !(cameFromJob && jobFilter !== ALL));
         return next;
       },
       { replace: true },
@@ -261,6 +346,7 @@ export function CandidatesPage() {
     pageSize,
     jobFilter,
     routeJobId,
+    cameFromJob,
     setSearchParams,
   ]);
 
@@ -464,13 +550,13 @@ export function CandidatesPage() {
    * generic line.
    */
   const inviteMutation = useMutation({
-    mutationFn: (id: string) => sendCandidateInvite(id),
-    onSuccess: (res) => {
+    mutationFn: ({ id }: { id: string; reinvite: boolean }) =>
+      sendCandidateInvite(id),
+    onSuccess: (res, { reinvite }) => {
       toast.success(
-        `Invite sent, attempt ${res.attemptNumber}, link expires ${formatDate(
-          res.expiresAt,
-          tz,
-        )}.`,
+        `Invite ${reinvite ? "re-sent" : "sent"}, attempt ${
+          res.attemptNumber
+        }, link expires ${formatDate(res.expiresAt, tz)}.`,
       );
       invalidateCandidates();
       queryClient.invalidateQueries({ queryKey: ["candidate", res.candidateId] });
@@ -480,6 +566,11 @@ export function CandidatesPage() {
       toast.error(errorMessage(err, "Could not send the invite."));
     },
   });
+
+  // True while the invite confirm dialog targets an already-invited candidate
+  // (an interview attempt already exists). Drives the dialog's "resend" wording
+  // and the flag threaded to the mutation for its toast — see `isReinvite`.
+  const invitingReinvite = inviteTarget ? isReinvite(inviteTarget) : false;
 
   // ── selection ───────────────────────────────────────────────────────
 
@@ -599,9 +690,16 @@ export function CandidatesPage() {
     setSearch("");
     setStatusFilter(ALL);
     if (!routeJobId) setJobFilter(ALL);
+    // Clearing the filters also leaves the job scope: the operator asked for the
+    // plain, org-wide list, so drop the drill-in chrome — and, crucially, keep it
+    // dropped so it does NOT reappear when they pick a job in the filter again.
+    setCameFromJob(false);
     resetPage();
   };
 
+  // The job name rides in the headline whenever a job is in view — a drill-in
+  // OR a plain Job-filter pick — matching the card title ("Applicants") and the
+  // job button below. Only that button's wording still reflects HOW you arrived.
   const headline = selectedJob
     ? `Candidates · ${selectedJob.title}`
     : "Candidates";
@@ -616,32 +714,6 @@ export function CandidatesPage() {
 
   return (
     <div className="mx-auto max-w-[1240px] px-6 py-6 lg:px-8 lg:py-8">
-      {routeJobId ? (
-        <nav
-          aria-label="Breadcrumb"
-          className="mb-3.5 flex items-center gap-2 text-[13px] text-ink-muted"
-        >
-          <Link to={ROUTES.JOBS} className="font-medium hover:text-ink">
-            Jobs
-          </Link>
-          <span className="text-ink-subtle">/</span>
-          {selectedJob ? (
-            <Link
-              to={jobDetail(selectedJob._id)}
-              className="font-medium hover:text-ink"
-            >
-              {selectedJob.title}
-            </Link>
-          ) : (
-            <span className="font-medium">
-              {jobsLoading ? "Loading…" : "Job"}
-            </span>
-          )}
-          <span className="text-ink-subtle">/</span>
-          <span className="font-semibold text-ink">Candidates</span>
-        </nav>
-      ) : null}
-
       <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
         <div>
           <div className="flex items-center gap-2.5">
@@ -657,11 +729,14 @@ export function CandidatesPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {routeJobId && selectedJob ? (
+          {selectedJob ? (
+            // Shown whenever a job is in view — a drill-in OR a plain Job-filter
+            // pick. `cameFromJob` only chooses the wording: "Back to job"
+            // retraces a real drill-in, "Go to job" jumps to the filtered job.
             <Button variant="secondary" size="sm" asChild>
               <Link to={jobDetail(selectedJob._id)}>
                 <ArrowLeft className="h-4 w-4" strokeWidth={1.7} />
-                Back to job
+                {cameFromJob ? "Back to job" : "Go to job"}
               </Link>
             </Button>
           ) : null}
@@ -936,6 +1011,10 @@ export function CandidatesPage() {
                         ids: [row._id],
                         label: row.fullName || "this candidate",
                         fromSelection: false,
+                        mergeValues: candidatePreviewMergeValues(
+                          row.fullName,
+                          jobsById.get(row.jobId)?.title ?? null,
+                        ),
                       })
                     }
                     onChangeStatus={(statusKey) =>
@@ -1064,19 +1143,40 @@ export function CandidatesPage() {
         onOpenChange={(open) => {
           if (!open) setInviteTarget(null);
         }}
-        title={`Invite ${inviteTarget?.fullName || "this candidate"} to interview?`}
-        description={
-          <>
-            This sends <strong>{inviteTarget?.fullName}</strong> an interview
-            invite. It generates a secure interview link, emails it to them, and
-            moves them to <strong>Invited</strong>.
-          </>
+        title={
+          invitingReinvite
+            ? `Resend interview invite to ${
+                inviteTarget?.fullName || "this candidate"
+              }?`
+            : `Invite ${
+                inviteTarget?.fullName || "this candidate"
+              } to interview?`
         }
-        confirmLabel="Send invite"
-        loadingLabel="Sending…"
+        description={
+          invitingReinvite ? (
+            <>
+              This emails <strong>{inviteTarget?.fullName}</strong> a fresh
+              interview link and voids the previous one. If they&apos;ve already
+              taken the interview, use <strong>Reattempt interview</strong> from
+              their profile instead.
+            </>
+          ) : (
+            <>
+              This sends <strong>{inviteTarget?.fullName}</strong> an interview
+              invite. It generates a secure interview link, emails it to them,
+              and moves them to <strong>Invited</strong>.
+            </>
+          )
+        }
+        confirmLabel={invitingReinvite ? "Resend invite" : "Send invite"}
+        loadingLabel={invitingReinvite ? "Resending…" : "Sending…"}
         loading={inviteMutation.isPending}
         onConfirm={() => {
-          if (inviteTarget) inviteMutation.mutate(inviteTarget._id);
+          if (inviteTarget)
+            inviteMutation.mutate({
+              id: inviteTarget._id,
+              reinvite: invitingReinvite,
+            });
         }}
       />
 
@@ -1087,6 +1187,7 @@ export function CandidatesPage() {
         }}
         candidateIds={emailState?.ids ?? []}
         recipientLabel={emailState?.label ?? ""}
+        previewMergeValues={emailState?.mergeValues}
         onSent={() => {
           // A send launched from the multi-select bar clears the selection;
           // a single-row send leaves any selection untouched.
@@ -1218,6 +1319,18 @@ function CandidatesTableSkeleton() {
   );
 }
 
+/**
+ * Whether inviting this candidate RE-SENDS an existing attempt's link rather
+ * than sending a first-time invite. `latestInterviewId` is populated the moment
+ * a first invite mints the (pending) interview doc, so its presence is exactly
+ * "already invited at least once". Mirrors the backend `/candidates/:id/invite`,
+ * which re-mints the current attempt's link when one exists and opens attempt 1
+ * when none does — so the label tracks what the click will actually do.
+ */
+function isReinvite(row: Pick<CandidateListItem, "latestInterviewId">): boolean {
+  return row.latestInterviewId !== null;
+}
+
 function CandidateRow({
   row,
   tz,
@@ -1250,9 +1363,14 @@ function CandidateRow({
   onDelete: () => void;
 }) {
   const status = row.currentStatusId;
-  // Always offered — the invite endpoint now accepts any status (it only
-  // refuses on a closed job / spent attempt cap, with a clear message).
+  // Always offered — the invite endpoint takes any funnel status; it only
+  // refuses on a closed job, a spent attempt cap, or an attempt that's already
+  // been started (a clear message then points to "Reattempt" in the drawer).
   const canInvite = true;
+  // First-time invite vs. re-sending an existing attempt's link — the same
+  // endpoint either way, but the label should say which so the row reads
+  // truthfully (an already-invited candidate showing "Send invite" misleads).
+  const reinvite = isReinvite(row);
   const scoreState = aiScoreState(row.latestInterviewId);
 
   return (
@@ -1410,8 +1528,12 @@ function CandidateRow({
             ) : null}
             {canInvite ? (
               <DropdownMenuItem onSelect={onInvite}>
-                <Send className="h-4 w-4" />
-                Send Interview invite
+                {reinvite ? (
+                  <RefreshCw className="h-4 w-4" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                {reinvite ? "Resend invite" : "Send Interview invite"}
               </DropdownMenuItem>
             ) : null}
             <DropdownMenuItem onSelect={onSendEmail}>
@@ -1425,6 +1547,14 @@ function CandidateRow({
                   the viewport and it reads as a detached floating list. */}
               <DropdownMenuSubContent className="max-h-72 w-52 overflow-y-auto">
                 <DropdownMenuLabel>Move to</DropdownMenuLabel>
+                {/* A manual move writes the status and nothing else — the
+                    backend sends no email on this path, so say it at the
+                    moment of the decision, not in a doc nobody reads. */}
+                <p className="px-2 pb-1.5 text-[11.5px] leading-snug text-ink-muted">
+                  A move never emails the candidate — use{" "}
+                  <span className="font-medium">Send email</span> to notify
+                  them.
+                </p>
                 {statuses.map((option) => {
                   const isCurrent = option.key === status?.key;
                   // Columns that aren't a human's to assert are disabled rather

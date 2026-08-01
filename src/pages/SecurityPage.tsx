@@ -26,6 +26,7 @@ import {
   setupMfa,
   type MfaSetup,
 } from "@/features/security/securityApi";
+import { useDeferredClose } from "@/hooks/useAnimatedOverlay";
 import { errorMessage } from "@/lib/errors";
 
 const MFA_STATUS_KEY = ["mfa-status"] as const;
@@ -102,6 +103,10 @@ function EnrollDialog({
   const [code, setCode] = useState("");
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
 
+  // Parent mounts this only while `setup` is set and drops it on close, so own
+  // the open flag and defer `onClose` until the dialog has animated out.
+  const { open, close } = useDeferredClose(onClose, { durationMs: 200 });
+
   const enable = useMutation({
     mutationFn: () => enableMfa(code.trim()),
     onSuccess: (codes) => {
@@ -114,9 +119,9 @@ function EnrollDialog({
 
   return (
     <Dialog
-      open
+      open={open}
       onOpenChange={(o) => {
-        if (!o && !enable.isPending) onClose();
+        if (!o && !enable.isPending) close();
       }}
     >
       <DialogContent className="max-w-[440px]">
@@ -132,7 +137,7 @@ function EnrollDialog({
             </div>
             <RecoveryCodes codes={recoveryCodes} />
             <div className="mt-5 flex justify-end">
-              <Button type="button" size="sm" onClick={onClose}>
+              <Button type="button" size="sm" onClick={() => close()}>
                 Done
               </Button>
             </div>
@@ -196,7 +201,7 @@ function EnrollDialog({
                   type="button"
                   variant="secondary"
                   size="sm"
-                  onClick={onClose}
+                  onClick={() => close()}
                   disabled={enable.isPending}
                 >
                   Cancel

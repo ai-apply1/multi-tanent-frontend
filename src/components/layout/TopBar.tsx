@@ -187,6 +187,10 @@ export function TopBar() {
   const [notifOpen, setNotifOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
+  // Controlled so the menu can stay open while the sign-out request is in
+  // flight (the loader lives on the item), and can't be dismissed mid-logout.
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const refreshNotifs = () => {
     void queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_UNREAD_KEY });
@@ -251,6 +255,8 @@ export function TopBar() {
   // on /login even if the server call fails (logout() tears the session down
   // locally regardless).
   const handleLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
     try {
       await logout();
       toast.success("Signed out.");
@@ -493,7 +499,13 @@ export function TopBar() {
           </SheetContent>
         </Sheet>
 
-        <DropdownMenu>
+        <DropdownMenu
+          open={profileOpen}
+          onOpenChange={(o) => {
+            // Ignore dismiss attempts while signing out so the loader stays put.
+            if (!loggingOut) setProfileOpen(o);
+          }}
+        >
           <DropdownMenuTrigger asChild>
             <button
               type="button"
@@ -533,11 +545,21 @@ export function TopBar() {
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
-              onClick={handleLogout}
+              // preventDefault keeps the menu open so the in-flight loader is
+              // visible; the controlled open state above handles the dismiss.
+              onSelect={(e) => {
+                e.preventDefault();
+                void handleLogout();
+              }}
+              disabled={loggingOut}
               className="text-[var(--danger)] focus:bg-[var(--danger-soft)] focus:text-[var(--danger)]"
             >
-              <LogOut strokeWidth={1.8} />
-              Sign out
+              {loggingOut ? (
+                <Loader2 strokeWidth={1.8} className="animate-spin" />
+              ) : (
+                <LogOut strokeWidth={1.8} />
+              )}
+              {loggingOut ? "Signing out…" : "Sign out"}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

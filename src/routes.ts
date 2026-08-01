@@ -7,7 +7,8 @@ export const ROUTES = {
   JOB_NEW: "/dashboard/jobs/new",
   JOB_DETAIL: "/dashboard/jobs/:jobId",
   JOB_EDIT: "/dashboard/jobs/:jobId/edit",
-  /** The kanban board for a single job — the board endpoint is per-job. */
+  /** Retired per-job board — kept registered as a redirect to
+   *  `CANDIDATES?job=<id>` so stale links and notifications don't 404. */
   JOB_CANDIDATES: "/dashboard/jobs/:jobId/candidates",
   CANDIDATES: "/dashboard/candidates",
   QUESTIONS: "/dashboard/questions",
