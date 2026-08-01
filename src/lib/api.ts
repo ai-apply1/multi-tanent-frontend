@@ -27,20 +27,21 @@ const defaultHeaders: Record<string, string> = {
 if (BASIC_AUTH_HEADER) defaultHeaders.Authorization = BASIC_AUTH_HEADER
 
 /**
- * Absolute origin of jobjen-backend (no trailing slash, no `/api`).
+ * Absolute origin of the multi-tenant backend (no trailing slash, no `/api`).
  *
  * The app talks to the backend DIRECTLY in every environment — there's no
- * Vite dev proxy and no Vercel `/api` rewrite. Set `VITE_API_BASE_URL`
- * per deployment:
+ * Vite dev proxy and no Vercel `/api` rewrite for API traffic (the one
+ * proxied path is the `/cv/` stream; see vite.config.ts / vercel.json). Set
+ * `VITE_API_BASE_URL` per deployment:
  *   - local dev   → http://localhost:3001 (the default below)
- *   - production  → https://api.jobjen.com
- *   - dev branch  → the dev backend origin (e.g. the Railway dev URL)
+ *   - production  → the deployed backend origin (the Railway URL)
+ *   - dev branch  → the dev backend origin
  *
  * Calls are therefore cross-origin, so the target backend must allow this
- * app's origin via CORS. `admin.jobjen.com` ↔ `api.jobjen.com` (and
- * `localhost:5174` ↔ `localhost:3001`) are same-SITE, so `SameSite=Lax`
- * cookies ride along. Only a cross-SITE pair (e.g. `*.vercel.app` ↔
- * `*.up.railway.app`) needs `SameSite=None; Secure` on the backend.
+ * app's origin via CORS. A same-SITE pair (`admin.acme.com` ↔ an API host on
+ * the same registrable domain, or `localhost:5174` ↔ `localhost:3001`) lets
+ * `SameSite=Lax` cookies ride along. A cross-SITE pair (e.g. `*.vercel.app`
+ * ↔ `*.up.railway.app`) needs `SameSite=None; Secure` on the backend.
  */
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001").replace(
   /\/+$/,
@@ -91,10 +92,10 @@ const JSON_TIMEOUT_MS = 30_000
 const BLOB_TIMEOUT_MS = 10 * 60_000
 
 /**
- * The admin app uses cookie-auth (httpOnly access + refresh tokens).
+ * The org dashboard uses cookie-auth (httpOnly access + refresh tokens).
  * `withCredentials: true` is required so the browser sends cookies on every
  * (cross-origin) request to the backend. Keep the SPA and the API on the
- * same parent domain (e.g. *.jobjen.com) so SameSite=Lax cookies work; for
+ * same parent domain (e.g. *.acme.com) so SameSite=Lax cookies work; for
  * a cross-site pair set SAME_SITE=none + SECURE=true on the backend.
  */
 export const api = axios.create({
@@ -278,8 +279,8 @@ api.interceptors.request.use(async (config) => {
    * what the backend reads for three different things — branding, which org's
    * password table a login checks, and the JWT-vs-host cross-check on guarded
    * routes. Attaching it to one call and not the others would give a page that
-   * paints Acme's logo and then logs you into whoever `DEV_LOGIN_ORG_SLUG`
-   * happens to name.
+   * paints Acme's logo while its other requests resolve no tenant at all and
+   * fail.
    *
    * `""` outside dev (see `devTenant`), so this is a no-op in production and
    * the request goes out exactly as it does today.

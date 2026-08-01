@@ -189,7 +189,9 @@ export function ForgotPasswordPage() {
     <div className="grid h-full w-full overflow-y-auto bg-[var(--surface)] lg:grid-cols-2">
       {/* -------- Form panel -------- */}
       <div className="flex items-center justify-center px-6 py-10 lg:px-10">
-        <div className="w-full max-w-[340px]">
+        {/* Keyed by `step` so the panel re-plays the fade on the in-page
+            email → code transition, not just on first mount. */}
+        <div key={step} className="w-full max-w-[340px] animate-fade-up">
           <div className="mb-10 flex items-center gap-2.5">
             <OrgLogo
               logoUrl={organization?.logoUrl}

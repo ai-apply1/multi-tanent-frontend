@@ -2,11 +2,12 @@
 
 interface ImportMetaEnv {
   /**
-   * Absolute origin of jobjen-backend (no trailing slash, no `/api`). The
-   * app calls the backend directly via this in every environment (no dev
-   * proxy, no Vercel rewrite). Defaults to http://localhost:3001 when
-   * unset; set it to https://api.jobjen.com in production and to the dev
-   * backend origin for a dev-branch deployment.
+   * Absolute origin of the multi-tenant backend (no trailing slash, no
+   * `/api`). The app calls the backend directly via this in every
+   * environment (no dev proxy or Vercel rewrite for API traffic — only the
+   * `/cv/` stream is proxied, see vite.config.ts). Defaults to
+   * http://localhost:3001 when unset; set it to the deployed backend origin
+   * in production and to the dev backend origin for a dev-branch deployment.
    */
   readonly VITE_API_BASE_URL?: string
   /**

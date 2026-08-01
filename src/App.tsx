@@ -22,13 +22,17 @@ import { ROUTES } from "@/routes";
  * The standalone per-job candidates board was retired. A job's candidates now
  * live on the org-wide list filtered by `?job=`. This redirect keeps the old
  * `JOB_CANDIDATES` route registered so stale links and notifications land on
- * the filtered list instead of the 404 page.
+ * the filtered list instead of the 404 page. `state.fromJob` marks it as a
+ * deliberate drill-in into one job, so the list shows its "back to job" chrome
+ * (breadcrumb, job name in the title, Back to job button) — the same as the Job
+ * detail page's Candidates tab, and unlike a manual pick in the Job filter.
  */
 function JobCandidatesRedirect() {
   const { jobId } = useParams<{ jobId: string }>();
   return (
     <Navigate
       to={jobId ? `${ROUTES.CANDIDATES}?job=${jobId}` : ROUTES.CANDIDATES}
+      state={jobId ? { fromJob: true } : undefined}
       replace
     />
   );

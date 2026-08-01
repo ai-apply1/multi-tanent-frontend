@@ -27,9 +27,11 @@ export type LoginOutcome =
  * So a correct email + correct password still 401s ("Invalid credentials",
  * deliberately indistinguishable) when the page is served from a host the
  * backend doesn't recognise: any org whose custom domain isn't live yet, a
- * Vercel preview URL, or localhost. For localhost the backend has a dev-only
- * fallback — it needs `DEV_LOGIN_ORG_SLUG=<an org slug>` AND
- * `NODE_ENV=development` in the API's `.env`, and it is impossible in prod.
+ * Vercel preview URL, or localhost. The escape hatch is the dev tenant
+ * override: load the page with `?tenant=<domain>` (see `lib/devTenant.ts`),
+ * which rides every request as `X-Dev-Tenant`; the API must have
+ * `DEV_TENANT_QUERY_ENABLED=true`, and the override is only consulted when the
+ * request's own host resolves NO tenant.
  */
 export async function loginRequest(
   identifier: string,
@@ -91,8 +93,9 @@ export async function exitImpersonationRequest() {
  * the server does not tell us, and it must not.
  *
  * Org selection is the page's own hostname, exactly as in `loginRequest` above —
- * so on localhost this silently issues nothing unless the API has
- * `DEV_LOGIN_ORG_SLUG` set. There is no org field in this body.
+ * so on localhost this silently issues nothing unless the dev tenant override
+ * is active (`?tenant=` / `X-Dev-Tenant`, gated by the API's
+ * `DEV_TENANT_QUERY_ENABLED`). There is no org field in this body.
  *
  * The emailed code is 6 characters, single-use, valid 30 minutes. Calling this
  * again invalidates any previous unconsumed code.

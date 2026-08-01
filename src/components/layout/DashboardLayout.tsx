@@ -1,4 +1,4 @@
-import { Outlet } from "react-router-dom"
+import { Outlet, useLocation } from "react-router-dom"
 import { Sidebar } from "@/components/layout/Sidebar"
 import { TopBar } from "@/components/layout/TopBar"
 import { ImpersonationBanner } from "@/components/layout/ImpersonationBanner"
@@ -10,6 +10,11 @@ import { ImpersonationBanner } from "@/components/layout/ImpersonationBanner"
  * hamburger drawer that renders the same nav sections.
  */
 export function DashboardLayout() {
+  // Keyed by pathname so the routed page remounts on navigation and replays
+  // its enter animation. Query-string changes (e.g. Candidates `?job=`,
+  // `?candidate=` drawer) keep the same pathname, so filtering or opening a
+  // drawer does NOT re-trigger the page fade or remount the list.
+  const location = useLocation()
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden bg-[var(--surface-2)] text-[var(--ink)]">
       {/* Full-width, above the sidebar and header, so an impersonation session
@@ -31,7 +36,9 @@ export function DashboardLayout() {
               where there is nothing to scroll, which is worse than the problem it
               solves. */}
           <main className="scroll min-h-0 min-w-0 flex-1 overflow-y-auto scrollbar-gutter-stable">
-            <Outlet />
+            <div key={location.pathname} className="animate-fade-up">
+              <Outlet />
+            </div>
           </main>
         </div>
       </div>

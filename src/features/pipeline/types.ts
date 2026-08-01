@@ -66,7 +66,35 @@ export interface UpdateStatusPayload {
   description?: string
   color?: string
   isTerminal?: boolean
+  /**
+   * The stage's automatic-email switch. Only sent for the stages that
+   * actually auto-email (see {@link STAGE_AUTO_EMAILS}) — the server
+   * accepts it on any row, but on the others it is a dead flag.
+   */
+  autoEmailsEnabled?: boolean
 }
+
+/**
+ * The builtin stages that send an AUTOMATIC email to the candidate, mapped
+ * to a plain-language line describing exactly what their toggle controls.
+ * Drives the inline "Auto emails" switch on the pipeline page rows: stages
+ * absent here (custom columns, `applied`, `needs_review`, `interviewing`,
+ * `scored`, `hired`) never auto-email, so they don't get a dead toggle.
+ */
+export const STAGE_AUTO_EMAILS: Record<string, string> = Object.assign(
+  // Null prototype on purpose: this map is indexed by ORG-AUTHORED status
+  // keys, and "constructor" is a legal key under the slug rule — on a plain
+  // literal it would answer truthy from Object.prototype and paint a live
+  // switch on a custom column that never auto-emails.
+  Object.create(null) as Record<string, string>,
+  {
+    invited: "Controls the interview invite email and the follow-up reminders.",
+    rejected: "Controls the automatic rejection email sent at the CV screen.",
+    shortlisted: "Controls the “you’re shortlisted” email sent after scoring.",
+    final_rejected:
+      "Controls the rejection email sent after the interview is scored.",
+  },
+)
 
 /**
  * Stride used when a drag-and-drop reorder renumbers the board — the whole

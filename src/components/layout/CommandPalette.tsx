@@ -17,6 +17,7 @@ import { listCandidates } from "@/features/candidates/candidatesApi"
 import { listJobs } from "@/features/jobs/jobsApi"
 import { useAuth } from "@/features/auth/AuthContext"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
+import { useAnimatedOverlay } from "@/hooks/useAnimatedOverlay"
 import { ROUTES, jobDetail } from "@/routes"
 
 interface CommandPaletteProps {
@@ -57,6 +58,11 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const debouncedQuery = useDebouncedValue(query, 200).trim()
   const inputRef = useRef<HTMLInputElement>(null)
   const [activeIndex, setActiveIndex] = useState(0)
+  // Hold the palette mounted through its close so the backdrop fade + panel
+  // pop-out actually play (it renders itself, so `open=false` alone would rip
+  // it out instantly). Queries/focus still key off `open`, so they idle the
+  // moment a close starts while the already-loaded results fade away.
+  const { mounted, phase } = useAnimatedOverlay(open, 180)
 
   // Reset every time the palette re-opens so a stale query from the previous
   // session never bleeds into the next one.
@@ -196,7 +202,11 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     }
   }
 
-  if (!open) return null
+  if (!mounted) return null
+
+  const backdropAnim =
+    phase === "exit" ? "overlay-out 0.18s ease forwards" : "overlay-in 0.18s ease forwards"
+  const panelAnim = phase === "exit" ? "om-pop-out 0.16s ease forwards" : "om-pop 0.14s ease"
 
   const loading = querying && (candidatesQuery.isLoading || jobsQuery.isLoading)
   const empty = !loading && querying && groups.every((g) => g.items.length === 0)
@@ -211,12 +221,12 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       aria-modal="true"
       aria-label="Command palette"
       className="fixed inset-0 z-[80] flex items-start justify-center bg-[rgba(13,11,11,0.4)] px-6 pt-[100px]"
-      style={{ animation: "om-fade .1s ease" }}
+      style={{ animation: backdropAnim }}
       onClick={() => onOpenChange(false)}
     >
       <div
         className="w-full max-w-[560px] overflow-hidden rounded-2xl border border-line bg-surface shadow-[0_24px_70px_rgba(13,11,11,0.28)]"
-        style={{ animation: "om-pop .13s ease" }}
+        style={{ animation: panelAnim }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Search input row */}

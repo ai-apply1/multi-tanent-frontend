@@ -1257,7 +1257,7 @@ export function OrgSettingsPage() {
 
       <form id="org-settings-form" onSubmit={submit}>
         <div className="rounded-2xl border border-line bg-surface">
-          <div className="p-5 sm:p-6">
+          <div key={activeTab} className="animate-fade-up p-5 sm:p-6">
             {activeTab === "general" ? generalBody : null}
             {activeTab === "branding" ? brandingBody : null}
             {activeTab === "domains" ? domainsBody : null}

@@ -32,6 +32,7 @@ import {
   Play,
   RefreshCw,
   Send,
+  ShieldCheck,
   Sparkles,
   Star,
   Tag,
@@ -127,6 +128,7 @@ import {
 import type {
   AdminInterviewAttempt,
   AdminInterviewQuestionItem,
+  InterviewRecording,
   InterviewScores,
   Recommendation,
   ScoredAnswer,
@@ -151,6 +153,140 @@ function isScoringInFlight(s?: ScoringStatus | null): boolean {
 
 function isTranscoding(s?: string | null): boolean {
   return s === "pending" || s === "processing";
+}
+
+/**
+ * Below this fraction of the interview, the recording is treated as not
+ * covering it and the reviewer is told.
+ *
+ * 0.9 rather than 1.0 because a small shortfall is normal and meaningless: the
+ * recorder starts a beat after `startedAt` is stamped, and the last seconds
+ * after the final answer are cut when the recorder stops for submit. A tenth of
+ * the interview missing is not that.
+ */
+const RECORDING_COVERAGE_FLOOR = 0.9;
+
+/** `1h 04m`, `7m 20s`, `12s` — a duration a reviewer can read at a glance. */
+function formatDurationSec(sec: number): string {
+  const total = Math.max(0, Math.round(sec));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m`;
+  if (m > 0) return `${m}m ${String(s).padStart(2, "0")}s`;
+  return `${s}s`;
+}
+
+interface RecordingCoverage {
+  /** Render the notice at all? */
+  incomplete: boolean
+  recordedSec: number
+  expectedSec: number
+  /** Recorder generations the recording is stitched from (1 = uninterrupted). */
+  generationCount: number
+  /** One sentence stating what is actually missing. */
+  headline: string
+  /** Why the reviewer should care, given the scores sit right next to it. */
+  detail: string
+}
+
+/**
+ * Does the video actually back up the scores it is shown beside?
+ *
+ * This exists because of a specific way the drawer could mislead. Answer audio
+ * is uploaded and confirmed per question the moment each one ends, and it
+ * survives a page reload; the webcam recording is one long stream that does not.
+ * So a candidate who reloads mid-interview could be fully transcribed, fully
+ * scored, and recommended — next to a video covering a fraction of the session,
+ * with nothing on screen saying so. A reviewer reading the score first (which is
+ * what a score is for) had no way to know.
+ *
+ * The recording no longer loses that footage (each generation is kept and the
+ * generations are stitched), but the wall-clock while the page was reloading is
+ * genuinely unrecorded, and a truncated or failed upload is still possible. So
+ * the honest thing is to state the coverage either way.
+ */
+function assessRecordingCoverage(
+  recording: InterviewRecording | undefined,
+  hasAnyVideo: boolean,
+): RecordingCoverage {
+  const recordedSec = Math.max(0, recording?.durationSec ?? 0);
+  const expectedSec = Math.max(0, recording?.expectedDurationSec ?? 0);
+  const generationCount = Math.max(0, recording?.generationCount ?? 0);
+  const stitched = generationCount > 1;
+  // Only claim a shortfall when both numbers are known. `expectedSec` is 0 for
+  // an interview that never started, and `recordedSec` is 0 while a transcode
+  // is still resolving the real length — neither is evidence of a gap.
+  const short =
+    hasAnyVideo &&
+    recordedSec > 0 &&
+    expectedSec > 0 &&
+    recordedSec / expectedSec < RECORDING_COVERAGE_FLOOR;
+
+  if (!short && !stitched) {
+    return {
+      incomplete: false,
+      recordedSec,
+      expectedSec,
+      generationCount,
+      headline: "",
+      detail: "",
+    };
+  }
+
+  const coverage =
+    short && expectedSec > 0
+      ? `${formatDurationSec(recordedSec)} of this ${formatDurationSec(expectedSec)} interview`
+      : "";
+  const headline = short
+    ? `This recording covers ${coverage}.`
+    : `This recording is stitched from ${generationCount} separate parts.`;
+  const detail = stitched
+    ? "The candidate's page reloaded during the interview, so the camera restarted " +
+      (generationCount > 2 ? `${generationCount - 1} times` : "once") +
+      " and the time in between was not captured. Their answers were still recorded and scored in full, so the scores below cover more of the interview than the video does."
+    : "Part of the session is missing from the video — the upload was cut short, or the camera stopped early. Their answers were still recorded and scored in full, so the scores below cover more of the interview than the video does.";
+
+  return {
+    incomplete: true,
+    recordedSec,
+    expectedSec,
+    generationCount,
+    headline,
+    detail,
+  };
+}
+
+/**
+ * The coverage warning. Rendered TWICE on purpose — above the player and again
+ * directly above the score card — because the failure it describes is a reviewer
+ * trusting a score without noticing the video behind it is partial, and plenty
+ * of reviewers never scroll up to the video at all.
+ */
+function RecordingCoverageNotice({
+  coverage,
+  className,
+}: {
+  coverage: RecordingCoverage;
+  className?: string;
+}) {
+  if (!coverage.incomplete) return null;
+  return (
+    <div
+      role="note"
+      className={cn(
+        "flex items-start gap-2.5 rounded-xl border px-3 py-2.5 text-[12.5px] leading-relaxed",
+        "border-[color:var(--warning)]/35 bg-[color:var(--warning)]/[0.07] text-ink",
+        className,
+      )}
+    >
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--warning)]" />
+      <p>
+        <span className="font-semibold">{coverage.headline}</span>{" "}
+        <span className="text-ink-muted">{coverage.detail}</span>
+      </p>
+    </div>
+  );
 }
 
 function initialsFor(name?: string, email?: string) {
@@ -790,13 +926,18 @@ function ProfileCard({ profile }: { profile: CandidateProfile | null }) {
 // ── Main drawer ────────────────────────────────────────────────────────
 
 /**
- * Read the pre-screen checklist off a rejection activity's `meta`. New rows
+ * Read the pre-screen checklist off a vetting activity's `meta`. New rows
  * store a structured `checks` array (each gate + pass/fail/unknown status);
- * older rows only have `reasons: string[]` (the failing reasons), rendered as
- * failed checks. Anything malformed is dropped.
+ * older rows only have `reasons: string[]`, rendered with
+ * `reasonsFallbackStatus`. That status depends on which VERDICT wrote the
+ * row: a rejection's reasons are genuine failures (`fail`, the default), but
+ * a review park's reasons are by definition the gates that could NOT be
+ * verified — callers on that path pass `unknown` so a legacy park note isn't
+ * painted as a row of red misses. Anything malformed is dropped.
  */
 function extractVettingChecks(
   meta: Record<string, unknown> | null | undefined,
+  reasonsFallbackStatus: VettingCheckStatus = "fail",
 ): VettingCheck[] {
   if (!meta) return [];
   const raw = meta.checks;
@@ -813,12 +954,11 @@ function extractVettingChecks(
       })
       .filter((c): c is VettingCheck => c !== null);
   }
-  // Fallback for pre-checklist rows: the stored `reasons` are all failures.
   const reasons = meta.reasons;
   if (Array.isArray(reasons)) {
     return reasons
       .filter((r): r is string => typeof r === "string" && r.length > 0)
-      .map((text) => ({ text, status: "fail" as const }));
+      .map((text) => ({ text, status: reasonsFallbackStatus }));
   }
   return [];
 }
@@ -1051,6 +1191,87 @@ function InitialRejectionCard({
   );
 }
 
+/**
+ * The `needs_review` counterpart of {@link InitialRejectionCard}: same
+ * checklist, the OTHER vetting verdict. Usually nothing failed outright — one
+ * or more gates could not be verified (no parsed profile, a CV that places
+ * the candidate in another country, an unmatched university…), so the engine
+ * parked the candidate instead of auto-deciding; the amber rows are the exact
+ * things a human must check before using Invite or Reject in the header.
+ *
+ * `reconsidered` is the OTHER way into this column: HR pulled an auto-
+ * rejected candidate back to look at them again. No park note exists then —
+ * the checklist shown is the original rejection's, and the copy must say so
+ * rather than claim the engine "could not decide". The lead paragraph is
+ * gated on actually HAVING checks: a hand-moved candidate (or one whose parse
+ * died before vetting) has no checklist, and asserting a park that never
+ * happened would send HR hunting for reasons that don't exist.
+ */
+function NeedsReviewCard({
+  checks,
+  loading,
+  error,
+  reconsidered,
+}: {
+  checks: VettingCheck[];
+  loading: boolean;
+  error: boolean;
+  reconsidered: boolean;
+}) {
+  return (
+    <div className="rounded-2xl border border-line bg-surface p-[18px]">
+      <div className="mb-1.5 flex items-center gap-2">
+        <span
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-[color:var(--warning)]"
+          style={{ background: "var(--warning-soft)" }}
+        >
+          <AlertTriangle className="h-3.5 w-3.5" strokeWidth={2} />
+        </span>
+        <span className="text-[14px] font-bold">
+          Why this candidate needs review
+        </span>
+      </div>
+      {loading ? (
+        <div className="flex items-center gap-2 text-[13px] text-ink-muted">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading checks…
+        </div>
+      ) : error ? (
+        // An error is NOT an empty history — saying "nothing was recorded"
+        // here would be a factual claim built on a failed request.
+        <p className="text-[13px] text-ink-muted">
+          The pre-screen checks could not be loaded. Close and reopen this
+          panel to retry.
+        </p>
+      ) : checks.length ? (
+        <>
+          <p className="mb-3.5 text-[12.5px] leading-relaxed text-ink-muted">
+            {reconsidered
+              ? "The CV pre-screen rejected this candidate, and they were " +
+                "moved back here to be reconsidered. This is the original " +
+                "checklist — the red item(s) are what caused that rejection."
+              : "The CV pre-screen could not auto-decide, so this candidate " +
+                "is parked for your call. The amber item(s) are what could " +
+                "not be verified automatically — check them, then Invite or " +
+                "Reject from the header."}
+          </p>
+          <div className="grid gap-2.5">
+            {checks.map((check, i) => (
+              <VettingCheckRow key={`${i}-${check.text}`} check={check} />
+            ))}
+          </div>
+        </>
+      ) : (
+        <p className="text-[13px] text-ink-muted">
+          No pre-screen checklist was recorded for this candidate. The CV may
+          still be processing, or they were moved here by hand — decide with
+          Invite or Reject in the header.
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp, onOpenChange }: Props) {
   // Reattempt history: `selectedSessionId` overrides which attempt's detail
   // we load; null = follow the prop. Reset whenever the entry point changes.
@@ -1061,6 +1282,35 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
     setSelectedSessionId(null);
   }, [sessionId]);
   const activeSessionId = selectedSessionId ?? sessionId;
+
+  // The parents keep this drawer PERMANENTLY mounted and signal open/closed only
+  // by whether they hand it a target (session/candidate); closing just nulls
+  // that. So the Sheet's open flag has to MIRROR the target — re-opening for
+  // every new candidate — not initialise once (that left it stuck closed after
+  // the first dismissal). Keyed on the target's identity, so it also re-opens if
+  // a different candidate arrives mid-close; that also cancels the pending
+  // unmount below. On close we flip it false so the slide-out plays, then defer
+  // the parent's unmount until the exit finishes so ✕ / backdrop / post-delete
+  // all animate out.
+  const targetKey = sessionId || candidateIdProp || null;
+  const [sheetOpen, setSheetOpen] = useState(Boolean(targetKey));
+  const closeTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (!targetKey) return;
+    if (closeTimer.current !== null) {
+      window.clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+    setSheetOpen(true);
+  }, [targetKey]);
+  const closeDrawer = () => {
+    setSheetOpen(false);
+    if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
+    closeTimer.current = window.setTimeout(() => {
+      closeTimer.current = null;
+      onOpenChange(false);
+    }, 320);
+  };
 
   const queryClient = useQueryClient();
   const orgTimezone = useOrgTimezone();
@@ -1188,24 +1438,37 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   };
 
 
-  // "Initial rejection" = the CV-stage auto-reject column (`rejected`), NOT a
-  // post-interview `final_rejected`. The vetting engine records the WHY on the
-  // rejection ACTIVITY (`meta.reasons`), never on the candidate doc, so we read
-  // it from the unscoped activity feed. Fetched only when the candidate is in
-  // that state and has no interview (the one branch that renders it).
+  // The vetting engine records its WHY on an ACTIVITY, never on the candidate
+  // doc, so both verdict cards read the unscoped activity feed. The two
+  // verdicts file it on DIFFERENT rows: a rejection rides the status_changed
+  // row INTO `rejected`, while a review park has NO transition (`needs_review`
+  // is where the candidate already sits) — the engine leaves a note_added row
+  // with `meta.verdict === "review"` instead. Fetched only in those two
+  // states with no interview (the one branch that renders either card).
   const isInitialRejected =
     candidate?.currentStatusId?.key === INITIAL_REJECT_STATUS_KEY;
-  const rejectionActivitiesQuery = useQuery({
-    queryKey: ["candidateActivities", candidateId, "initial-rejection"],
-    queryFn: () => getCandidateActivities(candidateId!),
-    enabled: Boolean(candidateId) && isInitialRejected && !activeSessionId,
+  const isNeedsReview =
+    candidate?.currentStatusId?.key === INVITABLE_STATUS_KEY;
+  const vettingActivitiesQuery = useQuery({
+    queryKey: ["candidateActivities", candidateId, "vetting"],
+    // limit 100 (the server's max), not the default 25: the park note is
+    // written at CV-parse time, i.e. it is one of the OLDEST rows in a
+    // newest-first feed, and `needs_review` is a working column that keeps
+    // accruing rows (emails, moves) while the candidate waits. At 25 the note
+    // could silently fall off page 1 and the card would claim nothing was
+    // ever recorded.
+    queryFn: () => getCandidateActivities(candidateId!, { limit: 100 }),
+    enabled:
+      Boolean(candidateId) &&
+      (isInitialRejected || isNeedsReview) &&
+      !activeSessionId,
     // See the staleTime note on the interview query above. A re-vet rewrites
     // these checks, so a cached read would keep showing the old reasons.
     staleTime: 0,
   });
   // Newest-first feed, so the first transition INTO `rejected` is the current
   // one; its `meta.reasons` is the vetting engine's verbatim explanation.
-  const initialRejectionRow = rejectionActivitiesQuery.data?.data.find(
+  const initialRejectionRow = vettingActivitiesQuery.data?.data.find(
     (a) =>
       a.type === "status_changed" &&
       a.toStatus?.key === INITIAL_REJECT_STATUS_KEY,
@@ -1213,6 +1476,24 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   const initialRejectionChecks = extractVettingChecks(
     initialRejectionRow?.meta,
   );
+  // The park note. Matched on `meta.verdict` rather than on note_added-by-AI:
+  // the engine files its withheld-email notes under the same type and actor,
+  // and those carry no checklist. Newest-first again, so after a re-vet the
+  // fresh park note wins over the original one. Legacy park notes stored only
+  // `reasons` — for a REVIEW verdict those are unverifiable gates, not
+  // failures, hence the `unknown` fallback (amber, matching the card's copy).
+  const needsReviewRow = vettingActivitiesQuery.data?.data.find(
+    (a) => a.type === "note_added" && a.meta?.verdict === "review",
+  );
+  // No park note but a rejection checklist in the same feed = the OTHER route
+  // into `needs_review`: HR pulled an auto-rejected candidate back via
+  // "Reconsider candidate" / the status menu. Show the original rejection's
+  // checklist under honest copy instead of claiming nothing was recorded.
+  const needsReviewReconsidered =
+    !needsReviewRow && initialRejectionChecks.length > 0;
+  const needsReviewChecks = needsReviewRow
+    ? extractVettingChecks(needsReviewRow.meta, "unknown")
+    : initialRejectionChecks;
 
   // Local mutation flags
   const [retranscoding, setRetranscoding] = useState(false);
@@ -1342,7 +1623,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
       // The candidate's row shows its latest interview's score/status, so a
       // deleted interview leaves those lists (and Overview) stale too.
       invalidateCandidateData(queryClient);
-      onOpenChange(false);
+      closeDrawer();
     },
     onError: (err) =>
       toast.error(errorMessage(err, "Could not delete the interview.")),
@@ -1356,7 +1637,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
       // Delete changes the job's TOTAL candidate count, so this is one of the
       // few sites that also refreshes the Jobs list's "Applicants" column.
       invalidateCandidateDataAndJobCounts(queryClient);
-      onOpenChange(false);
+      closeDrawer();
     },
     onError: (err) =>
       toast.error(errorMessage(err, "Could not delete the candidate.")),
@@ -1409,6 +1690,11 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   const recording = data?.recording;
   const hlsStatus = recording?.hlsStatus ?? null;
   const durationSec = recording?.durationSec ?? 0;
+  const rawUrls = data?.webcamVideoUrls ?? [];
+  const coverage = assessRecordingCoverage(
+    recording,
+    hlsReady || rawUrls.length > 0,
+  );
   const done = data?.status === "submitted";
   const overallScore100 =
     typeof data?.scores?.overall === "number"
@@ -1424,7 +1710,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
 
   return (
     <>
-      <Sheet open onOpenChange={onOpenChange}>
+      <Sheet open={sheetOpen} onOpenChange={(next) => { if (!next) closeDrawer(); }}>
         <SheetContent
           side="right"
           hideCloseButton
@@ -1515,7 +1801,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
               </div>
               <button
                 type="button"
-                onClick={() => onOpenChange(false)}
+                onClick={() => closeDrawer()}
                 className="inline-flex text-ink-muted hover:text-ink"
                 aria-label="Close"
               >
@@ -1615,6 +1901,13 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                           tower past the parent menu. */}
                       <DropdownMenuSubContent className="max-h-72 w-52 overflow-y-auto">
                         <DropdownMenuLabel>Move to</DropdownMenuLabel>
+                        {/* Same note as the candidates table's menu: a manual
+                            move writes the status only, no email goes out. */}
+                        <p className="px-2 pb-1.5 text-[11.5px] leading-snug text-ink-muted">
+                          A move never emails the candidate — use{" "}
+                          <span className="font-medium">Send email</span> to
+                          notify them.
+                        </p>
                         {statuses.map((option) => {
                           const isCurrent =
                             option.key === candidate?.currentStatusId?.key;
@@ -1748,7 +2041,18 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                   // so show WHY here instead of a "no interview yet" note.
                   <InitialRejectionCard
                     checks={initialRejectionChecks}
-                    loading={rejectionActivitiesQuery.isLoading}
+                    loading={vettingActivitiesQuery.isLoading}
+                  />
+                ) : isNeedsReview ? (
+                  // Parked by the vetting engine for a human decision — show
+                  // WHAT it could not verify instead of the generic note. Once
+                  // HR invites and the interview happens, this state (and the
+                  // card) is gone, so nothing else is displaced.
+                  <NeedsReviewCard
+                    checks={needsReviewChecks}
+                    loading={vettingActivitiesQuery.isLoading}
+                    error={vettingActivitiesQuery.isError}
+                    reconsidered={needsReviewReconsidered}
                   />
                 ) : (
                   <div className="flex items-center gap-3 rounded-2xl border border-dashed border-line bg-surface px-5 py-4 text-[13px] text-ink-muted">
@@ -1832,11 +2136,12 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                         <ResponsesTab
                           videoSectionRef={videoSectionRef}
                           hlsUrl={data.webcamHlsUrl}
-                          rawUrl={data.webcamVideoUrl}
+                          rawUrls={rawUrls}
                           hlsStatus={hlsStatus}
                           hlsProgress={recording?.hlsProgress ?? 0}
                           hlsError={recording?.hlsError ?? ""}
                           durationSec={durationSec}
+                          coverage={coverage}
                           chapters={chapters}
                           playerApiRef={playerApiRef}
                           questions={questions}
@@ -1847,13 +2152,36 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                           onJump={jumpToRecording}
                         />
 
-                        {/* 2. All evaluations, below the video: overall score,
+                        {/* 2. Interview integrity — the tab-switch /
+                            fullscreen-exit signals the candidate app records
+                            while they answer. Rendered outside the `data.scores`
+                            guard below so it shows for every submitted
+                            interview, scored or not. */}
+                        <ProctoringSummaryCard
+                          fullscreenExitCount={
+                            data.proctoring?.fullscreenExitCount ?? 0
+                          }
+                          tabHiddenCount={data.proctoring?.tabHiddenCount ?? 0}
+                          graceUsedSec={data.proctoring?.graceUsedSec ?? 0}
+                          integrityScore={
+                            typeof data.scores?.integrity?.score === "number"
+                              ? data.scores.integrity.score
+                              : null
+                          }
+                        />
+
+                        {/* 3. All evaluations, below the video: overall score,
                             highlights / areas / score breakdown, then the
                             per-question deep dive. When the recording isn't
                             scored yet, the actionable scoring banner takes
                             this slot. */}
                         {data.scores ? (
                           <>
+                            {/* Repeated from above the player on purpose: this
+                                is the spot a reviewer actually reads, and the
+                                whole point is that a score must not be read as
+                                a complete interview when the video isn't one. */}
+                            <RecordingCoverageNotice coverage={coverage} />
                             <AiScoreCard
                               overall={data.scores.overall}
                               recommendation={resolveVerdict(data.scores)}
@@ -2236,14 +2564,66 @@ function EvaluationTab({
 
 // ── Responses tab ──────────────────────────────────────────────────────
 
+/**
+ * The raw-recording fallback player(s) — used before the HLS bundle exists, or
+ * when its transcode failed.
+ *
+ * Plural because a recording made across a mid-interview page reload is several
+ * separate files until the transcode joins them into one timeline. Each is
+ * playable on its own, so they are listed in recording order and labelled; the
+ * chapters and the seek-to-question actions stay disabled until the bundle is
+ * ready, because only then is there a single timeline for an offset to mean
+ * anything against.
+ */
+function RawRecordingParts({
+  urls,
+  durationSec,
+  candidateName,
+}: {
+  urls: string[];
+  durationSec: number;
+  candidateName: string;
+}) {
+  if (urls.length === 0) return null;
+  const who = candidateName || "candidate";
+  if (urls.length === 1) {
+    return (
+      <VideoPlayer
+        src={urls[0]}
+        knownDurationSec={durationSec}
+        ariaLabel={`Webcam recording for ${who}`}
+      />
+    );
+  }
+  return (
+    <div className="grid w-full gap-3">
+      {urls.map((url, i) => (
+        <div key={url} className="grid gap-1.5">
+          <div className="text-[11px] font-semibold tracking-wide text-white/60 uppercase">
+            Part {i + 1} of {urls.length}
+          </div>
+          <VideoPlayer
+            src={url}
+            // No per-part duration to pass: `durationSec` is the total across
+            // every part, and handing it to one player would stretch its
+            // timeline over footage it doesn't contain.
+            ariaLabel={`Webcam recording for ${who}, part ${i + 1} of ${urls.length}`}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ResponsesTab({
   videoSectionRef,
   hlsUrl,
-  rawUrl,
+  rawUrls,
   hlsStatus,
   hlsProgress,
   hlsError,
   durationSec,
+  coverage,
   chapters,
   playerApiRef,
   questions,
@@ -2255,11 +2635,13 @@ function ResponsesTab({
 }: {
   videoSectionRef: React.MutableRefObject<HTMLElement | null>;
   hlsUrl: string;
-  rawUrl: string;
+  /** One per un-transcoded recorder generation, in recording order. */
+  rawUrls: string[];
   hlsStatus: string | null;
   hlsProgress: number;
   hlsError: string;
   durationSec: number;
+  coverage: RecordingCoverage;
   chapters: Array<{ atSec: number; label: string }>;
   playerApiRef: React.MutableRefObject<VideoPlayerHandle | null>;
   questions: AdminInterviewQuestionItem[];
@@ -2291,6 +2673,7 @@ function ResponsesTab({
         ref={videoSectionRef as React.RefObject<HTMLElement>}
         className="scroll-mt-4"
       >
+        <RecordingCoverageNotice coverage={coverage} className="mb-2.5" />
         <div className="overflow-hidden rounded-xl bg-black">
           {hlsUrl ? (
             <div className="aspect-video">
@@ -2323,15 +2706,11 @@ function ResponsesTab({
                 )}
                 Retry streaming conversion
               </Button>
-              {rawUrl ? (
-                <div className="w-full">
-                  <VideoPlayer
-                    src={rawUrl}
-                    knownDurationSec={durationSec}
-                    ariaLabel={`Webcam recording for ${candidateName || "candidate"}`}
-                  />
-                </div>
-              ) : null}
+              <RawRecordingParts
+                urls={rawUrls}
+                durationSec={durationSec}
+                candidateName={candidateName}
+              />
             </div>
           ) : isTranscoding(hlsStatus) ? (
             <div className="flex aspect-video flex-col items-center justify-center gap-3 p-6 text-center text-[13px] text-white/80">
@@ -2340,21 +2719,17 @@ function ResponsesTab({
                 Preparing a streamable version of this recording…
                 {hlsProgress ? ` ${Math.round(hlsProgress)}%` : ""}
               </p>
-              {rawUrl ? (
-                <div className="w-full">
-                  <VideoPlayer
-                    src={rawUrl}
-                    knownDurationSec={durationSec}
-                    ariaLabel={`Webcam recording for ${candidateName || "candidate"}`}
-                  />
-                </div>
-              ) : null}
+              <RawRecordingParts
+                urls={rawUrls}
+                durationSec={durationSec}
+                candidateName={candidateName}
+              />
             </div>
-          ) : rawUrl ? (
-            <VideoPlayer
-              src={rawUrl}
-              knownDurationSec={durationSec}
-              ariaLabel={`Webcam recording for ${candidateName || "candidate"}`}
+          ) : rawUrls.length > 0 ? (
+            <RawRecordingParts
+              urls={rawUrls}
+              durationSec={durationSec}
+              candidateName={candidateName}
             />
           ) : (
             <div className="flex aspect-video items-center justify-center p-6 text-center text-[13px] text-white/70">
@@ -2900,9 +3275,10 @@ function AnswerRow({
               </span>
               <span className="rounded-full border border-line px-2 py-0.5 font-semibold text-ink-2">
                 Depth: {formatScore(scored.depth, { suffix: " / 10" })}
-                {/* Surfaced only when the difficulty normalisation actually
-                    moved the number, so the reviewer is never shown a
-                    "raw → adjusted" pair that says the same thing twice. */}
+                {/* Surfaced only when the judge's calibration (for question
+                    difficulty + role seniority) actually moved the number, so
+                    the reviewer is never shown a "raw → adjusted" pair that
+                    says the same thing twice. */}
                 {typeof scored.depthRaw === "number" &&
                 scored.depthRaw !== scored.depth
                   ? ` (raw ${formatScore(scored.depthRaw)})`
@@ -2958,6 +3334,175 @@ export function formatOvertime(totalSec: number): string {
   if (m === 0) return `${rem}s`;
   if (rem === 0) return `${m}m`;
   return `${m}m ${rem}s`;
+}
+
+/**
+ * Interview-integrity panel for the drawer. Surfaces the proctoring signals the
+ * candidate app captures during the interview — fullscreen exits, tab switches,
+ * and any time run past the limit — plus the AI integrity score once scoring has
+ * run. The counts come straight from `data.proctoring`, which the admin detail
+ * endpoint returns for every interview, so this renders for scored and unscored
+ * submissions alike. Flag-only by design: it never gates a candidate, it just
+ * shows HR what happened, mirroring the "noted for your reviewer" wording the
+ * candidate sees mid-interview. Clean sessions collapse to a single reassuring
+ * line so a spotless interview stays quiet rather than shouting a wall of zeros.
+ */
+function ProctoringSummaryCard({
+  fullscreenExitCount,
+  tabHiddenCount,
+  graceUsedSec,
+  integrityScore,
+}: {
+  fullscreenExitCount: number;
+  tabHiddenCount: number;
+  graceUsedSec: number;
+  integrityScore: number | null;
+}) {
+  const exits = Math.max(0, Math.round(fullscreenExitCount));
+  const switches = Math.max(0, Math.round(tabHiddenCount));
+  const overtime = Math.max(0, Math.round(graceUsedSec));
+  const flagged = exits > 0 || switches > 0 || overtime > 0;
+
+  return (
+    <div className="rounded-2xl border border-line bg-surface p-[18px]">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <span
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+            style={{
+              background: flagged
+                ? "var(--warning-soft)"
+                : "var(--success-soft)",
+              color: flagged ? "var(--warning)" : "var(--success)",
+            }}
+          >
+            <ShieldCheck className="h-4 w-4" strokeWidth={1.9} />
+          </span>
+          <div>
+            <p className="text-sm font-semibold text-ink">
+              Interview integrity
+            </p>
+            <p className="text-[11.5px] text-ink-subtle">
+              Tab &amp; fullscreen activity recorded during the interview
+            </p>
+          </div>
+        </div>
+        {integrityScore !== null ? (
+          <span
+            className={cn(
+              "mono shrink-0 rounded-full border px-2.5 py-1 text-[12px] font-semibold",
+              integrityScore < 6
+                ? "border-[color-mix(in_srgb,var(--warning),transparent_60%)] text-[color:var(--warning)]"
+                : "border-line text-ink-2",
+            )}
+            style={
+              integrityScore < 6
+                ? { background: "var(--warning-soft)" }
+                : undefined
+            }
+          >
+            {integrityScore}
+            <span className="text-[10px] font-normal text-ink-subtle">
+              {" "}
+              / 10
+            </span>
+          </span>
+        ) : null}
+      </div>
+
+      {flagged ? (
+        <div className="flex flex-wrap gap-2">
+          <StatTile
+            kind="fullscreen"
+            value={exits}
+            label={`fullscreen exit${exits === 1 ? "" : "s"}`}
+            warn={exits > 0}
+          />
+          <StatTile
+            kind="tab"
+            value={switches}
+            label={`tab switch${switches === 1 ? "" : "es"}`}
+            warn={switches > 0}
+          />
+          {overtime > 0 ? (
+            <StatTile
+              kind="time"
+              value={formatOvertime(overtime)}
+              label="over the time limit"
+              warn
+            />
+          ) : null}
+        </div>
+      ) : (
+        <div
+          className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-[13px] font-medium"
+          style={{ background: "var(--success-soft)", color: "var(--success)" }}
+        >
+          <CheckCircle2 className="h-4 w-4 shrink-0" strokeWidth={1.9} />
+          Stayed in fullscreen the whole time — no tab switches recorded.
+        </div>
+      )}
+
+      <p className="mt-3 text-[11px] leading-snug text-ink-subtle">
+        {flagged
+          ? "Noted while the candidate was taking the interview. These are review flags only — they never auto-fail a candidate."
+          : "Proctoring ran for this interview and found nothing to flag."}
+      </p>
+    </div>
+  );
+}
+
+/** One stat inside the integrity card — icon chip, count, and caption. The
+ *  `warn` tint fires only when this particular signal fired, so a "0 tab
+ *  switches" tile stays neutral next to a flagged "2 fullscreen exits". */
+function StatTile({
+  kind,
+  value,
+  label,
+  warn,
+}: {
+  kind: "fullscreen" | "tab" | "time";
+  value: number | string;
+  label: string;
+  warn: boolean;
+}) {
+  const Icon = kind === "fullscreen" ? Maximize : kind === "tab" ? EyeOff : Clock;
+  return (
+    <div
+      className={cn(
+        "flex min-w-[128px] flex-1 items-center gap-2.5 rounded-xl border px-3 py-2.5",
+        warn
+          ? "border-[color-mix(in_srgb,var(--warning),transparent_65%)]"
+          : "border-line bg-card",
+      )}
+      style={warn ? { background: "var(--warning-soft)" } : undefined}
+    >
+      <span
+        className={cn(
+          "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg",
+          warn ? "text-[color:var(--warning)]" : "bg-surface text-ink-subtle",
+        )}
+        style={
+          warn
+            ? { background: "color-mix(in srgb, var(--warning), transparent 82%)" }
+            : undefined
+        }
+      >
+        <Icon className="h-3.5 w-3.5" strokeWidth={1.8} />
+      </span>
+      <div className="min-w-0 leading-tight">
+        <p
+          className={cn(
+            "mono text-[15px] font-semibold",
+            warn ? "text-[color:var(--warning)]" : "text-ink",
+          )}
+        >
+          {value}
+        </p>
+        <p className="truncate text-[11px] text-ink-subtle">{label}</p>
+      </div>
+    </div>
+  );
 }
 
 /** Proctoring-signal badge — kept exported so other views can reuse the tint. */
