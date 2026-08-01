@@ -268,8 +268,28 @@ export interface InterviewProctoring {
 }
 
 export interface InterviewRecording {
-  /** Authoritative recorder wall-clock duration (0 = unknown). */
+  /**
+   * Authoritative length of the recorded CONTENT in seconds (0 = unknown).
+   * NOT how long the interview took — see `expectedDurationSec`.
+   */
   durationSec: number
+  /**
+   * How long the recording SHOULD be: `startedAt` → `submittedAt`, in seconds
+   * (0 when the interview never started).
+   *
+   * Compare with `durationSec` to know whether the video actually covers the
+   * interview it sits beside. It usually does; when it doesn't, the reviewer has
+   * to be told, because the SCORES are computed from the per-answer audio, which
+   * survives everything the video doesn't — so a partial recording still reads
+   * as a complete, passing interview unless the gap is shown.
+   */
+  expectedDurationSec: number
+  /**
+   * How many recorder generations the recording is stitched from. `> 1` means
+   * the candidate's page reloaded (or their camera changed) mid-interview, so
+   * there is unrecorded wall-clock at each join.
+   */
+  generationCount: number
   hlsStatus: WebcamHlsStatus | null
   hlsProgress: number
   hlsError: string
@@ -384,11 +404,16 @@ export interface AdminInterviewDetail {
   proctoring: InterviewProctoring
   recording: InterviewRecording
   /**
-   * Raw-recording streaming proxy URL (`…/video`). Present only while a
-   * non-transcoded original still exists — the transcode worker deletes the
-   * raw copy once the HLS bundle is ready. The player's fallback source.
+   * Raw-recording streaming proxy URLs, one per un-transcoded recorder
+   * generation, in recording order. Non-empty only while raw originals still
+   * exist — the transcode worker deletes them once the HLS bundle is ready. The
+   * player's fallback sources.
+   *
+   * A LIST, not one URL: a recording made across a mid-interview page reload is
+   * several separate WebM files until the transcode joins them, and showing only
+   * the first would hide the rest of the interview without saying so.
    */
-  webcamVideoUrl: string
+  webcamVideoUrls: string[]
   /**
    * Auth-gated HLS manifest proxy URL, streamed via hls.js. Empty until the
    * background transcode reaches `ready`.

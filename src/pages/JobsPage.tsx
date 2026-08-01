@@ -345,9 +345,17 @@ export function JobsPage() {
                       >
                         Edit
                       </DropdownMenuItem>
+                      {/* `state.fromJob` marks this as a deliberate drill-in
+                          into one job's candidates, so the list shows its "back
+                          to job" chrome (breadcrumb, job name in the title, Back
+                          to job button) — the same as the Job detail page's
+                          Candidates tab, and unlike a manual pick in the Job
+                          filter. */}
                       <DropdownMenuItem
                         onSelect={() =>
-                          navigate(`${ROUTES.CANDIDATES}?job=${row._id}`)
+                          navigate(`${ROUTES.CANDIDATES}?job=${row._id}`, {
+                            state: { fromJob: true },
+                          })
                         }
                       >
                         View candidates

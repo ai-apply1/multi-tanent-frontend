@@ -130,7 +130,12 @@ export function LoginPage() {
     <div className="grid h-full w-full overflow-y-auto bg-[var(--surface)] lg:grid-cols-2">
       {/* -------- Form panel -------- */}
       <div className="flex items-center justify-center px-6 py-10 lg:px-10">
-        <div className="w-full max-w-[340px]">
+        {/* Keyed by which step is shown so the panel re-plays the fade on the
+            in-page sign-in → two-factor transition, not just on first mount. */}
+        <div
+          key={challengeToken ? "mfa" : "signin"}
+          className="w-full max-w-[340px] animate-fade-up"
+        >
           <div className="mb-10 flex items-center gap-2.5">
             {orgName && (
               <OrgLogo
