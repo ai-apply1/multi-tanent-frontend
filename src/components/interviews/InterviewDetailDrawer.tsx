@@ -35,7 +35,6 @@ import {
   ShieldCheck,
   Sparkles,
   Star,
-  Tag,
   Trash2,
   User,
   X,
@@ -44,6 +43,7 @@ import { errorMessage } from "@/lib/errors";
 import { cn } from "@/lib/utils";
 import { ScoringDetailsDialog } from "@/components/interviews/ScoringDetailsDialog";
 import { BulkEmailDialog } from "@/features/candidates/components/BulkEmailDialog";
+import { ChangeStatusSubMenu } from "@/features/candidates/components/ChangeStatusSubMenu";
 import {
   HlsPlayer,
   type VideoPlayerHandle,
@@ -67,10 +67,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -104,7 +100,6 @@ import {
   invalidateCandidateDataAndJobCounts,
 } from "@/features/candidates/candidatesCache";
 import { toDisplayScore } from "@/features/candidates/aiScore";
-import { manualMoveBlocker } from "@/features/candidates/manualMove";
 import { useOrgTimezone } from "@/features/organization/useOrgTimezone";
 import {
   INITIAL_REJECT_STATUS_KEY,
@@ -1892,63 +1887,17 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                       candidates table offers, so a reviewer can decide without
                       closing the drawer. */}
                   {candidateId && statuses.length > 0 ? (
-                    <DropdownMenuSub>
-                      <DropdownMenuSubTrigger>
-                        <Tag className="h-3.5 w-3.5" strokeWidth={1.7} />
-                        Change status
-                      </DropdownMenuSubTrigger>
-                      {/* Capped + scrollable so a long custom pipeline doesn't
-                          tower past the parent menu. */}
-                      <DropdownMenuSubContent className="max-h-72 w-52 overflow-y-auto">
-                        <DropdownMenuLabel>Move to</DropdownMenuLabel>
-                        {/* Same note as the candidates table's menu: a manual
-                            move writes the status only, no email goes out. */}
-                        <p className="px-2 pb-1.5 text-[11.5px] leading-snug text-ink-muted">
-                          A move never emails the candidate — use{" "}
-                          <span className="font-medium">Send email</span> to
-                          notify them.
-                        </p>
-                        {statuses.map((option) => {
-                          const isCurrent =
-                            option.key === candidate?.currentStatusId?.key;
-                          // Columns that aren't a human's to assert are greyed
-                          // out with the reason on hover, matching the
-                          // candidates table. `candidate` is null only while the
-                          // detail is in flight, and this menu is gated on
-                          // `candidateId` — treat the gap as unblocked and let
-                          // the server have the final word.
-                          const blocked = candidate
-                            ? manualMoveBlocker(option, candidate)
-                            : null;
-                          return (
-                            <DropdownMenuItem
-                              key={option._id}
-                              disabled={
-                                isCurrent || statusPending || blocked !== null
-                              }
-                              title={blocked ?? undefined}
-                              onSelect={() =>
-                                void handleStatusChange(option.key)
-                              }
-                            >
-                              <span
-                                className="h-2 w-2 shrink-0 rounded-full"
-                                style={{
-                                  backgroundColor:
-                                    option.color ?? "var(--ink-muted)",
-                                }}
-                              />
-                              <span className="min-w-0 truncate">
-                                {option.label}
-                              </span>
-                              {isCurrent ? (
-                                <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-ink-muted" />
-                              ) : null}
-                            </DropdownMenuItem>
-                          );
-                        })}
-                      </DropdownMenuSubContent>
-                    </DropdownMenuSub>
+                    // `candidate` is null only while the detail request is in
+                    // flight, and this menu is gated on `candidateId` — the
+                    // shared component treats that gap as unblocked and lets
+                    // the server have the final word.
+                    <ChangeStatusSubMenu
+                      statuses={statuses}
+                      currentKey={candidate?.currentStatusId?.key}
+                      candidate={candidate}
+                      pending={statusPending}
+                      onSelect={(statusKey) => void handleStatusChange(statusKey)}
+                    />
                   ) : null}
                   {data?.scores ? (
                     <DropdownMenuItem
