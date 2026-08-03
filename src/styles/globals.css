@@ -372,6 +372,43 @@
     background-clip: padding-box;
   }
 
+  /* The same pill, but for a SCROLLING LIST INSIDE A POPOVER (the row menu's
+     "Change status" submenu, and anything like it).
+
+     One deliberate difference from `.scroll`: the TRACK IS VISIBLE. On the app
+     shell an empty groove down the page edge is noise, so it's transparent
+     there. In a small floating menu it's the opposite — the list is capped and
+     the cut-off item is often a full row below the fold, so if nothing at rest
+     says "there is more", people read the menu as complete and never scroll.
+     The groove is the cheapest permanent answer to that; the fading edges the
+     menu draws over it are the second.
+
+     Both colours are `color-mix` off `--ink`, which the dark block already
+     flips, so there is no `.dark` twin to keep in sync here.
+
+     WebKit-only for the same reason as `.scroll` above: adding the standard
+     `scrollbar-width`/`scrollbar-color` makes Chromium 121+ drop every
+     ::-webkit rule below and fall back to its plain native bar. */
+  .menu-scroll::-webkit-scrollbar {
+    width: 8px;
+  }
+  .menu-scroll::-webkit-scrollbar-track {
+    background: color-mix(in srgb, var(--ink) 8%, transparent);
+    border-radius: 99px;
+    /* Keeps the groove clear of the menu's rounded top/bottom corners. */
+    margin-block: 4px;
+  }
+  .menu-scroll::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--ink) 26%, transparent);
+    border-radius: 99px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .menu-scroll::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--ink) 42%, transparent);
+    background-clip: padding-box;
+  }
+
   button,
   [role="button"],
   input[type="button"],

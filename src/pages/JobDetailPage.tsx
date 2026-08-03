@@ -25,6 +25,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useAuth } from "@/features/auth/AuthContext";
+import { canManageFunnel } from "@/features/auth/roles";
 import { JobQuestionsManager } from "@/features/jobs/components/JobQuestionsManager";
 import { JobShareDialog } from "@/features/jobs/components/JobShareDialog";
 import { JobSwitcher } from "@/features/jobs/components/JobSwitcher";
@@ -76,6 +78,12 @@ export function JobDetailPage() {
   const { jobId } = useParams<{ jobId: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  // Interviewers read this page and never write it — the backend 403s the job
+  // edit / status / threshold-reprocess / CV-import calls, so those buttons are
+  // hidden rather than left to fail on click. Share stays: the link itself and
+  // copying it are reads (the send-invites half is hidden inside the dialog).
+  const canAct = canManageFunnel(user?.role);
   const [tab, setTab] = useState<TabId>("overview");
   const [uploadOpen, setUploadOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -275,20 +283,22 @@ export function JobDetailPage() {
           ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => setReprocessOpen(true)}
-            disabled={reprocessMutation.isPending}
-          >
-            {reprocessMutation.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" strokeWidth={1.9} />
-            )}
-            Re-apply threshold
-          </Button>
-          {transitions.length > 0 ? (
+          {canAct ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setReprocessOpen(true)}
+              disabled={reprocessMutation.isPending}
+            >
+              {reprocessMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" strokeWidth={1.9} />
+              )}
+              Re-apply threshold
+            </Button>
+          ) : null}
+          {canAct && transitions.length > 0 ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -323,40 +333,46 @@ export function JobDetailPage() {
             <Share2 className="h-4 w-4" strokeWidth={1.9} />
             Share
           </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => navigate(jobEdit(job._id))}
-          >
-            <Pencil className="h-4 w-4" strokeWidth={1.9} />
-            Edit
-          </Button>
-          <Button size="sm" onClick={() => setUploadOpen(true)}>
-            <Upload className="h-4 w-4" strokeWidth={1.9} />
-            Upload CVs
-          </Button>
+          {canAct ? (
+            <>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => navigate(jobEdit(job._id))}
+              >
+                <Pencil className="h-4 w-4" strokeWidth={1.9} />
+                Edit
+              </Button>
+              <Button size="sm" onClick={() => setUploadOpen(true)}>
+                <Upload className="h-4 w-4" strokeWidth={1.9} />
+                Upload CVs
+              </Button>
+            </>
+          ) : null}
         </div>
       </div>
 
       <JobShareDialog jobId={job._id} open={shareOpen} onOpenChange={setShareOpen} />
 
-      <ConfirmDialog
-        open={reprocessOpen}
-        onOpenChange={(o) => !o && setReprocessOpen(false)}
-        title="Re-apply the scoring threshold?"
-        description={
-          <>
-            This re-checks every already-interviewed candidate for this job
-            against the current threshold ({job.rejectionThreshold}) and moves
-            them between shortlisted and rejected based on their existing
-            interview score. Nobody is re-scored, and no emails are sent.
-          </>
-        }
-        confirmLabel="Re-apply"
-        loadingLabel="Re-applying…"
-        loading={reprocessMutation.isPending}
-        onConfirm={() => reprocessMutation.mutate()}
-      />
+      {canAct ? (
+        <ConfirmDialog
+          open={reprocessOpen}
+          onOpenChange={(o) => !o && setReprocessOpen(false)}
+          title="Re-apply the scoring threshold?"
+          description={
+            <>
+              This re-checks every already-interviewed candidate for this job
+              against the current threshold ({job.rejectionThreshold}) and moves
+              them between shortlisted and rejected based on their existing
+              interview score. Nobody is re-scored, and no emails are sent.
+            </>
+          }
+          confirmLabel="Re-apply"
+          loadingLabel="Re-applying…"
+          loading={reprocessMutation.isPending}
+          onConfirm={() => reprocessMutation.mutate()}
+        />
+      ) : null}
 
       {/*
         KPI strip, counted from the job's own board.
@@ -446,13 +462,15 @@ export function JobDetailPage() {
       </div>
 
       {/* Upload dialog — mounted once, opened by the header CTA. */}
-      <UploadCvsDialog
-        open={uploadOpen}
-        onOpenChange={setUploadOpen}
-        jobId={job._id}
-        jobTitle={job.title}
-        onImported={invalidateCandidates}
-      />
+      {canAct ? (
+        <UploadCvsDialog
+          open={uploadOpen}
+          onOpenChange={setUploadOpen}
+          jobId={job._id}
+          jobTitle={job.title}
+          onImported={invalidateCandidates}
+        />
+      ) : null}
     </div>
   );
 }

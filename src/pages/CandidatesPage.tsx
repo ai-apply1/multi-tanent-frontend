@@ -11,7 +11,6 @@ import toast from "react-hot-toast";
 import {
   AlertTriangle,
   ArrowLeft,
-  Check,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -43,17 +42,14 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { InterviewDetailDrawer } from "@/components/interviews/InterviewDetailDrawer";
 import { BulkEmailDialog } from "@/features/candidates/components/BulkEmailDialog";
+import { ChangeStatusSubMenu } from "@/features/candidates/components/ChangeStatusSubMenu";
 import {
   deleteCandidate,
   exportCandidatesCsv,
@@ -67,8 +63,9 @@ import {
   invalidateCandidateData,
   invalidateCandidateDataAndJobCounts,
 } from "@/features/candidates/candidatesCache";
+import { useAuth } from "@/features/auth/AuthContext";
+import { canManageFunnel } from "@/features/auth/roles";
 import { aiScoreState, type AiScoreState } from "@/features/candidates/aiScore";
-import { manualMoveBlocker } from "@/features/candidates/manualMove";
 import {
   type CandidateListItem,
   type CandidateStatus,
@@ -176,6 +173,11 @@ function initialsOf(name: string): string {
 export function CandidatesPage() {
   const queryClient = useQueryClient();
   const tz = useOrgTimezone();
+  // `interviewer` reads this page but the backend 403s every mutation it can
+  // reach from here (export, invite, email, status change, delete), so those
+  // affordances are hidden rather than left to fail on click.
+  const { user } = useAuth();
+  const canAct = canManageFunnel(user?.role);
   // This page serves two routes: the org-wide `/dashboard/candidates` and
   // `/dashboard/jobs/:jobId/candidates`, which Jobs links to as "View
   // candidates". On the latter the job is the whole point of the URL, so it
@@ -666,9 +668,11 @@ export function CandidatesPage() {
       // drawer's downloads do.
       const status = axios.isAxiosError(err) ? err.response?.status : undefined;
       toast.error(
-        status === 400
-          ? "That export request was rejected. Try clearing the job filter."
-          : "Could not export the CSV.",
+        status === 403
+          ? "Your role can't export candidates."
+          : status === 400
+            ? "That export request was rejected. Try clearing the job filter."
+            : "Could not export the CSV.",
       );
     } finally {
       setExporting(false);
@@ -754,19 +758,21 @@ export function CandidatesPage() {
             />
             Refresh
           </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => void handleExport()}
-            disabled={exporting}
-          >
-            {exporting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Download className="h-4 w-4" strokeWidth={1.7} />
-            )}
-            Export CSV
-          </Button>
+          {canAct ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void handleExport()}
+              disabled={exporting}
+            >
+              {exporting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" strokeWidth={1.7} />
+              )}
+              Export CSV
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -856,7 +862,10 @@ export function CandidatesPage() {
           </Select>
         </div>
 
-        {selectedCount > 0 ? (
+        {/* Row selection exists ONLY to feed these two bulk actions, so a
+            role that can do neither never sees the checkboxes and this bar
+            can't be reached — the `canAct` guard is belt-and-braces. */}
+        {canAct && selectedCount > 0 ? (
               <div className="flex flex-col gap-2 border-b border-line bg-[var(--accent-softer)] px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-3 text-[13px]">
                   <span className="font-semibold text-ink">
@@ -939,11 +948,13 @@ export function CandidatesPage() {
               )}
             >
               <span className="flex items-center gap-2.5">
-                <Checkbox
-                  checked={headerChecked}
-                  onCheckedChange={(c) => toggleAll(Boolean(c))}
-                  aria-label="Select all on this page"
-                />
+                {canAct ? (
+                  <Checkbox
+                    checked={headerChecked}
+                    onCheckedChange={(c) => toggleAll(Boolean(c))}
+                    aria-label="Select all on this page"
+                  />
+                ) : null}
                 Candidate
               </span>
               <span>Role</span>
@@ -982,7 +993,9 @@ export function CandidatesPage() {
                   statusFilter !== ALL ||
                   jobFilter !== ALL
                     ? "Adjust your search or filters to see applicants."
-                    : "Open a job and upload CVs from its Candidates tab to add some."}
+                    : canAct
+                      ? "Open a job and upload CVs from its Candidates tab to add some."
+                      : "Candidates appear here once applications arrive or a recruiter uploads CVs."}
                 </p>
               </div>
             ) : (
@@ -992,6 +1005,7 @@ export function CandidatesPage() {
                     key={row._id}
                     row={row}
                     tz={tz}
+                    canAct={canAct}
                     selected={selectedIds.has(row._id)}
                     jobTitle={jobsById.get(row.jobId)?.title ?? null}
                     statuses={statuses}
@@ -1334,6 +1348,7 @@ function isReinvite(row: Pick<CandidateListItem, "latestInterviewId">): boolean 
 function CandidateRow({
   row,
   tz,
+  canAct,
   selected,
   jobTitle,
   statuses,
@@ -1349,6 +1364,8 @@ function CandidateRow({
 }: {
   row: CandidateListItem;
   tz: string;
+  /** May this role mutate the funnel? A view-only role gets read items only. */
+  canAct: boolean;
   selected: boolean;
   jobTitle: string | null;
   statuses: CandidateStatus[];
@@ -1363,15 +1380,20 @@ function CandidateRow({
   onDelete: () => void;
 }) {
   const status = row.currentStatusId;
-  // Always offered — the invite endpoint takes any funnel status; it only
-  // refuses on a closed job, a spent attempt cap, or an attempt that's already
-  // been started (a clear message then points to "Reattempt" in the drawer).
-  const canInvite = true;
+  // Offered at every funnel status — the invite endpoint takes any of them and
+  // only refuses on a closed job, a spent attempt cap, or an attempt that's
+  // already been started (a clear message then points to "Reattempt" in the
+  // drawer). The one hard gate is the role: the backend 403s a view-only send.
+  const canInvite = canAct;
   // First-time invite vs. re-sending an existing attempt's link — the same
   // endpoint either way, but the label should say which so the row reads
   // truthfully (an already-invited candidate showing "Send invite" misleads).
   const reinvite = isReinvite(row);
   const scoreState = aiScoreState(row.latestInterviewId);
+  // Every other kebab entry is a mutation, so for a view-only role the menu
+  // holds at most "Open CV" — and nothing at all on a row without one. An
+  // empty menu is worse than no trigger, hence the trigger goes too.
+  const hasRowActions = canAct || Boolean(row.cvKey);
 
   return (
     <div
@@ -1390,16 +1412,18 @@ function CandidateRow({
     >
       {/* Candidate — checkbox + avatar + name/email */}
       <div className="flex min-w-0 items-center gap-2.5">
-        <span
-          onClick={(e) => e.stopPropagation()}
-          className="flex items-center"
-        >
-          <Checkbox
-            checked={selected}
-            onCheckedChange={(c) => onToggle(Boolean(c))}
-            aria-label={`Select ${row.fullName || "candidate"}`}
-          />
-        </span>
+        {canAct ? (
+          <span
+            onClick={(e) => e.stopPropagation()}
+            className="flex items-center"
+          >
+            <Checkbox
+              checked={selected}
+              onCheckedChange={(c) => onToggle(Boolean(c))}
+              aria-label={`Select ${row.fullName || "candidate"}`}
+            />
+          </span>
+        ) : null}
         <span
           aria-hidden
           className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-accent text-[12px] font-bold text-primary"
@@ -1483,9 +1507,15 @@ function CandidateRow({
         <AiScoreCell state={scoreState} />
       </div>
 
-      {/* Date */}
-      <span className="text-[12.5px] text-ink-muted">
-        {formatDate(row.createdAt, tz)}
+      {/* Date — when the row LAST MOVED stage (`statusUpdatedAt`: shortlisted,
+          rejected, invited…), not when the candidate applied. `createdAt` is
+          the fallback for the moment a legacy row predating the field would
+          otherwise render the "-" placeholder. */}
+      <span
+        className="text-[12.5px] text-ink-muted"
+        title="Date of the latest status change"
+      >
+        {formatDate(row.statusUpdatedAt || row.createdAt, tz)}
       </span>
 
       {/* Actions, an explicit "View interview" button plus the kebab menu.
@@ -1505,97 +1535,66 @@ function CandidateRow({
           {resolvingInterview ? <Loader2 className="animate-spin" /> : <Eye />}
           View interview
         </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label="Row actions"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full text-ink-muted hover:bg-surface-3 hover:text-ink"
-            >
-              {statusPending || resolvingInterview ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <MoreVertical className="h-4 w-4" strokeWidth={1.7} />
-              )}
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-52">
-            {row.cvKey ? (
-              <DropdownMenuItem onSelect={onOpenCv}>
-                <FileText className="h-4 w-4" />
-                Open CV
-              </DropdownMenuItem>
-            ) : null}
-            {canInvite ? (
-              <DropdownMenuItem onSelect={onInvite}>
-                {reinvite ? (
-                  <RefreshCw className="h-4 w-4" />
+        {hasRowActions ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label="Row actions"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-ink-muted hover:bg-surface-3 hover:text-ink"
+              >
+                {statusPending || resolvingInterview ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <Send className="h-4 w-4" />
+                  <MoreVertical className="h-4 w-4" strokeWidth={1.7} />
                 )}
-                {reinvite ? "Resend invite" : "Send Interview invite"}
-              </DropdownMenuItem>
-            ) : null}
-            <DropdownMenuItem onSelect={onSendEmail}>
-              <Mail className="h-4 w-4" />
-              Send email
-            </DropdownMenuItem>
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>Change status</DropdownMenuSubTrigger>
-              {/* Capped + scrollable: a long custom pipeline must not tower
-                  past the parent menu — uncapped, Radix shifts it up to fit
-                  the viewport and it reads as a detached floating list. */}
-              <DropdownMenuSubContent className="max-h-72 w-52 overflow-y-auto">
-                <DropdownMenuLabel>Move to</DropdownMenuLabel>
-                {/* A manual move writes the status and nothing else — the
-                    backend sends no email on this path, so say it at the
-                    moment of the decision, not in a doc nobody reads. */}
-                <p className="px-2 pb-1.5 text-[11.5px] leading-snug text-ink-muted">
-                  A move never emails the candidate — use{" "}
-                  <span className="font-medium">Send email</span> to notify
-                  them.
-                </p>
-                {statuses.map((option) => {
-                  const isCurrent = option.key === status?.key;
-                  // Columns that aren't a human's to assert are disabled rather
-                  // than hidden: a missing option reads as a bug, a greyed one
-                  // with a reason teaches the rule. `title` carries the reason
-                  // — Radix keeps disabled items out of the tab order, so this
-                  // is the hover affordance that still fires.
-                  const blocked = manualMoveBlocker(option, row);
-                  return (
-                    <DropdownMenuItem
-                      key={option._id}
-                      disabled={isCurrent || blocked !== null}
-                      title={blocked ?? undefined}
-                      onSelect={() => onChangeStatus(option.key)}
-                    >
-                      <span
-                        className="h-2 w-2 shrink-0 rounded-full"
-                        style={{
-                          backgroundColor:
-                            option.color ?? "var(--ink-muted)",
-                        }}
-                      />
-                      <span className="min-w-0 truncate">{option.label}</span>
-                      {isCurrent ? (
-                        <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-ink-muted" />
-                      ) : null}
-                    </DropdownMenuItem>
-                  );
-                })}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="text-[var(--danger)] focus:bg-[var(--danger-soft)] focus:text-[var(--danger)]"
-              onSelect={onDelete}
-            >
-              <Trash2 className="h-4 w-4" />
-              Delete candidate
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              {row.cvKey ? (
+                <DropdownMenuItem onSelect={onOpenCv}>
+                  <FileText className="h-4 w-4" />
+                  Open CV
+                </DropdownMenuItem>
+              ) : null}
+              {canInvite ? (
+                <DropdownMenuItem onSelect={onInvite}>
+                  {reinvite ? (
+                    <RefreshCw className="h-4 w-4" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                  {reinvite ? "Resend invite" : "Send Interview invite"}
+                </DropdownMenuItem>
+              ) : null}
+              {canAct ? (
+                <>
+                  <DropdownMenuItem onSelect={onSendEmail}>
+                    <Mail className="h-4 w-4" />
+                    Send email
+                  </DropdownMenuItem>
+                  {/* Capped, scrollable, and identical to the drawer's copy — see
+                      `ChangeStatusSubMenu` for why the list has to defend itself
+                      against a pipeline of any length. */}
+                  <ChangeStatusSubMenu
+                    statuses={statuses}
+                    currentKey={status?.key}
+                    candidate={row}
+                    onSelect={onChangeStatus}
+                  />
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="text-[var(--danger)] focus:bg-[var(--danger-soft)] focus:text-[var(--danger)]"
+                    onSelect={onDelete}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Delete candidate
+                  </DropdownMenuItem>
+                </>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
       </div>
     </div>
   );
