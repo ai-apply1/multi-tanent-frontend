@@ -47,6 +47,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SortHeader, SortScopeNote } from "@/components/ui/sort-header";
 import { InterviewDetailDrawer } from "@/components/interviews/InterviewDetailDrawer";
 import { BulkEmailDialog } from "@/features/candidates/components/BulkEmailDialog";
 import { ChangeStatusSubMenu } from "@/features/candidates/components/ChangeStatusSubMenu";
@@ -73,6 +74,13 @@ import { useOrgTimezone } from "@/features/organization/useOrgTimezone";
 import { jobDetail } from "@/routes";
 import { formatDate } from "@/lib/date";
 import { errorMessage } from "@/lib/errors";
+import {
+  dateSortValue,
+  sortRows,
+  type SortDir,
+  type SortState,
+  type SortValue,
+} from "@/lib/sort";
 import { cn } from "@/lib/utils";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { ClearFiltersButton } from "@/components/common/ClearFiltersButton";
@@ -94,6 +102,45 @@ const DEFAULT_PAGE_SIZE = 25;
  * fraction of the shared container width, so they line up across all rows.
  */
 const ROW_GRID = "grid-cols-[1.7fr_1.3fr_1.1fr_1.1fr_0.8fr_200px]";
+
+/** Every visible column here has a meaningful order, so every one of them sorts. */
+type CandidateSortField = "name" | "job" | "status" | "score" | "date";
+
+/** Which way each column opens — see `SortHeader.firstDir`. */
+const CANDIDATE_SORT_FIRST_DIR: Record<CandidateSortField, SortDir> = {
+  name: "asc",
+  job: "asc",
+  status: "asc",
+  score: "desc",
+  date: "desc",
+};
+
+const CANDIDATE_SORT_FIELDS = Object.keys(
+  CANDIDATE_SORT_FIRST_DIR,
+) as CandidateSortField[];
+
+/**
+ * Read a sort back out of the URL, or `null` for the API's own order.
+ *
+ * Validated against the field list rather than trusted, because this value is
+ * whatever is in the address bar: a hand-typed or stale `?sort=` must land on
+ * "unsorted", not feed an unknown key into the comparator where every row would
+ * compare blank and the table would silently stop reflecting its own header.
+ */
+function readSortParam(
+  params: URLSearchParams,
+): SortState<CandidateSortField> | null {
+  const by = params.get("sort");
+  if (!by || !CANDIDATE_SORT_FIELDS.includes(by as CandidateSortField)) {
+    return null;
+  }
+  const field = by as CandidateSortField;
+  const dir = params.get("dir");
+  return {
+    by: field,
+    dir: dir === "asc" || dir === "desc" ? dir : CANDIDATE_SORT_FIRST_DIR[field],
+  };
+}
 
 /**
  * Stage badge tint. The org owns the hue (custom columns included), so the
@@ -223,6 +270,13 @@ export function CandidatesPage() {
     () => searchParams.get("status") ?? ALL,
   );
   const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
+  // Column sort. URL-backed like the filters above, so a refresh or a shared
+  // link restores the view someone was actually looking at. It is NOT part of
+  // `listParams` — sorting runs over the rows already fetched, so it must not
+  // spawn a request, and it must not move the reviewer off their page.
+  const [sort, setSort] = useState<SortState<CandidateSortField> | null>(() =>
+    readSortParam(searchParams),
+  );
 
   // Leaving the job scope by NAVIGATION. React Router keeps this page mounted
   // when the sidebar's "Candidates" (or a browser Back) lands on the plain
@@ -319,6 +373,10 @@ export function CandidatesPage() {
         put("status", statusFilter, statusFilter === ALL);
         put("page", String(page), page === 1);
         put("size", String(pageSize), pageSize === DEFAULT_PAGE_SIZE);
+        // Both keys or neither — a lone `?dir=asc` is meaningless, and
+        // `readSortParam` would drop it anyway.
+        put("sort", sort?.by ?? "", !sort);
+        put("dir", sort?.dir ?? "", !sort);
         // On the job-scoped route the path owns the job; only the org-wide
         // route carries it as a query param.
         if (routeJobId) next.delete("job");
@@ -339,6 +397,7 @@ export function CandidatesPage() {
     statusFilter,
     page,
     pageSize,
+    sort,
     jobFilter,
     routeJobId,
     cameFromJob,
@@ -430,7 +489,45 @@ export function CandidatesPage() {
     staleTime: 0,
   });
 
-  const rows = useMemo(() => data?.data ?? [], [data]);
+  /**
+   * The page's rows in the order the table renders them.
+   *
+   * The value function lives here rather than at module scope because two of
+   * the columns aren't on the candidate at all: Role is a client-side join
+   * against the loaded job options, and AI score comes from the same
+   * `aiScoreState` the cell renders — reading it any other way would let the
+   * order disagree with the number printed next to it.
+   */
+  const rows = useMemo(
+    () =>
+      sortRows(
+        data?.data ?? [],
+        sort,
+        (row, field): SortValue => {
+          switch (field) {
+            case "name":
+              return row.fullName;
+            case "job":
+              // `null` when the job isn't in the options page (capped at 100),
+              // which sinks those rows rather than grouping them under "".
+              return jobsById.get(row.jobId)?.title ?? null;
+            case "status":
+              // Pipeline position, not the label's spelling: ascending walks
+              // the funnel Applied → … → Hired, which is what the column means.
+              return row.currentStatusId?.stageOrder ?? null;
+            case "score": {
+              // Only a real number sorts; "Scoring…", "Failed", "Awaiting" and
+              // "no interview" are all absent, not zero, and sink to the bottom.
+              const state = aiScoreState(row.latestInterviewId);
+              return state.kind === "scored" ? state.value : null;
+            }
+            case "date":
+              return dateSortValue(row.createdAt);
+          }
+        },
+      ),
+    [data?.data, sort, jobsById],
+  );
   /** Rows this page is knowingly showing a soon-to-be-stale status for. */
   const processingCount = useMemo(
     () => rows.filter(isProcessing).length,
@@ -939,12 +1036,45 @@ export function CandidatesPage() {
                   onCheckedChange={(c) => toggleAll(Boolean(c))}
                   aria-label="Select all on this page"
                 />
-                Candidate
+                <SortHeader
+                  label="Candidate"
+                  field="name"
+                  firstDir={CANDIDATE_SORT_FIRST_DIR.name}
+                  sort={sort}
+                  onSortChange={setSort}
+                />
               </span>
-              <span>Role</span>
-              <span>Status</span>
-              <span className="text-center">AI score</span>
-              <span>Date</span>
+              <SortHeader
+                label="Role"
+                field="job"
+                firstDir={CANDIDATE_SORT_FIRST_DIR.job}
+                sort={sort}
+                onSortChange={setSort}
+              />
+              <SortHeader
+                label="Status"
+                field="status"
+                firstDir={CANDIDATE_SORT_FIRST_DIR.status}
+                sort={sort}
+                onSortChange={setSort}
+              />
+              {/* Opens highest-first: "who scored best" is the reason anyone
+                  sorts this column, and it should cost one click. */}
+              <SortHeader
+                label="AI score"
+                field="score"
+                firstDir={CANDIDATE_SORT_FIRST_DIR.score}
+                sort={sort}
+                onSortChange={setSort}
+                align="center"
+              />
+              <SortHeader
+                label="Date"
+                field="date"
+                firstDir={CANDIDATE_SORT_FIRST_DIR.date}
+                sort={sort}
+                onSortChange={setSort}
+              />
               <span />
             </div>
 
@@ -1051,6 +1181,11 @@ export function CandidatesPage() {
                   <span className="mono">
                     Page {page} of {Math.max(totalPages, 1)}
                   </span>
+                  {/* Sorting is client-side, so on a multi-page result it
+                      orders THESE rows, not the whole funnel. Said out loud
+                      because "AI score, highest first" showing the best of this
+                      page reads exactly like the best overall. */}
+                  {sort && totalPages > 1 ? <SortScopeNote /> : null}
                   {/* Rows stay put via keepPreviousData, so without this a page
                       change would feel like nothing happened. */}
                   {isFetching ? (

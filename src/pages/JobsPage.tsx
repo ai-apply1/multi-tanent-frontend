@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   keepPreviousData,
@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SortHeader, SortScopeNote } from "@/components/ui/sort-header";
 import { deleteJob, listJobs, setJobStatus } from "@/features/jobs/jobsApi";
 import {
   EMPLOYMENT_TYPE_LABELS,
@@ -50,6 +51,13 @@ import { useOrgTimezone } from "@/features/organization/useOrgTimezone";
 import { ROUTES, jobDetail, jobEdit } from "@/routes";
 import { formatDate } from "@/lib/date";
 import { errorMessage } from "@/lib/errors";
+import {
+  dateSortValue,
+  rankSortValue,
+  sortRows,
+  type SortState,
+  type SortValue,
+} from "@/lib/sort";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { ClearFiltersButton } from "@/components/common/ClearFiltersButton";
 
@@ -65,6 +73,45 @@ const JOB_STATUSES: JobStatus[] = ["draft", "open", "closed", "archived"];
  * rows can never drift out of alignment. */
 const COLS = "grid-cols-[2.2fr_0.8fr_1.2fr_0.7fr_0.7fr_0.7fr_0.9fr_40px]";
 
+/**
+ * The columns worth ordering by. "Classification" is absent on purpose: the
+ * cell is up to three independent chips (employment type, work mode,
+ * seniority), so there is no single value to compare — any ordering it appeared
+ * to have would be one of the three winning silently.
+ */
+type JobSortField =
+  | "title"
+  | "status"
+  | "applicants"
+  | "questions"
+  | "threshold"
+  | "created";
+
+/**
+ * A job's value for one sort column.
+ *
+ * Status sorts by LIFECYCLE position, not alphabetically — `JOB_STATUSES` is
+ * already in that order (draft → open → closed → archived), and it's the order
+ * the product means. A–Z would put "archived" first and interleave the rest by
+ * accident of spelling.
+ */
+function jobSortValue(job: JobListItem, field: JobSortField): SortValue {
+  switch (field) {
+    case "title":
+      return job.title;
+    case "status":
+      return rankSortValue(job.status, JOB_STATUSES);
+    case "applicants":
+      return job.applicantCount;
+    case "questions":
+      return job.questionCount;
+    case "threshold":
+      return job.rejectionThreshold;
+    case "created":
+      return dateSortValue(job.createdAt);
+  }
+}
+
 export function JobsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -74,6 +121,10 @@ export function JobsPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<JobStatus | "">("");
   const [deleteTarget, setDeleteTarget] = useState<JobListItem | null>(null);
+  // `null` = the order the API returned (newest first). Kept out of the query
+  // key on purpose: sorting happens over the rows already in hand, so changing
+  // it must not refetch, and it must not move you off the page you're reading.
+  const [sort, setSort] = useState<SortState<JobSortField> | null>(null);
   const debouncedSearch = useDebouncedValue(search);
 
   const { data, isLoading, isFetching, isError, refetch } = useQuery({
@@ -129,7 +180,10 @@ export function JobsPage() {
     },
   });
 
-  const rows = data?.data ?? [];
+  const rows = useMemo(
+    () => sortRows(data?.data ?? [], sort, jobSortValue),
+    [data?.data, sort],
+  );
   const total = data?.count ?? 0;
   const totalPages = data?.totalPage ?? 0;
   const showingFrom = total === 0 ? 0 : (page - 1) * pageSize + 1;
@@ -232,13 +286,54 @@ export function JobsPage() {
           <div
             className={`grid ${COLS} items-center gap-3 border-b border-line bg-surface-3 px-5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-muted`}
           >
-            <span>Title</span>
-            <span>Status</span>
+            <SortHeader
+              label="Title"
+              field="title"
+              sort={sort}
+              onSortChange={setSort}
+            />
+            <SortHeader
+              label="Status"
+              field="status"
+              sort={sort}
+              onSortChange={setSort}
+            />
+            {/* Not sortable — see `JobSortField`. */}
             <span>Classification</span>
-            <span className="text-center">Applicants</span>
-            <span className="text-center">Questions</span>
-            <span className="text-center">Threshold</span>
-            <span>Created</span>
+            {/* The three numeric columns lead with their high end: "which job
+                is drawing the most applicants" is the question people open this
+                table with, and it should be one click, not two. */}
+            <SortHeader
+              label="Applicants"
+              field="applicants"
+              firstDir="desc"
+              sort={sort}
+              onSortChange={setSort}
+              align="center"
+            />
+            <SortHeader
+              label="Questions"
+              field="questions"
+              firstDir="desc"
+              sort={sort}
+              onSortChange={setSort}
+              align="center"
+            />
+            <SortHeader
+              label="Threshold"
+              field="threshold"
+              firstDir="desc"
+              sort={sort}
+              onSortChange={setSort}
+              align="center"
+            />
+            <SortHeader
+              label="Created"
+              field="created"
+              firstDir="desc"
+              sort={sort}
+              onSortChange={setSort}
+            />
             <span />
           </div>
 
@@ -425,6 +520,9 @@ export function JobsPage() {
               <span>
                 Page {page} of {Math.max(totalPages, 1)}
               </span>
+              {/* Only when it can mislead: a sort over one page of many orders
+                  those rows, not the whole job board. */}
+              {sort && totalPages > 1 ? <SortScopeNote /> : null}
               {isFetching ? (
                 <span className="inline-flex items-center gap-1">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />

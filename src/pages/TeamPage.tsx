@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SortHeader, SortScopeNote } from "@/components/ui/sort-header";
 import { UserFormDialog } from "@/features/users/components/UserFormDialog";
 import { ResetPasswordDialog } from "@/features/users/components/ResetPasswordDialog";
 import { deleteUser, listUsers, updateUser } from "@/features/users/usersApi";
@@ -46,6 +47,13 @@ import { useOrgTimezone } from "@/features/organization/useOrgTimezone";
 import type { UserRole } from "@/features/auth/types";
 import { formatDateTime } from "@/lib/date";
 import { errorMessage as apiError } from "@/lib/errors";
+import {
+  dateSortValue,
+  rankSortValue,
+  sortRows,
+  type SortState,
+  type SortValue,
+} from "@/lib/sort";
 import { titleCase } from "@/lib/text";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { ClearFiltersButton } from "@/components/common/ClearFiltersButton";
@@ -57,6 +65,44 @@ const DEFAULT_PAGE_SIZE = 20;
 const ALL = "all";
 
 const COLS = "grid-cols-[1.5fr_1fr_1.5fr_0.9fr_0.9fr_1.3fr_40px]";
+
+/**
+ * Roles in privilege order, so sorting the Role column groups the admins at one
+ * end rather than ordering them by how "hr" and "org_admin" happen to spell.
+ */
+const ROLE_ORDER: UserRole[] = ["org_admin", "hr"];
+
+/** Every column here carries a real order, so every one of them sorts. */
+type TeamSortField =
+  | "name"
+  | "userName"
+  | "email"
+  | "role"
+  | "status"
+  | "lastLogin";
+
+function userSortValue(user: OrgUser, field: TeamSortField): SortValue {
+  switch (field) {
+    case "name":
+      // The stored value, which the cell re-cases for display — the comparator
+      // is case-insensitive, so the two agree about the order regardless.
+      return user.fullName;
+    case "userName":
+      return user.userName;
+    case "email":
+      return user.email;
+    case "role":
+      return rankSortValue(user.role, ROLE_ORDER);
+    case "status":
+      // Booleans compare as 0/1, so descending is active-first.
+      return user.isActive;
+    case "lastLogin":
+      // `null` for a member who has never signed in. Those sink to the bottom
+      // in BOTH directions (see `sortRows`), which is the honest placement:
+      // "never" is not the oldest login, it is the absence of one.
+      return dateSortValue(user.lastLoginAt);
+  }
+}
 
 export function TeamPage() {
   const queryClient = useQueryClient();
@@ -71,6 +117,9 @@ export function TeamPage() {
   const [activationTarget, setActivationTarget] = useState<OrgUser | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<OrgUser | null>(null);
   const [resetTarget, setResetTarget] = useState<OrgUser | null>(null);
+  // `null` = the order the API returned (newest first). Client-side, so it
+  // never refetches and never moves you off the page you're on.
+  const [sort, setSort] = useState<SortState<TeamSortField> | null>(null);
 
   const isOrgAdmin = user?.role === "org_admin";
   const debouncedSearch = useDebouncedValue(search);
@@ -182,7 +231,11 @@ export function TeamPage() {
     setPage(1);
   };
 
-  const rows = data?.data ?? [];
+  // Not memoised, unlike the other two tables: the `hr` early-return above sits
+  // between this and the hooks, so a `useMemo` here would be a conditional hook.
+  // Nothing keys off this array's identity and a team list is one page of seats,
+  // so re-sorting per render costs nothing worth a refactor to buy back.
+  const rows = sortRows(data?.data ?? [], sort, userSortValue);
   const total = data?.count ?? 0;
   const totalPages = data?.totalPage ?? 0;
   const showingFrom = total === 0 ? 0 : (page - 1) * pageSize + 1;
@@ -299,12 +352,45 @@ export function TeamPage() {
           <div
             className={`grid ${COLS} items-center gap-3 border-b border-line bg-surface-3 px-5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-muted`}
           >
-            <span>Name</span>
-            <span>Username</span>
-            <span>Email</span>
-            <span>Role</span>
-            <span>Status</span>
-            <span>Last login</span>
+            <SortHeader
+              label="Name"
+              field="name"
+              sort={sort}
+              onSortChange={setSort}
+            />
+            <SortHeader
+              label="Username"
+              field="userName"
+              sort={sort}
+              onSortChange={setSort}
+            />
+            <SortHeader
+              label="Email"
+              field="email"
+              sort={sort}
+              onSortChange={setSort}
+            />
+            <SortHeader
+              label="Role"
+              field="role"
+              sort={sort}
+              onSortChange={setSort}
+            />
+            {/* Descending first, so one click answers "who still has a seat?" */}
+            <SortHeader
+              label="Status"
+              field="status"
+              firstDir="desc"
+              sort={sort}
+              onSortChange={setSort}
+            />
+            <SortHeader
+              label="Last login"
+              field="lastLogin"
+              firstDir="desc"
+              sort={sort}
+              onSortChange={setSort}
+            />
             <span />
           </div>
 
@@ -471,6 +557,8 @@ export function TeamPage() {
               <span>
                 Page {page} of {Math.max(totalPages, 1)}
               </span>
+              {/* Only when it can mislead — see `SortScopeNote`. */}
+              {sort && totalPages > 1 ? <SortScopeNote /> : null}
               {isFetching ? (
                 <span className="inline-flex items-center gap-1">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
