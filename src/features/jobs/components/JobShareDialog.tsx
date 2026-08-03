@@ -17,6 +17,8 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { CopyButton } from "@/components/common/CopyButton"
+import { useAuth } from "@/features/auth/AuthContext"
+import { canManageFunnel } from "@/features/auth/roles"
 import { getJobShareLink, sendJobInvites } from "@/features/jobs/jobsApi"
 import { errorMessage as apiError } from "@/lib/errors"
 import { cn } from "@/lib/utils"
@@ -46,6 +48,12 @@ interface JobShareDialogProps {
  * Mirrors the jobjen design; QR-code affordance omitted for now.
  */
 export function JobShareDialog({ jobId, open, onOpenChange }: JobShareDialogProps) {
+  const { user } = useAuth()
+  // Sending invites is a funnel mutation the backend 403s for interviewers, so
+  // the whole email composer goes; the share link stays, since reading and
+  // copying it are reads.
+  const canInvite = canManageFunnel(user?.role)
+
   const linkQuery = useQuery({
     queryKey: ["jobShareLink", jobId],
     queryFn: () => getJobShareLink(jobId),
@@ -183,86 +191,95 @@ export function JobShareDialog({ jobId, open, onOpenChange }: JobShareDialogProp
           </div>
         ) : null}
 
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div
+          className={cn(
+            "grid grid-cols-1 gap-4",
+            // One card left alone shouldn't sit in a half-width column.
+            canInvite && "lg:grid-cols-2",
+          )}
+        >
           {/* Invite by email */}
-          <section className="flex flex-col rounded-xl border border-line bg-surface p-4">
-            <header className="mb-3 flex items-center gap-2">
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-primary">
-                <Mail className="h-4 w-4" strokeWidth={1.8} />
-              </span>
-              <div className="min-w-0">
-                <h3 className="text-[13.5px] font-semibold text-ink">
-                  Invite by email
-                </h3>
-                <p className="text-[12px] text-ink-muted">
-                  Send the apply link straight to their inbox.
-                </p>
-              </div>
-            </header>
-
-            <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-[var(--field-border)] bg-surface px-2 py-1.5 focus-within:border-primary">
-              {emails.map((email) => (
-                <span
-                  key={email}
-                  className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-accent py-1 pl-3 pr-1.5 text-[12.5px] font-semibold text-primary"
-                >
-                  <span className="truncate" title={email}>{email}</span>
-                  <button
-                    type="button"
-                    aria-label={`Remove ${email}`}
-                    onClick={() =>
-                      setEmails((prev) => prev.filter((v) => v !== email))
-                    }
-                    className="inline-flex h-4 w-4 items-center justify-center rounded-full text-primary hover:bg-primary/10"
-                  >
-                    <X className="h-3 w-3" strokeWidth={2} />
-                  </button>
+          {canInvite ? (
+            <section className="flex flex-col rounded-xl border border-line bg-surface p-4">
+              <header className="mb-3 flex items-center gap-2">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-primary">
+                  <Mail className="h-4 w-4" strokeWidth={1.8} />
                 </span>
-              ))}
-              <input
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={handleKeyDown}
-                onBlur={commitDraft}
-                placeholder={
-                  emails.length === 0 ? "Type an email and press Enter" : ""
-                }
-                className="min-w-[140px] flex-1 border-0 bg-transparent text-[13.5px] text-ink outline-0 placeholder:text-ink-subtle"
-              />
-            </div>
-            <p className="mt-1.5 text-[11.5px] text-ink-muted">
-              Up to {MAX_EMAILS} per send. Enter, comma, or space separates them.
-            </p>
+                <div className="min-w-0">
+                  <h3 className="text-[13.5px] font-semibold text-ink">
+                    Invite by email
+                  </h3>
+                  <p className="text-[12px] text-ink-muted">
+                    Send the apply link straight to their inbox.
+                  </p>
+                </div>
+              </header>
 
-            <Button
-              type="button"
-              size="sm"
-              className="mt-3 w-full"
-              onClick={handleSend}
-              disabled={
-                // `linkQuery.isLoading` covers the window where `status` hasn't
-                // arrived yet: `isNonOpen` is still false then, which would
-                // briefly enable sending invites for an archived/closed job.
-                sendMutation.isPending ||
-                emails.length === 0 ||
-                isNonOpen ||
-                linkQuery.isLoading
-              }
-            >
-              {sendMutation.isPending ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Sending…
-                </>
-              ) : (
-                <>
-                  <Send className="h-4 w-4" strokeWidth={1.9} />
-                  Send {emails.length > 0 ? `${emails.length} ` : ""}
-                  invite{emails.length === 1 ? "" : "s"}
-                </>
-              )}
-            </Button>
-          </section>
+              <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-[var(--field-border)] bg-surface px-2 py-1.5 focus-within:border-primary">
+                {emails.map((email) => (
+                  <span
+                    key={email}
+                    className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-accent py-1 pl-3 pr-1.5 text-[12.5px] font-semibold text-primary"
+                  >
+                    <span className="truncate" title={email}>{email}</span>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${email}`}
+                      onClick={() =>
+                        setEmails((prev) => prev.filter((v) => v !== email))
+                      }
+                      className="inline-flex h-4 w-4 items-center justify-center rounded-full text-primary hover:bg-primary/10"
+                    >
+                      <X className="h-3 w-3" strokeWidth={2} />
+                    </button>
+                  </span>
+                ))}
+                <input
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  onBlur={commitDraft}
+                  placeholder={
+                    emails.length === 0 ? "Type an email and press Enter" : ""
+                  }
+                  className="min-w-[140px] flex-1 border-0 bg-transparent text-[13.5px] text-ink outline-0 placeholder:text-ink-subtle"
+                />
+              </div>
+              <p className="mt-1.5 text-[11.5px] text-ink-muted">
+                Up to {MAX_EMAILS} per send. Enter, comma, or space separates
+                them.
+              </p>
+
+              <Button
+                type="button"
+                size="sm"
+                className="mt-3 w-full"
+                onClick={handleSend}
+                disabled={
+                  // `linkQuery.isLoading` covers the window where `status` hasn't
+                  // arrived yet: `isNonOpen` is still false then, which would
+                  // briefly enable sending invites for an archived/closed job.
+                  sendMutation.isPending ||
+                  emails.length === 0 ||
+                  isNonOpen ||
+                  linkQuery.isLoading
+                }
+              >
+                {sendMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Sending…
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-4 w-4" strokeWidth={1.9} />
+                    Send {emails.length > 0 ? `${emails.length} ` : ""}
+                    invite{emails.length === 1 ? "" : "s"}
+                  </>
+                )}
+              </Button>
+            </section>
+          ) : null}
 
           {/* Share link */}
           <section className="flex flex-col rounded-xl border border-line bg-surface p-4">

@@ -1,4 +1,4 @@
-import { Mail } from "lucide-react"
+import { Mail, ShieldCheck } from "lucide-react"
 import { useAuth } from "@/features/auth/AuthContext"
 import { EmailTemplatesCard } from "@/features/organization/components/EmailTemplatesCard"
 
@@ -13,6 +13,11 @@ import { EmailTemplatesCard } from "@/features/organization/components/EmailTemp
 export function EmailTemplatesPage() {
   const { user } = useAuth()
   const canWrite = user?.role === "org_admin"
+  // `EmailTemplatesCard` fetches the template list on mount with no `enabled`
+  // gate, and the backend 403s that list for anyone below hr — so the card has
+  // to stay unmounted rather than render an error, the way TeamPage bails
+  // before its own query for a non-admin.
+  const canRead = user?.role === "org_admin" || user?.role === "hr"
 
   return (
     <div className="mx-auto max-w-[1240px] px-6 py-6 lg:px-8 lg:py-8">
@@ -32,9 +37,26 @@ export function EmailTemplatesPage() {
         </p>
       </div>
 
-      <div className="rounded-2xl border border-line bg-surface p-5 sm:p-6">
-        <EmailTemplatesCard canWrite={canWrite} />
-      </div>
+      {canRead ? (
+        <div className="rounded-2xl border border-line bg-surface p-5 sm:p-6">
+          <EmailTemplatesCard canWrite={canWrite} />
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-line bg-surface">
+          <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
+            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-primary">
+              <ShieldCheck className="h-6 w-6" strokeWidth={1.7} />
+            </span>
+            <h3 className="text-[16px] font-semibold text-ink">
+              Not available for your role
+            </h3>
+            <p className="max-w-[340px] text-[13.5px] text-ink-muted">
+              Your role doesn&apos;t include email templates. Ask an org admin
+              or a recruiter in your organization to review or change them.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
