@@ -1483,9 +1483,15 @@ function CandidateRow({
         <AiScoreCell state={scoreState} />
       </div>
 
-      {/* Date */}
-      <span className="text-[12.5px] text-ink-muted">
-        {formatDate(row.createdAt, tz)}
+      {/* Date — when the row LAST MOVED stage (`statusUpdatedAt`: shortlisted,
+          rejected, invited…), not when the candidate applied. `createdAt` is
+          the fallback for the moment a legacy row predating the field would
+          otherwise render the "-" placeholder. */}
+      <span
+        className="text-[12.5px] text-ink-muted"
+        title="Date of the latest status change"
+      >
+        {formatDate(row.statusUpdatedAt || row.createdAt, tz)}
       </span>
 
       {/* Actions, an explicit "View interview" button plus the kebab menu.
