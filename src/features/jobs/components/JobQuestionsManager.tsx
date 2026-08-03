@@ -96,6 +96,11 @@ const DIFFICULTY_CHIP: Record<string, string> = {
 
 interface JobQuestionsManagerProps {
   job: Job
+  /**
+   * View-only mode (the `interviewer` role): the interview script is shown but
+   * every editing affordance — add, remove, reorder, reweight, save — is gone.
+   */
+  readOnly?: boolean
 }
 
 /**
@@ -108,7 +113,10 @@ interface JobQuestionsManagerProps {
  * "typing 40 into one box" is a state the server must reject. Nothing is
  * sent until the numbers add up and you press Save.
  */
-export function JobQuestionsManager({ job }: JobQuestionsManagerProps) {
+export function JobQuestionsManager({
+  job,
+  readOnly = false,
+}: JobQuestionsManagerProps) {
   const queryClient = useQueryClient()
   const [addOpen, setAddOpen] = useState(false)
   const [draft, setDraft] = useState<JobQuestionView[]>(job.questions)
@@ -235,6 +243,7 @@ export function JobQuestionsManager({ job }: JobQuestionsManagerProps) {
           <Star className="h-[18px] w-[18px] text-primary" strokeWidth={1.7} />
           <h2 className="text-[15px] font-semibold text-ink">Interview questions</h2>
         </div>
+        {!readOnly ? (
         <div className="flex items-center gap-2">
           {/* Distribute evenly — always available when there's more than one
               question. Fires the same draft update path as a manual edit, so
@@ -287,15 +296,20 @@ export function JobQuestionsManager({ job }: JobQuestionsManagerProps) {
             Add questions
           </Button>
         </div>
+        ) : null}
       </div>
 
       <p className="mt-1 mb-3.5 text-[13px] text-ink-muted">
         {draft.length > 0
-          ? `${draft.length} question${draft.length === 1 ? "" : "s"}, asked in this order. Edit each weight (%) — the total should reach 100%.`
+          ? `${draft.length} question${draft.length === 1 ? "" : "s"}, asked in this order.${
+              readOnly
+                ? " Each carries the share of the score shown."
+                : " Edit each weight (%) — the total should reach 100%."
+            }`
           : "No questions yet."}
       </p>
 
-      {orphaned.length > 0 ? (
+      {!readOnly && orphaned.length > 0 ? (
         <div className="mb-3 flex items-start gap-2 rounded-lg border border-[var(--danger)]/40 bg-[var(--danger-soft)] p-3 text-[12.5px] leading-relaxed text-[var(--danger)]">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.7} />
           <span>
@@ -310,35 +324,49 @@ export function JobQuestionsManager({ job }: JobQuestionsManagerProps) {
 
       {draft.length === 0 ? (
         <div className="rounded-xl border border-dashed border-line-2 py-8 text-center text-[13px] text-ink-muted">
-          This job has no questions yet. Add some from your bank.
+          {readOnly
+            ? "This job has no questions yet."
+            : "This job has no questions yet. Add some from your bank."}
         </div>
       ) : (
         <>
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={handleDragEnd}
-          >
-            <SortableContext
-              items={draft.map((q) => q.questionId)}
-              strategy={verticalListSortingStrategy}
+          {readOnly ? (
+            <div className="grid gap-2">
+              {draft.map((question, index) => (
+                <ReadOnlyQuestionRow
+                  key={question.questionId}
+                  question={question}
+                  index={index}
+                />
+              ))}
+            </div>
+          ) : (
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
             >
-              <div className="grid gap-2">
-                {draft.map((question, index) => (
-                  <SortableQuestionRow
-                    key={question.questionId}
-                    question={question}
-                    index={index}
-                    disabled={mutation.isPending}
-                    onRemove={() => handleRemove(question.questionId)}
-                    onWeight={(weightPct) =>
-                      handleWeight(question.questionId, weightPct)
-                    }
-                  />
-                ))}
-              </div>
-            </SortableContext>
-          </DndContext>
+              <SortableContext
+                items={draft.map((q) => q.questionId)}
+                strategy={verticalListSortingStrategy}
+              >
+                <div className="grid gap-2">
+                  {draft.map((question, index) => (
+                    <SortableQuestionRow
+                      key={question.questionId}
+                      question={question}
+                      index={index}
+                      disabled={mutation.isPending}
+                      onRemove={() => handleRemove(question.questionId)}
+                      onWeight={(weightPct) =>
+                        handleWeight(question.questionId, weightPct)
+                      }
+                    />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
+          )}
 
           <div className="mt-0.5 flex items-center justify-between border-t border-line px-3.5 py-3">
             <span className="text-[12.5px] font-semibold text-ink-muted">
@@ -567,6 +595,76 @@ function QuestionRow({
       >
         ✕
       </button>
+    </div>
+  )
+}
+
+/**
+ * Static, non-interactive row for the view-only (interviewer) question list:
+ * the same layout as `QuestionRow` minus the drag handle, weight input and
+ * remove button — order, wording, difficulty/tags and the weight are shown,
+ * nothing can be changed.
+ */
+function ReadOnlyQuestionRow({
+  question,
+  index,
+}: {
+  question: JobQuestionView
+  index: number
+}) {
+  const diffClass = question.difficultyLevel
+    ? DIFFICULTY_CHIP[question.difficultyLevel]
+    : ""
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-line bg-surface px-3.5 py-3">
+      <span className="flex h-[22px] w-[22px] flex-shrink-0 items-center justify-center rounded-full bg-surface-3 text-[11px] font-bold text-ink-2">
+        {index + 1}
+      </span>
+
+      <div className="min-w-0 flex-1">
+        <div className="text-[13.5px] font-medium text-ink">
+          {question.text ?? "(removed from the bank)"}
+        </div>
+        {(question.difficultyLevel ||
+          question.tags.length > 0 ||
+          question.text === null) && (
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {question.difficultyLevel ? (
+              <span
+                className={cn(
+                  "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize",
+                  diffClass,
+                )}
+              >
+                {question.difficultyLevel}
+              </span>
+            ) : null}
+            {question.tags.map((tag) => (
+              <span
+                key={tag}
+                className="inline-flex items-center rounded-full bg-surface-3 px-2 py-0.5 text-[11px] font-semibold text-ink-2"
+              >
+                {tag}
+              </span>
+            ))}
+            {question.text === null ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-[var(--danger-soft)] px-2 py-0.5 text-[11px] font-semibold text-[var(--danger)]">
+                <AlertTriangle className="h-3 w-3" strokeWidth={1.9} />
+                Removed from the bank
+              </span>
+            ) : null}
+          </div>
+        )}
+      </div>
+
+      <div className="flex flex-col items-end gap-0.5">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-subtle">
+          Weight
+        </span>
+        <span className="mono text-[13px] font-bold text-primary">
+          {question.weightPct}%
+        </span>
+      </div>
     </div>
   )
 }

@@ -28,6 +28,7 @@ import {
 import { JobQuestionsManager } from "@/features/jobs/components/JobQuestionsManager";
 import { JobShareDialog } from "@/features/jobs/components/JobShareDialog";
 import { JobSwitcher } from "@/features/jobs/components/JobSwitcher";
+import { JobLinkedInControls } from "@/features/jobs/components/JobLinkedInControls";
 import { getJob, setJobStatus } from "@/features/jobs/jobsApi";
 import {
   EMPLOYMENT_TYPE_LABELS,
@@ -39,6 +40,7 @@ import {
   type JobStatus,
 } from "@/features/jobs/types";
 import { useOrganization } from "@/features/organization/useOrganization";
+import { useAuth } from "@/features/auth/AuthContext";
 import { UploadCvsDialog } from "@/features/candidates/components/UploadCvsDialog";
 import {
   getCandidateKanban,
@@ -76,6 +78,11 @@ export function JobDetailPage() {
   const { jobId } = useParams<{ jobId: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  // `interviewer` is a view-only role: it can read this page but not edit the
+  // job, move its status, re-run the threshold, upload CVs or post to LinkedIn.
+  // Every mutating control is withheld (the backend 403s them too).
+  const { user } = useAuth();
+  const isInterviewer = user?.role === "interviewer";
   const [tab, setTab] = useState<TabId>("overview");
   const [uploadOpen, setUploadOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -275,20 +282,22 @@ export function JobDetailPage() {
           ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => setReprocessOpen(true)}
-            disabled={reprocessMutation.isPending}
-          >
-            {reprocessMutation.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" strokeWidth={1.9} />
-            )}
-            Re-apply threshold
-          </Button>
-          {transitions.length > 0 ? (
+          {!isInterviewer ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setReprocessOpen(true)}
+              disabled={reprocessMutation.isPending}
+            >
+              {reprocessMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" strokeWidth={1.9} />
+              )}
+              Re-apply threshold
+            </Button>
+          ) : null}
+          {!isInterviewer && transitions.length > 0 ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -323,20 +332,29 @@ export function JobDetailPage() {
             <Share2 className="h-4 w-4" strokeWidth={1.9} />
             Share
           </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => navigate(jobEdit(job._id))}
-          >
-            <Pencil className="h-4 w-4" strokeWidth={1.9} />
-            Edit
-          </Button>
-          <Button size="sm" onClick={() => setUploadOpen(true)}>
-            <Upload className="h-4 w-4" strokeWidth={1.9} />
-            Upload CVs
-          </Button>
+          {!isInterviewer ? (
+            <>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => navigate(jobEdit(job._id))}
+              >
+                <Pencil className="h-4 w-4" strokeWidth={1.9} />
+                Edit
+              </Button>
+              <Button size="sm" onClick={() => setUploadOpen(true)}>
+                <Upload className="h-4 w-4" strokeWidth={1.9} />
+                Upload CVs
+              </Button>
+            </>
+          ) : null}
         </div>
       </div>
+
+      {/* LinkedIn: post this job to your feed, view the live post, or unpublish.
+          Connecting the account lives on Settings → Integrations. Publishing is
+          an edit, so it's hidden from the view-only interviewer. */}
+      {!isInterviewer ? <JobLinkedInControls job={job} /> : null}
 
       <JobShareDialog jobId={job._id} open={shareOpen} onOpenChange={setShareOpen} />
 
@@ -441,7 +459,7 @@ export function JobDetailPage() {
         {tab === "overview" ? (
           <OverviewTab job={job} kpi={kpi} columns={boardQuery.data?.columns} />
         ) : (
-          <JobQuestionsManager job={job} />
+          <JobQuestionsManager job={job} readOnly={isInterviewer} />
         )}
       </div>
 

@@ -47,6 +47,7 @@ import {
   type JobStatus,
 } from "@/features/jobs/types";
 import { useOrgTimezone } from "@/features/organization/useOrgTimezone";
+import { useAuth } from "@/features/auth/AuthContext";
 import { ROUTES, jobDetail, jobEdit } from "@/routes";
 import { formatDate } from "@/lib/date";
 import { errorMessage } from "@/lib/errors";
@@ -69,6 +70,11 @@ export function JobsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const tz = useOrgTimezone();
+  // `interviewer` is a view-only role: it can browse jobs but never create,
+  // edit, transition or delete one, so every mutating control is withheld
+  // (the backend 403s them too).
+  const { user } = useAuth();
+  const isInterviewer = user?.role === "interviewer";
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [search, setSearch] = useState("");
@@ -161,10 +167,12 @@ export function JobsPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <ClearFiltersButton active={filtersActive} onClear={clearFilters} />
-          <Button size="sm" onClick={() => navigate(ROUTES.JOB_NEW)}>
-            <Plus className="h-4 w-4" strokeWidth={2.2} />
-            Create job
-          </Button>
+          {!isInterviewer ? (
+            <Button size="sm" onClick={() => navigate(ROUTES.JOB_NEW)}>
+              <Plus className="h-4 w-4" strokeWidth={2.2} />
+              Create job
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -266,12 +274,16 @@ export function JobsPage() {
               <p className="max-w-[340px] text-[13.5px] text-ink-muted">
                 {search || statusFilter
                   ? "Try a different title or clear the status filter."
-                  : "Create your first posting to start collecting applicants."}
+                  : isInterviewer
+                    ? "No postings have been created yet."
+                    : "Create your first posting to start collecting applicants."}
               </p>
-              <Button size="sm" onClick={() => navigate(ROUTES.JOB_NEW)}>
-                <Plus className="h-4 w-4" strokeWidth={2.2} />
-                Create job
-              </Button>
+              {!isInterviewer ? (
+                <Button size="sm" onClick={() => navigate(ROUTES.JOB_NEW)}>
+                  <Plus className="h-4 w-4" strokeWidth={2.2} />
+                  Create job
+                </Button>
+              ) : null}
             </div>
           ) : (
             rows.map((row) => (
@@ -340,11 +352,13 @@ export function JobsPage() {
                       >
                         Open
                       </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onSelect={() => navigate(jobEdit(row._id))}
-                      >
-                        Edit
-                      </DropdownMenuItem>
+                      {!isInterviewer ? (
+                        <DropdownMenuItem
+                          onSelect={() => navigate(jobEdit(row._id))}
+                        >
+                          Edit
+                        </DropdownMenuItem>
+                      ) : null}
                       {/* `state.fromJob` marks this as a deliberate drill-in
                           into one job's candidates, so the list shows its "back
                           to job" chrome (breadcrumb, job name in the title, Back
@@ -362,8 +376,10 @@ export function JobsPage() {
                       </DropdownMenuItem>
                       {/* Only the transitions legal from THIS status —
                           anything else is a 409. `archived` is terminal,
-                          so its list is empty and the separator with it. */}
-                      {STATUS_TRANSITIONS[row.status].length > 0 ? (
+                          so its list is empty and the separator with it.
+                          Withheld entirely from the view-only interviewer. */}
+                      {!isInterviewer &&
+                      STATUS_TRANSITIONS[row.status].length > 0 ? (
                         <>
                           <DropdownMenuSeparator />
                           {STATUS_TRANSITIONS[row.status].map((t) => (
@@ -382,13 +398,17 @@ export function JobsPage() {
                           ))}
                         </>
                       ) : null}
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        className="text-[var(--danger)] focus:bg-[var(--danger-soft)] focus:text-[var(--danger)]"
-                        onSelect={() => setDeleteTarget(row)}
-                      >
-                        Delete
-                      </DropdownMenuItem>
+                      {!isInterviewer ? (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            className="text-[var(--danger)] focus:bg-[var(--danger-soft)] focus:text-[var(--danger)]"
+                            onSelect={() => setDeleteTarget(row)}
+                          >
+                            Delete
+                          </DropdownMenuItem>
+                        </>
+                      ) : null}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>

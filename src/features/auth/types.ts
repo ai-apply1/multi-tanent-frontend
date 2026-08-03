@@ -1,5 +1,9 @@
-/** Wire values, not display labels — `org_admin` unlocks Team + the org-settings write path. */
-export type UserRole = "org_admin" | "hr"
+/**
+ * Wire values, not display labels — `org_admin` unlocks Team + the org-settings
+ * write path. `interviewer` is a view-only reviewer: it can browse candidates
+ * but not mutate them, and the backend withholds salary data from it entirely.
+ */
+export type UserRole = "org_admin" | "hr" | "interviewer"
 
 /**
  * The signed-in user. Login, refresh AND `/admin/auth/me` all return this

@@ -99,6 +99,22 @@ export interface JobScoringWeights {
   communication: number
 }
 
+export type JobLinkedInStatus = "none" | "published" | "removed" | "failed"
+
+/**
+ * The job's LinkedIn share state, mirrored from `job.linkedin` on the backend.
+ * `none` = never posted; `published` carries a live `postUrl`; `failed` carries
+ * `lastError`. Present on the detail route; absent from the list rows.
+ */
+export interface JobLinkedIn {
+  status: JobLinkedInStatus
+  postUrl: string | null
+  postUrn: string | null
+  postedAt: string | null
+  removedAt: string | null
+  lastError: string | null
+}
+
 /** Everything a job carries except its questions. */
 export interface JobBase {
   _id: string
@@ -123,6 +139,11 @@ export interface JobBase {
    * candidate has already been emailed about.
    */
   interviewDurationMinutes: number | null
+  /**
+   * LinkedIn share state. Optional because the list route projects it away —
+   * only `GET /admin/jobs/:id` (the detail) carries it.
+   */
+  linkedin?: JobLinkedIn
   createdBy: string | null
   updatedBy: string | null
   createdAt: string

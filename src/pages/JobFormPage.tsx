@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -53,6 +53,7 @@ import {
   type WorkMode,
 } from "@/features/jobs/types";
 import { useOrganization } from "@/features/organization/useOrganization";
+import { useAuth } from "@/features/auth/AuthContext";
 import { ROUTES, jobDetail } from "@/routes";
 import { errorMessage } from "@/lib/errors";
 import { blurOnWheel, cn } from "@/lib/utils";
@@ -97,12 +98,23 @@ const ERROR_CLASS = "mt-1.5 text-[12px] text-[var(--danger)]";
 export function JobFormPage() {
   const { jobId } = useParams<{ jobId: string }>();
   const isEdit = Boolean(jobId);
+  const { user } = useAuth();
 
   const jobQuery = useQuery({
     queryKey: ["job", jobId],
     queryFn: () => getJob(jobId!),
     enabled: isEdit,
   });
+
+  // The view-only interviewer never creates or edits a job. The controls that
+  // route here are hidden for them; this bounces a hand-typed URL too (the
+  // backend 403s the write regardless). Kept below the hooks so their call
+  // order stays stable.
+  if (user?.role === "interviewer") {
+    return (
+      <Navigate to={isEdit && jobId ? jobDetail(jobId) : ROUTES.JOBS} replace />
+    );
+  }
 
   if (isEdit && jobQuery.isLoading) {
     return <JobFormSkeleton />;

@@ -260,6 +260,9 @@ export function TeamPage() {
                 {USER_ROLE_LABELS.org_admin}
               </SelectItem>
               <SelectItem value="hr">{USER_ROLE_LABELS.hr}</SelectItem>
+              <SelectItem value="interviewer">
+                {USER_ROLE_LABELS.interviewer}
+              </SelectItem>
             </SelectContent>
           </Select>
           <Select

@@ -42,6 +42,8 @@ import {
 } from "lucide-react";
 import { errorMessage } from "@/lib/errors";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/features/auth/AuthContext";
+import { MaskedAmount, MaskedNumbers } from "@/components/ui/masked-amount";
 import { ScoringDetailsDialog } from "@/components/interviews/ScoringDetailsDialog";
 import { BulkEmailDialog } from "@/features/candidates/components/BulkEmailDialog";
 import {
@@ -629,6 +631,7 @@ function PipelineCard({
   recommendation,
   onStatusChange,
   pending,
+  readOnly,
 }: {
   candidate: CandidateDetail | null | undefined;
   /** The org's column catalog, in any order — this card sorts it. */
@@ -641,6 +644,9 @@ function PipelineCard({
   recommendation: Recommendation | null;
   onStatusChange: (statusKey: string) => void;
   pending: boolean;
+  /** A view-only viewer (interviewer): the pipeline is shown, but every
+   *  status-changing decision button is withheld. */
+  readOnly?: boolean;
 }) {
   const currentStatus = candidate?.currentStatusId ?? null;
   const statusKey = currentStatus?.key;
@@ -766,25 +772,27 @@ function PipelineCard({
               . Your confirmation is required, nothing advances automatically.
             </p>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={pending}
-              onClick={() => onStatusChange(POST_INTERVIEW_REJECT_STATUS_KEY)}
-            >
-              <X className="h-3.5 w-3.5" strokeWidth={1.9} />
-              Reject
-            </Button>
-            <Button
-              size="sm"
-              disabled={pending}
-              onClick={() => onStatusChange("shortlisted")}
-            >
-              <Star className="h-3.5 w-3.5" strokeWidth={1.8} />
-              Shortlist
-            </Button>
-          </div>
+          {!readOnly ? (
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={pending}
+                onClick={() => onStatusChange(POST_INTERVIEW_REJECT_STATUS_KEY)}
+              >
+                <X className="h-3.5 w-3.5" strokeWidth={1.9} />
+                Reject
+              </Button>
+              <Button
+                size="sm"
+                disabled={pending}
+                onClick={() => onStatusChange("shortlisted")}
+              >
+                <Star className="h-3.5 w-3.5" strokeWidth={1.8} />
+                Shortlist
+              </Button>
+            </div>
+          ) : null}
         </div>
       ) : isProcessing ? (
         // Same stage, but the score hasn't landed. Say so rather than render an
@@ -802,7 +810,7 @@ function PipelineCard({
         </div>
       ) : null}
 
-      {isShortlisted ? (
+      {isShortlisted && !readOnly ? (
         <div className="mt-1.5 grid gap-2">
           <Button
             size="sm"
@@ -838,7 +846,7 @@ function PipelineCard({
         </div>
       ) : null}
 
-      {isRejected ? (
+      {isRejected && !readOnly ? (
         <div className="mt-1.5">
           <Button
             variant="secondary"
@@ -965,6 +973,11 @@ function extractVettingChecks(
 
 /** One row of the pre-screen checklist: a status icon plus the check text. */
 function VettingCheckRow({ check }: { check: VettingCheck }) {
+  // The salary check embeds figures (the candidate's ask AND the role's max) —
+  // mask them behind a reveal toggle, matching the "Expected salary" field. For
+  // an interviewer the backend has already stripped the numbers, so MaskedNumbers
+  // finds nothing to hide and renders the sentence plainly with no toggle.
+  const isSalaryCheck = /expected salary/i.test(check.text);
   return (
     <div className="flex gap-2.5 text-[13px] leading-snug text-ink-2">
       {check.status === "pass" ? (
@@ -985,7 +998,11 @@ function VettingCheckRow({ check }: { check: VettingCheck }) {
           !
         </span>
       )}
-      {check.text}
+      {isSalaryCheck ? (
+        <MaskedNumbers text={check.text} label="salary" />
+      ) : (
+        check.text
+      )}
     </div>
   );
 }
@@ -1029,6 +1046,10 @@ interface ExtraGatesCardProps {
   willingToRelocate: boolean | null
   city: string | null
   profileCity: string | null
+  // True for the `interviewer` role: the backend strips `expectedSalaryMin`,
+  // so we can't (and shouldn't) show a figure — the row reads "Restricted"
+  // instead. For every other role the value is present and masked-with-reveal.
+  salaryRestricted: boolean
 }
 
 /**
@@ -1044,14 +1065,23 @@ function hasExtraGates(p: ExtraGatesCardProps): boolean {
   return (
     Boolean(p.university) ||
     p.expectedSalaryMin != null ||
+    // An interviewer always gets a salary row (a "Restricted" placeholder), so
+    // the card must render for them even when no other gate is present.
+    p.salaryRestricted ||
     p.willingToRelocate != null ||
     citiesDisagree(p.city ?? "", p.profileCity ?? "")
   );
 }
 
 function ExtraGatesCard(props: ExtraGatesCardProps) {
-  const { university, expectedSalaryMin, willingToRelocate, city, profileCity } =
-    props;
+  const {
+    university,
+    expectedSalaryMin,
+    willingToRelocate,
+    city,
+    profileCity,
+    salaryRestricted,
+  } = props;
   const cityConflict = citiesDisagree(city ?? "", profileCity ?? "");
   if (!hasExtraGates(props)) return null;
 
@@ -1092,7 +1122,19 @@ function ExtraGatesCard(props: ExtraGatesCardProps) {
             ) : null}
           </div>
         ) : null}
-        {expectedSalaryMin != null ? (
+        {salaryRestricted ? (
+          <div className="grid gap-0.5">
+            <dt className="flex flex-wrap items-center gap-x-1.5 text-[12px] text-ink-muted">
+              Expected salary
+              <span className="text-[11px] text-ink-subtle">
+                from the application
+              </span>
+            </dt>
+            <dd className="text-[13.5px] font-semibold text-ink-subtle">
+              Restricted
+            </dd>
+          </div>
+        ) : expectedSalaryMin != null ? (
           <div className="grid gap-0.5">
             <dt className="flex flex-wrap items-center gap-x-1.5 text-[12px] text-ink-muted">
               Expected salary
@@ -1101,7 +1143,7 @@ function ExtraGatesCard(props: ExtraGatesCardProps) {
               </span>
             </dt>
             <dd className="text-[13.5px] font-semibold text-ink">
-              {money(expectedSalaryMin)}
+              <MaskedAmount value={money(expectedSalaryMin)} label="salary" />
             </dd>
           </div>
         ) : null}
@@ -1273,6 +1315,11 @@ function NeedsReviewCard({
 }
 
 export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp, onOpenChange }: Props) {
+  const { user } = useAuth();
+  // `interviewer` is a view-only reviewer walled off from salary: the backend
+  // strips the figure and redacts the salary rejection reason, and the UI
+  // hides candidate-mutating controls from it.
+  const isInterviewer = user?.role === "interviewer";
   // Reattempt history: `selectedSessionId` overrides which attempt's detail
   // we load; null = follow the prop. Reset whenever the entry point changes.
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
@@ -1435,6 +1482,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
     willingToRelocate: candidate?.willingToRelocate ?? null,
     city: candidate?.city ?? null,
     profileCity: profile?.city ?? null,
+    salaryRestricted: isInterviewer,
   };
 
 
@@ -1860,6 +1908,10 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                * also shows what the AI recommended. Nothing is lost from here —
                * every status change stays reachable from the Actions menu.
                */}
+              {/* The Actions menu is every candidate/interview mutation the
+                  drawer offers (invite, email, status move, delete). A
+                  view-only interviewer gets none of them. */}
+              {!isInterviewer ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="secondary" size="sm" aria-label="Actions">
@@ -2010,6 +2062,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                   ) : null}
                 </DropdownMenuContent>
               </DropdownMenu>
+              ) : null}
             </div>
           </div>
 
@@ -2121,7 +2174,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                         title="No AI evaluation yet"
                         sub="The candidate hasn't recorded their interview. Their AI score, video and evaluation will appear here once it's scored."
                         action={
-                          candidateId ? (
+                          candidateId && !isInterviewer ? (
                             <ResendInviteButton
                               canSend={canSendCandidateInvite}
                               pending={invitingCand}
@@ -2313,6 +2366,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                       }
                       onStatusChange={handleStatusChange}
                       pending={statusPending}
+                      readOnly={isInterviewer}
                     />
                   </div>
                 ) : null}

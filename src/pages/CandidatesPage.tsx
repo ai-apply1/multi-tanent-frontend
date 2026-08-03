@@ -53,6 +53,7 @@ import {
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { InterviewDetailDrawer } from "@/components/interviews/InterviewDetailDrawer";
+import { useAuth } from "@/features/auth/AuthContext";
 import { BulkEmailDialog } from "@/features/candidates/components/BulkEmailDialog";
 import {
   deleteCandidate,
@@ -176,6 +177,11 @@ function initialsOf(name: string): string {
 export function CandidatesPage() {
   const queryClient = useQueryClient();
   const tz = useOrgTimezone();
+  // `interviewer` is a view-only role: it can browse candidates and open the
+  // drawer, but every mutating control (export, bulk actions, per-row invite /
+  // email / status move / delete) is withheld — the backend 403s them anyway.
+  const { user } = useAuth();
+  const isInterviewer = user?.role === "interviewer";
   // This page serves two routes: the org-wide `/dashboard/candidates` and
   // `/dashboard/jobs/:jobId/candidates`, which Jobs links to as "View
   // candidates". On the latter the job is the whole point of the URL, so it
@@ -754,19 +760,21 @@ export function CandidatesPage() {
             />
             Refresh
           </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => void handleExport()}
-            disabled={exporting}
-          >
-            {exporting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Download className="h-4 w-4" strokeWidth={1.7} />
-            )}
-            Export CSV
-          </Button>
+          {!isInterviewer ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void handleExport()}
+              disabled={exporting}
+            >
+              {exporting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" strokeWidth={1.7} />
+              )}
+              Export CSV
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -871,35 +879,37 @@ export function CandidatesPage() {
                     Clear
                   </button>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() =>
-                      setEmailState({
-                        ids: Array.from(selectedIds),
-                        label: `${selectedCount} candidate${selectedCount === 1 ? "" : "s"}`,
-                        fromSelection: true,
-                      })
-                    }
-                  >
-                    <Mail className="h-4 w-4" strokeWidth={1.7} />
-                    Send email
-                  </Button>
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    disabled={bulkDeleteMutation.isPending}
-                    onClick={() => setBulkDeleteOpen(true)}
-                  >
-                    {bulkDeleteMutation.isPending ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-4 w-4" strokeWidth={1.7} />
-                    )}
-                    Delete
-                  </Button>
-                </div>
+                {!isInterviewer ? (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() =>
+                        setEmailState({
+                          ids: Array.from(selectedIds),
+                          label: `${selectedCount} candidate${selectedCount === 1 ? "" : "s"}`,
+                          fromSelection: true,
+                        })
+                      }
+                    >
+                      <Mail className="h-4 w-4" strokeWidth={1.7} />
+                      Send email
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      disabled={bulkDeleteMutation.isPending}
+                      onClick={() => setBulkDeleteOpen(true)}
+                    >
+                      {bulkDeleteMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" strokeWidth={1.7} />
+                      )}
+                      Delete
+                    </Button>
+                  </div>
+                ) : null}
               </div>
             ) : null}
 
@@ -939,11 +949,13 @@ export function CandidatesPage() {
               )}
             >
               <span className="flex items-center gap-2.5">
-                <Checkbox
-                  checked={headerChecked}
-                  onCheckedChange={(c) => toggleAll(Boolean(c))}
-                  aria-label="Select all on this page"
-                />
+                {!isInterviewer ? (
+                  <Checkbox
+                    checked={headerChecked}
+                    onCheckedChange={(c) => toggleAll(Boolean(c))}
+                    aria-label="Select all on this page"
+                  />
+                ) : null}
                 Candidate
               </span>
               <span>Role</span>
@@ -992,6 +1004,7 @@ export function CandidatesPage() {
                     key={row._id}
                     row={row}
                     tz={tz}
+                    readOnly={isInterviewer}
                     selected={selectedIds.has(row._id)}
                     jobTitle={jobsById.get(row.jobId)?.title ?? null}
                     statuses={statuses}
@@ -1334,6 +1347,7 @@ function isReinvite(row: Pick<CandidateListItem, "latestInterviewId">): boolean 
 function CandidateRow({
   row,
   tz,
+  readOnly,
   selected,
   jobTitle,
   statuses,
@@ -1349,6 +1363,8 @@ function CandidateRow({
 }: {
   row: CandidateListItem;
   tz: string;
+  /** View-only viewer (interviewer): selection + all mutating row actions hidden. */
+  readOnly?: boolean;
   selected: boolean;
   jobTitle: string | null;
   statuses: CandidateStatus[];
@@ -1390,16 +1406,18 @@ function CandidateRow({
     >
       {/* Candidate — checkbox + avatar + name/email */}
       <div className="flex min-w-0 items-center gap-2.5">
-        <span
-          onClick={(e) => e.stopPropagation()}
-          className="flex items-center"
-        >
-          <Checkbox
-            checked={selected}
-            onCheckedChange={(c) => onToggle(Boolean(c))}
-            aria-label={`Select ${row.fullName || "candidate"}`}
-          />
-        </span>
+        {!readOnly ? (
+          <span
+            onClick={(e) => e.stopPropagation()}
+            className="flex items-center"
+          >
+            <Checkbox
+              checked={selected}
+              onCheckedChange={(c) => onToggle(Boolean(c))}
+              aria-label={`Select ${row.fullName || "candidate"}`}
+            />
+          </span>
+        ) : null}
         <span
           aria-hidden
           className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-accent text-[12px] font-bold text-primary"
@@ -1505,6 +1523,7 @@ function CandidateRow({
           {resolvingInterview ? <Loader2 className="animate-spin" /> : <Eye />}
           View interview
         </Button>
+        {!readOnly || row.cvKey ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -1526,6 +1545,8 @@ function CandidateRow({
                 Open CV
               </DropdownMenuItem>
             ) : null}
+            {!readOnly ? (
+              <>
             {canInvite ? (
               <DropdownMenuItem onSelect={onInvite}>
                 {reinvite ? (
@@ -1594,8 +1615,11 @@ function CandidateRow({
               <Trash2 className="h-4 w-4" />
               Delete candidate
             </DropdownMenuItem>
+              </>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
+        ) : null}
       </div>
     </div>
   );

@@ -2,6 +2,7 @@ import api from "@/lib/api"
 import type {
   CreateJobPayload,
   Job,
+  JobLinkedInStatus,
   JobListItem,
   JobQuestionItemPayload,
   JobStatus,
@@ -148,6 +149,38 @@ export async function sendJobInvites(jobId: string, emails: string[]) {
 
 export async function deleteJobInvite(jobId: string, inviteId: string) {
   await api.delete(`/admin/jobs/${jobId}/invites/${inviteId}`)
+}
+
+// ── Post to LinkedIn ────────────────────────────────────────────────────
+//
+// Per-user OAuth: publishing a job posts a share on the connecting user's
+// personal feed linking to the public apply page. The CONNECTION itself
+// (connect/status/disconnect) lives in `@/features/integrations/integrationsApi`
+// — these two are the job-scoped post/remove actions only.
+
+/** `POST /admin/jobs/:id/linkedin` result. */
+export interface LinkedInPublishResult {
+  status: JobLinkedInStatus
+  postUrl: string
+  postUrn: string
+  postedAt: string
+}
+
+/** Publish the job as a share on the connected user's LinkedIn feed. */
+export async function postJobToLinkedIn(jobId: string) {
+  const { data } = await api.post<LinkedInPublishResult>(
+    `/admin/jobs/${jobId}/linkedin`
+  )
+  return data
+}
+
+/** Remove the job's LinkedIn post. */
+export async function removeJobFromLinkedIn(jobId: string) {
+  const { data } = await api.delete<{
+    status: JobLinkedInStatus
+    postUrl: string | null
+  }>(`/admin/jobs/${jobId}/linkedin`)
+  return data
 }
 
 // The question bank is NOT read from here. `/admin/questions` has exactly one
