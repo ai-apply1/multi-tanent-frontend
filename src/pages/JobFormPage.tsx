@@ -65,17 +65,6 @@ import { blurOnWheel, cn } from "@/lib/utils";
  */
 const UNSET = "";
 
-/**
- * Scoring presets as `[correctness, depth, label, hint]`. Communication is
- * always the remainder, so every preset sums to 100 by construction.
- */
-const WEIGHT_PRESETS: Array<[number, number, string, string]> = [
-  [40, 20, "Balanced", "The default — right answers, some judgment, clear delivery."],
-  [60, 10, "Recall-first", "Screening for correct knowledge above all."],
-  [30, 40, "Judgment", "Senior roles: trade-offs and lived experience lead."],
-  [20, 10, "Communication", "Client-facing roles: how they explain it matters most."],
-];
-
 const EMPLOYMENT_TYPES = Object.keys(
   EMPLOYMENT_TYPE_LABELS,
 ) as EmploymentType[];
@@ -610,7 +599,6 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
               depthWeight={depthWeight}
               communicationWeight={communicationWeight}
               setWeights={setWeights}
-              applyPreset={setWeights}
               rejectionThreshold={rejectionThreshold}
               setRejectionThreshold={setRejectionThreshold}
               rejectionError={rejectionError}
@@ -1166,7 +1154,7 @@ function WeightSplitBar({
           {segments.map((seg, i) => (
             <div
               key={seg.label}
-              // Animate preset jumps, but NEVER while dragging — a transition
+              // Animate keyboard steps, but NEVER while dragging — a transition
               // there makes the fill lag the cursor and feel soggy.
               className={`absolute inset-y-0 ${
                 dragging ? "" : "transition-[left,width] duration-150 ease-out"
@@ -1318,7 +1306,6 @@ function ScoringStep({
   depthWeight,
   communicationWeight,
   setWeights,
-  applyPreset,
   rejectionThreshold,
   setRejectionThreshold,
   rejectionError,
@@ -1335,7 +1322,6 @@ function ScoringStep({
   depthWeight: number;
   communicationWeight: number;
   setWeights: (correctness: number, depth: number) => void;
-  applyPreset: (correctness: number, depth: number) => void;
   rejectionThreshold: string;
   setRejectionThreshold: (v: string) => void;
   rejectionError: string;
@@ -1355,42 +1341,7 @@ function ScoringStep({
         subtitle="How the interview's three axes fold into one overall score, and where the shortlist line sits."
       />
       <div className="flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <span className="text-[13px] font-semibold text-ink">
-            Score split
-          </span>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {WEIGHT_PRESETS.map(([correctness, depth, label, hint]) => {
-              const active =
-                correctnessWeight === correctness && depthWeight === depth;
-              return (
-                <button
-                  key={label}
-                  type="button"
-                  title={hint}
-                  // Exactly one preset is applied at a time, so these behave as
-                  // a radio group. `aria-pressed` is what says so — without it
-                  // "which split is active" is carried by colour alone, and a
-                  // screen reader hears four identical buttons.
-                  aria-pressed={active}
-                  onClick={() => applyPreset(correctness, depth)}
-                  // The UA's default ring survives a mouse click and then sits
-                  // on a preset the user has since dragged away from, which
-                  // reads as "this preset is selected" when it isn't. Pinning
-                  // the ring to focus-VISIBLE keeps it for keyboard users only,
-                  // so the purple active fill is the one selection signal.
-                  className={`rounded-md border px-2.5 py-1 text-[12px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--ring)] ${
-                    active
-                      ? "border-primary bg-accent text-primary"
-                      : "border-line-2 bg-surface text-ink-2 hover:bg-hover"
-                  }`}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        <span className="text-[13px] font-semibold text-ink">Score split</span>
 
         <WeightSplitBar
           correctness={correctnessWeight}
