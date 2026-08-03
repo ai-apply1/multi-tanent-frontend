@@ -11,7 +11,6 @@ import toast from "react-hot-toast";
 import {
   AlertTriangle,
   ArrowLeft,
-  Check,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -43,17 +42,14 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { InterviewDetailDrawer } from "@/components/interviews/InterviewDetailDrawer";
 import { BulkEmailDialog } from "@/features/candidates/components/BulkEmailDialog";
+import { ChangeStatusSubMenu } from "@/features/candidates/components/ChangeStatusSubMenu";
 import {
   deleteCandidate,
   exportCandidatesCsv,
@@ -68,7 +64,6 @@ import {
   invalidateCandidateDataAndJobCounts,
 } from "@/features/candidates/candidatesCache";
 import { aiScoreState, type AiScoreState } from "@/features/candidates/aiScore";
-import { manualMoveBlocker } from "@/features/candidates/manualMove";
 import {
   type CandidateListItem,
   type CandidateStatus,
@@ -1483,9 +1478,15 @@ function CandidateRow({
         <AiScoreCell state={scoreState} />
       </div>
 
-      {/* Date */}
-      <span className="text-[12.5px] text-ink-muted">
-        {formatDate(row.createdAt, tz)}
+      {/* Date — when the row LAST MOVED stage (`statusUpdatedAt`: shortlisted,
+          rejected, invited…), not when the candidate applied. `createdAt` is
+          the fallback for the moment a legacy row predating the field would
+          otherwise render the "-" placeholder. */}
+      <span
+        className="text-[12.5px] text-ink-muted"
+        title="Date of the latest status change"
+      >
+        {formatDate(row.statusUpdatedAt || row.createdAt, tz)}
       </span>
 
       {/* Actions, an explicit "View interview" button plus the kebab menu.
@@ -1540,52 +1541,15 @@ function CandidateRow({
               <Mail className="h-4 w-4" />
               Send email
             </DropdownMenuItem>
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>Change status</DropdownMenuSubTrigger>
-              {/* Capped + scrollable: a long custom pipeline must not tower
-                  past the parent menu — uncapped, Radix shifts it up to fit
-                  the viewport and it reads as a detached floating list. */}
-              <DropdownMenuSubContent className="max-h-72 w-52 overflow-y-auto">
-                <DropdownMenuLabel>Move to</DropdownMenuLabel>
-                {/* A manual move writes the status and nothing else — the
-                    backend sends no email on this path, so say it at the
-                    moment of the decision, not in a doc nobody reads. */}
-                <p className="px-2 pb-1.5 text-[11.5px] leading-snug text-ink-muted">
-                  A move never emails the candidate — use{" "}
-                  <span className="font-medium">Send email</span> to notify
-                  them.
-                </p>
-                {statuses.map((option) => {
-                  const isCurrent = option.key === status?.key;
-                  // Columns that aren't a human's to assert are disabled rather
-                  // than hidden: a missing option reads as a bug, a greyed one
-                  // with a reason teaches the rule. `title` carries the reason
-                  // — Radix keeps disabled items out of the tab order, so this
-                  // is the hover affordance that still fires.
-                  const blocked = manualMoveBlocker(option, row);
-                  return (
-                    <DropdownMenuItem
-                      key={option._id}
-                      disabled={isCurrent || blocked !== null}
-                      title={blocked ?? undefined}
-                      onSelect={() => onChangeStatus(option.key)}
-                    >
-                      <span
-                        className="h-2 w-2 shrink-0 rounded-full"
-                        style={{
-                          backgroundColor:
-                            option.color ?? "var(--ink-muted)",
-                        }}
-                      />
-                      <span className="min-w-0 truncate">{option.label}</span>
-                      {isCurrent ? (
-                        <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-ink-muted" />
-                      ) : null}
-                    </DropdownMenuItem>
-                  );
-                })}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
+            {/* Capped, scrollable, and identical to the drawer's copy — see
+                `ChangeStatusSubMenu` for why the list has to defend itself
+                against a pipeline of any length. */}
+            <ChangeStatusSubMenu
+              statuses={statuses}
+              currentKey={status?.key}
+              candidate={row}
+              onSelect={onChangeStatus}
+            />
             <DropdownMenuSeparator />
             <DropdownMenuItem
               className="text-[var(--danger)] focus:bg-[var(--danger-soft)] focus:text-[var(--danger)]"

@@ -80,6 +80,7 @@ import {
   getCandidate,
   listCandidates,
 } from "@/features/candidates/candidatesApi";
+import { INVITABLE_STATUS_KEY } from "@/features/candidates/types";
 import { InterviewDetailDrawer } from "@/components/interviews/InterviewDetailDrawer";
 import { useAuth } from "@/features/auth/AuthContext";
 import { ROUTES } from "@/routes";
@@ -241,11 +242,37 @@ export function OverviewPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 
-  // Awaiting your decision: reuse the shared candidates list endpoint scoped to
-  // the `scored` status. Guarded on `user` so it never fires before sign-in.
+  /*
+   * Awaiting your decision: the shared candidates list endpoint scoped to the
+   * ONE column that is actually a human queue.
+   *
+   * `needs_review`, NOT `scored`. This panel used to read `scored`, and that was
+   * wrong for a structural reason rather than a taste one: `scored` is a
+   * PASS-THROUGH, not a resting place. The backend's `finalizeDecision` moves a
+   * candidate `→ scored` purely so the timeline records the step, then straight
+   * on to `shortlisted` / `final_rejected` in the same function — see
+   * `candidate-status.service.ts`, which says outright that "nobody rests here
+   * on the happy path". So the panel read "All caught up" almost permanently,
+   * and the rows it did show were ones HR had put back themselves via
+   * "Reconsider candidate".
+   *
+   * `needs_review` is the column that IS waiting on a person: applications the
+   * vetting engine could not decide, which only a manual invite or rejection
+   * moves. The interview drawer's own stage hints already call it "Awaiting
+   * your decision to invite".
+   *
+   * `INVITABLE_STATUS_KEY` rather than the literal — the string collides with
+   * `ScoringStatus`'s unrelated `"needs_review"` (a transcript too poor to
+   * score), and the constant is what keeps a find-and-replace from swapping the
+   * two. Guarded on `user` so it never fires before sign-in.
+   *
+   * Query key stays `["awaiting-decision"]` verbatim: `invalidateCandidateData`
+   * matches on that exact string, so renaming it would silently stop the panel
+   * refreshing after a decision.
+   */
   const { data: awaitingData, isLoading: awaitingLoading } = useQuery({
     queryKey: ["awaiting-decision"],
-    queryFn: () => listCandidates({ statusKey: "scored", limit: 5 }),
+    queryFn: () => listCandidates({ statusKey: INVITABLE_STATUS_KEY, limit: 5 }),
     enabled: Boolean(user),
   });
   const awaiting = useMemo(() => awaitingData?.data ?? [], [awaitingData]);
@@ -629,7 +656,9 @@ export function OverviewPage() {
               </div>
               {awaiting.length === 0 ? (
                 <div className="py-8 text-center text-[13px] text-ink-muted">
-                  All caught up, no interviews waiting.
+                  {/* "no applications", not "no interviews": nobody in this
+                      column has interviewed — they are waiting to be invited. */}
+                  All caught up, no applications to review.
                 </div>
               ) : (
                 <div className="scroll max-h-[360px] overflow-y-auto">
@@ -647,8 +676,11 @@ export function OverviewPage() {
                         <div className="truncate text-[13.5px] font-semibold text-ink">
                           {cand.fullName}
                         </div>
+                        {/* The catalog LABEL first, so an org that renamed the
+                            column sees its own name; the builtin label is only
+                            the fallback. */}
                         <div className="truncate text-[12px] text-ink-muted">
-                          {cand.currentStatusId?.label ?? "Scored"}
+                          {cand.currentStatusId?.label ?? "Needs Review"}
                         </div>
                       </div>
                       <ChevronRight
@@ -660,13 +692,13 @@ export function OverviewPage() {
                 </div>
               )}
               {/* The list is windowed to the first few rows, but the badge counts
-                  every `scored` candidate — so when the total exceeds the window
-                  the rest are off-screen. Link into the Candidates page
-                  pre-filtered to the `scored` status (its `?status=` param seeds
+                  every `needs_review` candidate — so when the total exceeds the
+                  window the rest are off-screen. Link into the Candidates page
+                  pre-filtered to the same column (its `?status=` param seeds
                   `statusFilter`) so those rows stay reachable from the dashboard. */}
               {(awaitingData?.count ?? 0) > awaiting.length ? (
                 <Link
-                  to={`${ROUTES.CANDIDATES}?status=scored`}
+                  to={`${ROUTES.CANDIDATES}?status=${INVITABLE_STATUS_KEY}`}
                   className="flex items-center justify-center gap-1 border-t border-line px-[18px] py-3 text-[12.5px] font-semibold text-primary hover:bg-hover"
                 >
                   View all {awaitingData?.count} awaiting
@@ -730,10 +762,13 @@ export function OverviewPage() {
         }}
       />
 
-      {/* `candidateId` is passed alongside `sessionId` so the drawer opens even
-          when the row has no interview yet — e.g. a candidate manually moved
-          into the `scored` column. Without it the click silently no-op'd,
-          because `interviewSessionId` stays null when `latestInterviewId` is. */}
+      {/* `candidateId` is passed alongside `sessionId` because for this panel the
+          row has no interview — that is the RULE here, not an edge case:
+          `needs_review` candidates are waiting to be invited, so
+          `latestInterviewId` is null and `interviewSessionId` with it. Without
+          the candidate id every click would silently no-op. The drawer handles
+          this pairing on purpose (its `isNeedsReview` branch renders the vetting
+          reasons and the manual-invite action instead of an interview). */}
       <InterviewDetailDrawer
         sessionId={interviewSessionId}
         candidateId={drawerCandidateId}
