@@ -86,9 +86,10 @@ export interface NotificationPrefs {
 /** Mirrors the backend's `@Matches` on `userName`; surfaced as helper text. */
 export const USER_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]{2,49}$/;
 
-export const USER_ROLES: UserRole[] = ["org_admin", "hr"];
+export const USER_ROLES: UserRole[] = ["org_admin", "hr", "interviewer"];
 
 export const USER_ROLE_LABELS: Record<UserRole, string> = {
   org_admin: "ORG ADMIN",
   hr: "HR",
+  interviewer: "INTERVIEWER",
 };

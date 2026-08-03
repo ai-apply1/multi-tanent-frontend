@@ -62,6 +62,8 @@ import {
   type DifficultyLevel,
   type ScreeningQuestion,
 } from "@/features/screening-questions/types";
+import { useAuth } from "@/features/auth/AuthContext";
+import { canManageFunnel } from "@/features/auth/roles";
 import { errorMessage as apiError } from "@/lib/errors";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { ClearFiltersButton } from "@/components/common/ClearFiltersButton";
@@ -82,6 +84,10 @@ const DIFFICULTY_PILL: Record<DifficultyLevel, string> = {
 
 export function QuestionBankPage() {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  // Interviewers read the bank; every write below (create, edit, delete,
+  // audio generation, variant suggestion) is a 403 for them.
+  const canAct = canManageFunnel(user?.role);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [search, setSearch] = useState("");
@@ -218,10 +224,12 @@ export function QuestionBankPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <ClearFiltersButton active={filtersActive} onClear={clearFilters} />
-          <Button size="sm" onClick={openCreate}>
-            <Plus className="h-4 w-4" />
-            Add question
-          </Button>
+          {canAct ? (
+            <Button size="sm" onClick={openCreate}>
+              <Plus className="h-4 w-4" />
+              Add question
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -310,7 +318,7 @@ export function QuestionBankPage() {
         {/* Rows */}
         <TooltipProvider delayDuration={300}>
           {isLoading ? (
-            <QuestionListSkeleton />
+            <QuestionListSkeleton showActions={canAct} />
           ) : isError ? (
             <div className="flex flex-col items-center justify-center gap-2 px-6 py-16 text-center text-[13.5px] text-[var(--danger)]">
               Could not load questions.
@@ -330,13 +338,16 @@ export function QuestionBankPage() {
                 No questions yet
               </h3>
               <p className="max-w-[340px] text-[13.5px] text-ink-muted">
-                Add your first screening question to start building a bank your
-                jobs can draw from.
+                {canAct
+                  ? "Add your first screening question to start building a bank your jobs can draw from."
+                  : "Nobody has added a screening question to this bank yet."}
               </p>
-              <Button size="sm" onClick={openCreate}>
-                <Plus className="h-4 w-4" />
-                Add question
-              </Button>
+              {canAct ? (
+                <Button size="sm" onClick={openCreate}>
+                  <Plus className="h-4 w-4" />
+                  Add question
+                </Button>
+              ) : null}
             </div>
           ) : (
             <div>
@@ -455,59 +466,64 @@ export function QuestionBankPage() {
                         ) : null}
                       </div>
                     </div>
-                    <div
-                      className="flex flex-shrink-0 items-center gap-1"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => openEdit(row)}
-                        title="Edit question"
-                        className="flex h-[30px] w-[30px] items-center justify-center rounded-lg text-ink-muted hover:bg-surface-3"
+                    {/* Edit + kebab together: the kebab holds only Edit and
+                        Delete, so for a reader it would open onto nothing. */}
+                    {canAct ? (
+                      <div
+                        className="flex flex-shrink-0 items-center gap-1"
+                        onClick={(e) => e.stopPropagation()}
                       >
-                        <Pencil className="h-4 w-4" strokeWidth={1.7} />
-                      </button>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            type="button"
-                            title="More"
-                            className="flex h-[28px] w-[28px] items-center justify-center rounded-lg text-ink-subtle hover:bg-surface-3"
-                          >
-                            <MoreHorizontal
-                              className="h-4 w-4"
-                              strokeWidth={1.7}
-                            />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onSelect={() => openEdit(row)}>
-                            <Pencil className="h-4 w-4" />
-                            Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          {/* Disabled while jobs embed the question — same
-                              rule the backend's 409 enforces, surfaced before
-                              the click instead of after. A stale count can
-                              still let a click through; the 409 handling in
-                              the confirm dialog remains the backstop. */}
-                          <DropdownMenuItem
-                            disabled={usedByJobs > 0}
-                            onSelect={() => openDelete(row)}
-                            className="text-[var(--danger)] focus:bg-[var(--danger-soft)] focus:text-[var(--danger)]"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                            Delete
-                            {usedByJobs > 0 ? (
-                              <span className="ml-auto pl-3 text-[11px] font-normal text-ink-subtle">
-                                in {usedByJobs} job
-                                {usedByJobs === 1 ? "" : "s"}
-                              </span>
-                            ) : null}
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
+                        <button
+                          type="button"
+                          onClick={() => openEdit(row)}
+                          title="Edit question"
+                          className="flex h-[30px] w-[30px] items-center justify-center rounded-lg text-ink-muted hover:bg-surface-3"
+                        >
+                          <Pencil className="h-4 w-4" strokeWidth={1.7} />
+                        </button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              type="button"
+                              title="More"
+                              className="flex h-[28px] w-[28px] items-center justify-center rounded-lg text-ink-subtle hover:bg-surface-3"
+                            >
+                              <MoreHorizontal
+                                className="h-4 w-4"
+                                strokeWidth={1.7}
+                              />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onSelect={() => openEdit(row)}>
+                              <Pencil className="h-4 w-4" />
+                              Edit
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            {/* Disabled while jobs embed the question — same
+                                rule the backend's 409 enforces, surfaced
+                                before the click instead of after. A stale
+                                count can still let a click through; the 409
+                                handling in the confirm dialog remains the
+                                backstop. */}
+                            <DropdownMenuItem
+                              disabled={usedByJobs > 0}
+                              onSelect={() => openDelete(row)}
+                              className="text-[var(--danger)] focus:bg-[var(--danger-soft)] focus:text-[var(--danger)]"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              Delete
+                              {usedByJobs > 0 ? (
+                                <span className="ml-auto pl-3 text-[11px] font-normal text-ink-subtle">
+                                  in {usedByJobs} job
+                                  {usedByJobs === 1 ? "" : "s"}
+                                </span>
+                              ) : null}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    ) : null}
                   </div>
                 );
               })}
@@ -636,8 +652,11 @@ export function QuestionBankPage() {
  * difficulty / wordings / tags) and the trailing edit + kebab controls — so
  * the list doesn't jump when the questions arrive. Pill widths are varied per
  * row so the shimmer reads as content rather than a repeating pattern.
+ *
+ * `showActions` mirrors the row's own gate — a reader's rows have no trailing
+ * controls, so reserving their width would shift the list once it loads.
  */
-function QuestionListSkeleton() {
+function QuestionListSkeleton({ showActions }: { showActions: boolean }) {
   const pillSets = ["w-16 w-14 w-20", "w-20 w-16 w-12", "w-14 w-20 w-16"];
   return (
     <div>
@@ -657,10 +676,12 @@ function QuestionListSkeleton() {
                 ))}
               </div>
             </div>
-            <div className="flex flex-shrink-0 items-center gap-1">
-              <Skeleton className="h-[30px] w-[30px] rounded-lg" />
-              <Skeleton className="h-[28px] w-[28px] rounded-lg" />
-            </div>
+            {showActions ? (
+              <div className="flex flex-shrink-0 items-center gap-1">
+                <Skeleton className="h-[30px] w-[30px] rounded-lg" />
+                <Skeleton className="h-[28px] w-[28px] rounded-lg" />
+              </div>
+            ) : null}
           </div>
         );
       })}

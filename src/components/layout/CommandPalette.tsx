@@ -16,6 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { listCandidates } from "@/features/candidates/candidatesApi"
 import { listJobs } from "@/features/jobs/jobsApi"
 import { useAuth } from "@/features/auth/AuthContext"
+import { canManageFunnel } from "@/features/auth/roles"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { useAnimatedOverlay } from "@/hooks/useAnimatedOverlay"
 import { ROUTES, jobDetail } from "@/routes"
@@ -97,11 +98,17 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   // Static navigation targets, always available. Filtered client-side
   // against the query so typing "team" surfaces just the Team link.
   const isOrgAdmin = user?.role === "org_admin"
+  const canAct = canManageFunnel(user?.role)
   const goToItems = useMemo<PaletteItem[]>(() => {
     const raw: Array<Omit<PaletteItem, "onSelect"> & { to: string }> = [
       { id: "go-overview", icon: LayoutGrid, title: "Dashboard", sub: "Pipeline dashboard", to: ROUTES.OVERVIEW },
       { id: "go-jobs", icon: Briefcase, title: "Jobs", sub: "All postings", to: ROUTES.JOBS },
-      { id: "go-jobs-new", icon: Briefcase, title: "Create job", sub: "New draft posting", to: ROUTES.JOB_NEW },
+      // Every other entry is a read-only destination, but this one lands on the
+      // job-create form the backend 403s an interviewer on — so it is offered
+      // only to the roles that can actually finish it.
+      ...(canAct
+        ? [{ id: "go-jobs-new", icon: Briefcase, title: "Create job", sub: "New draft posting", to: ROUTES.JOB_NEW }]
+        : []),
       { id: "go-candidates", icon: Users2, title: "Candidates", sub: "Every applicant", to: ROUTES.CANDIDATES },
       { id: "go-questions", icon: Library, title: "Questions", sub: "Screening questions", to: ROUTES.QUESTIONS },
       { id: "go-pipeline", icon: GitBranch, title: "Hiring Pipeline", sub: "Candidate statuses", to: ROUTES.PIPELINE },
@@ -124,7 +131,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         onOpenChange(false)
       },
     }))
-  }, [debouncedQuery, isOrgAdmin, navigate, onOpenChange])
+  }, [canAct, debouncedQuery, isOrgAdmin, navigate, onOpenChange])
 
   const candidateItems = useMemo<PaletteItem[]>(() => {
     const rows = candidatesQuery.data?.data ?? []

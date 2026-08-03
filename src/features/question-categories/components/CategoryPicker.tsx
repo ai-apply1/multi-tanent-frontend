@@ -8,6 +8,8 @@ import {
   QUESTION_CATEGORIES_QUERY_KEY,
 } from "@/features/question-categories/questionCategoriesApi"
 import type { QuestionCategory } from "@/features/question-categories/types"
+import { useAuth } from "@/features/auth/AuthContext"
+import { canManageFunnel } from "@/features/auth/roles"
 import { errorMessage as apiError } from "@/lib/errors"
 import { cn } from "@/lib/utils"
 
@@ -31,6 +33,11 @@ export function CategoryPicker({
   disabled,
 }: CategoryPickerProps) {
   const queryClient = useQueryClient()
+  const { user } = useAuth()
+  // Picking an existing category is a read; CREATING one is a 403 for an
+  // interviewer. Gated here rather than at the mount point so any future
+  // caller inherits the rule.
+  const canAct = canManageFunnel(user?.role)
   const query = useQuery({
     queryKey: QUESTION_CATEGORIES_QUERY_KEY,
     queryFn: listQuestionCategories,
@@ -184,63 +191,65 @@ export function CategoryPicker({
             )}
           </div>
 
-          <div className="border-t border-line bg-surface-2 p-2">
-            {adding ? (
-              <div className="flex items-center gap-1.5">
-                <input
-                  ref={addInputRef}
-                  value={draftLabel}
-                  onChange={(e) => setDraftLabel(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault()
-                      submitDraft()
-                    } else if (e.key === "Escape") {
-                      e.preventDefault()
+          {canAct ? (
+            <div className="border-t border-line bg-surface-2 p-2">
+              {adding ? (
+                <div className="flex items-center gap-1.5">
+                  <input
+                    ref={addInputRef}
+                    value={draftLabel}
+                    onChange={(e) => setDraftLabel(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault()
+                        submitDraft()
+                      } else if (e.key === "Escape") {
+                        e.preventDefault()
+                        setAdding(false)
+                        setDraftLabel("")
+                      }
+                    }}
+                    maxLength={100}
+                    placeholder="New category name"
+                    className="h-8 flex-1 rounded-md border border-[var(--field-border)] bg-surface px-2 text-[13px] text-ink outline-none focus:border-primary"
+                  />
+                  <button
+                    type="button"
+                    onClick={submitDraft}
+                    disabled={createMutation.isPending || !draftLabel.trim()}
+                    className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-2 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+                  >
+                    {createMutation.isPending ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Check className="h-3.5 w-3.5" strokeWidth={2.2} />
+                    )}
+                    Add
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
                       setAdding(false)
                       setDraftLabel("")
-                    }
-                  }}
-                  maxLength={100}
-                  placeholder="New category name"
-                  className="h-8 flex-1 rounded-md border border-[var(--field-border)] bg-surface px-2 text-[13px] text-ink outline-none focus:border-primary"
-                />
+                    }}
+                    aria-label="Cancel"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-muted hover:bg-surface-3 hover:text-ink"
+                  >
+                    <X className="h-3.5 w-3.5" strokeWidth={1.8} />
+                  </button>
+                </div>
+              ) : (
                 <button
                   type="button"
-                  onClick={submitDraft}
-                  disabled={createMutation.isPending || !draftLabel.trim()}
-                  className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-2 text-[12px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+                  onClick={() => setAdding(true)}
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] font-semibold text-primary transition hover:bg-surface-3"
                 >
-                  {createMutation.isPending ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Check className="h-3.5 w-3.5" strokeWidth={2.2} />
-                  )}
-                  Add
+                  <Plus className="h-3.5 w-3.5" strokeWidth={2.2} />
+                  Add category
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAdding(false)
-                    setDraftLabel("")
-                  }}
-                  aria-label="Cancel"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-muted hover:bg-surface-3 hover:text-ink"
-                >
-                  <X className="h-3.5 w-3.5" strokeWidth={1.8} />
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setAdding(true)}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] font-semibold text-primary transition hover:bg-surface-3"
-              >
-                <Plus className="h-3.5 w-3.5" strokeWidth={2.2} />
-                Add category
-              </button>
-            )}
-          </div>
+              )}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

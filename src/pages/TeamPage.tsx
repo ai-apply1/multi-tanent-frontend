@@ -143,7 +143,7 @@ export function TeamPage() {
             </h1>
           </div>
           <p className="mt-1.5 max-w-[620px] text-[13.5px] text-ink-muted">
-            Recruiters and admins with access to this workspace.
+            Recruiters, interviewers and admins with access to this workspace.
           </p>
         </div>
         <div className="rounded-2xl border border-line bg-surface">
@@ -201,7 +201,7 @@ export function TeamPage() {
             </h1>
           </div>
           <p className="mt-1.5 max-w-[620px] text-[13.5px] text-ink-muted">
-            Recruiters and admins with access to this workspace.
+            Recruiters, interviewers and admins with access to this workspace.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -260,6 +260,9 @@ export function TeamPage() {
                 {USER_ROLE_LABELS.org_admin}
               </SelectItem>
               <SelectItem value="hr">{USER_ROLE_LABELS.hr}</SelectItem>
+              <SelectItem value="interviewer">
+                {USER_ROLE_LABELS.interviewer}
+              </SelectItem>
             </SelectContent>
           </Select>
           <Select
