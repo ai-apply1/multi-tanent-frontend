@@ -38,7 +38,6 @@ import { useAuth } from "@/features/auth/AuthContext";
 import { useOrgTimezone } from "@/features/organization/useOrgTimezone";
 // import { useTheme } from "@/features/theme/ThemeContext" — dark/light toggle commented out
 import { USER_ROLE_LABELS } from "@/features/users/types";
-import type { UserRole } from "@/features/auth/types";
 import {
   dismissAllNotifications,
   dismissNotification,
@@ -180,9 +179,7 @@ export function TopBar() {
   const rawDisplayName = user?.fullName || user?.email || "Admin";
   const displayName = titleCase(rawDisplayName) || rawDisplayName;
   const email = user?.email || "";
-  const rolePill = user?.role
-    ? (USER_ROLE_LABELS[user.role as UserRole] ?? "")
-    : "";
+  const rolePill = user?.role ? (USER_ROLE_LABELS[user.role] ?? "") : "";
 
   const [notifOpen, setNotifOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);

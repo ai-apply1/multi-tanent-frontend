@@ -20,6 +20,8 @@ import { CSS } from "@dnd-kit/utilities"
 import { AlertTriangle, Loader2, Plus, Scale, Star } from "lucide-react"
 import toast from "react-hot-toast"
 import { Button } from "@/components/ui/button"
+import { useAuth } from "@/features/auth/AuthContext"
+import { canManageFunnel } from "@/features/auth/roles"
 import { AddJobQuestionsDialog } from "@/features/jobs/components/AddJobQuestionsDialog"
 import { setJobQuestions } from "@/features/jobs/jobsApi"
 import type {
@@ -110,6 +112,11 @@ interface JobQuestionsManagerProps {
  */
 export function JobQuestionsManager({ job }: JobQuestionsManagerProps) {
   const queryClient = useQueryClient()
+  // Self-gated (like CategoryPicker): interviewers read the script — order,
+  // weights, difficulty — but every edit affordance is hidden and the PUT
+  // is 403 server-side anyway.
+  const { user } = useAuth()
+  const canAct = canManageFunnel(user?.role)
   const [addOpen, setAddOpen] = useState(false)
   const [draft, setDraft] = useState<JobQuestionView[]>(job.questions)
 
@@ -240,7 +247,7 @@ export function JobQuestionsManager({ job }: JobQuestionsManagerProps) {
               question. Fires the same draft update path as a manual edit, so
               the Save button still lights up and the total-weight footer
               recomputes without special-casing. */}
-          {draft.length > 1 ? (
+          {canAct && draft.length > 1 ? (
             <Button
               type="button"
               variant="secondary"
@@ -253,7 +260,7 @@ export function JobQuestionsManager({ job }: JobQuestionsManagerProps) {
               Distribute evenly
             </Button>
           ) : null}
-          {dirty ? (
+          {canAct && dirty ? (
             <>
               <Button
                 type="button"
@@ -282,16 +289,20 @@ export function JobQuestionsManager({ job }: JobQuestionsManagerProps) {
               </Button>
             </>
           ) : null}
-          <Button size="sm" onClick={() => setAddOpen(true)}>
-            <Plus className="h-4 w-4" />
-            Add questions
-          </Button>
+          {canAct ? (
+            <Button size="sm" onClick={() => setAddOpen(true)}>
+              <Plus className="h-4 w-4" />
+              Add questions
+            </Button>
+          ) : null}
         </div>
       </div>
 
       <p className="mt-1 mb-3.5 text-[13px] text-ink-muted">
         {draft.length > 0
-          ? `${draft.length} question${draft.length === 1 ? "" : "s"}, asked in this order. Edit each weight (%) — the total should reach 100%.`
+          ? canAct
+            ? `${draft.length} question${draft.length === 1 ? "" : "s"}, asked in this order. Edit each weight (%) — the total should reach 100%.`
+            : `${draft.length} question${draft.length === 1 ? "" : "s"}, asked in this order, each weighted as a share of the score.`
           : "No questions yet."}
       </p>
 
@@ -310,7 +321,9 @@ export function JobQuestionsManager({ job }: JobQuestionsManagerProps) {
 
       {draft.length === 0 ? (
         <div className="rounded-xl border border-dashed border-line-2 py-8 text-center text-[13px] text-ink-muted">
-          This job has no questions yet. Add some from your bank.
+          {canAct
+            ? "This job has no questions yet. Add some from your bank."
+            : "This job has no questions yet."}
         </div>
       ) : (
         <>
@@ -330,6 +343,7 @@ export function JobQuestionsManager({ job }: JobQuestionsManagerProps) {
                     question={question}
                     index={index}
                     disabled={mutation.isPending}
+                    canAct={canAct}
                     onRemove={() => handleRemove(question.questionId)}
                     onWeight={(weightPct) =>
                       handleWeight(question.questionId, weightPct)
@@ -356,13 +370,15 @@ export function JobQuestionsManager({ job }: JobQuestionsManagerProps) {
         </>
       )}
 
-      <AddJobQuestionsDialog
-        open={addOpen}
-        onOpenChange={setAddOpen}
-        attachedIds={draft.map((q) => q.questionId)}
-        onAdd={handleAdd}
-        saving={mutation.isPending}
-      />
+      {canAct ? (
+        <AddJobQuestionsDialog
+          open={addOpen}
+          onOpenChange={setAddOpen}
+          attachedIds={draft.map((q) => q.questionId)}
+          onAdd={handleAdd}
+          saving={mutation.isPending}
+        />
+      ) : null}
     </div>
   )
 }
@@ -371,6 +387,7 @@ interface SortableQuestionRowProps {
   question: JobQuestionView
   index: number
   disabled: boolean
+  canAct: boolean
   onRemove: () => void
   onWeight: (weightPct: number) => void
 }
@@ -385,7 +402,7 @@ function SortableQuestionRow(props: SortableQuestionRowProps) {
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: props.question.questionId })
+  } = useSortable({ id: props.question.questionId, disabled: !props.canAct })
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -416,6 +433,7 @@ function QuestionRow({
   question,
   index,
   disabled,
+  canAct,
   onRemove,
   onWeight,
   sortableRef,
@@ -475,17 +493,22 @@ function QuestionRow({
         isDragging && "z-10 opacity-60 shadow-lg",
       )}
     >
-      <button
-        type="button"
-        ref={dragHandleRef}
-        {...dragHandleAttributes}
-        {...dragHandleListeners}
-        aria-label={`Drag to reorder question ${index + 1}`}
-        title="Drag to reorder"
-        className="cursor-grab touch-none border-0 bg-transparent p-0 text-[14px] text-ink-subtle active:cursor-grabbing"
-      >
-        ⠿
-      </button>
+      {/* Hidden (not disabled) for read-only roles: spreading dnd-kit's
+          attributes would still announce "sortable" to a screen reader, and
+          touch-none would swallow the list's touch scroll. */}
+      {canAct ? (
+        <button
+          type="button"
+          ref={dragHandleRef}
+          {...dragHandleAttributes}
+          {...dragHandleListeners}
+          aria-label={`Drag to reorder question ${index + 1}`}
+          title="Drag to reorder"
+          className="cursor-grab touch-none border-0 bg-transparent p-0 text-[14px] text-ink-subtle active:cursor-grabbing"
+        >
+          ⠿
+        </button>
+      ) : null}
 
       <span className="flex h-[22px] w-[22px] flex-shrink-0 items-center justify-center rounded-full bg-surface-3 text-[11px] font-bold text-ink-2">
         {index + 1}
@@ -534,9 +557,13 @@ function QuestionRow({
         <div className="flex h-8 w-[74px] items-center overflow-hidden rounded-lg border border-[var(--field-border)]">
           <input
             value={weightDraft}
-            disabled={disabled}
+            disabled={disabled || !canAct}
             aria-label={`Percent of the score for question ${index + 1}`}
-            title="Percent of the interview score. All questions must total 100%."
+            title={
+              canAct
+                ? "Percent of the interview score. All questions must total 100%."
+                : "Percent of the interview score."
+            }
             onChange={(e) =>
               setWeightDraft(e.target.value.replace(/[^0-9]/g, ""))
             }
@@ -557,16 +584,18 @@ function QuestionRow({
         </div>
       </div>
 
-      <button
-        type="button"
-        disabled={disabled}
-        aria-label={`Remove question ${index + 1}`}
-        title="Remove from this job"
-        onClick={onRemove}
-        className="cursor-pointer border-0 bg-transparent p-0 text-ink-subtle hover:text-[var(--danger)] disabled:cursor-not-allowed"
-      >
-        ✕
-      </button>
+      {canAct ? (
+        <button
+          type="button"
+          disabled={disabled}
+          aria-label={`Remove question ${index + 1}`}
+          title="Remove from this job"
+          onClick={onRemove}
+          className="cursor-pointer border-0 bg-transparent p-0 text-ink-subtle hover:text-[var(--danger)] disabled:cursor-not-allowed"
+        >
+          ✕
+        </button>
+      ) : null}
     </div>
   )
 }

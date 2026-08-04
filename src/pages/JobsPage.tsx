@@ -37,6 +37,8 @@ import {
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SortHeader, SortScopeNote } from "@/components/ui/sort-header";
+import { useAuth } from "@/features/auth/AuthContext";
+import { canManageFunnel } from "@/features/auth/roles";
 import { deleteJob, listJobs, setJobStatus } from "@/features/jobs/jobsApi";
 import {
   EMPLOYMENT_TYPE_LABELS,
@@ -116,6 +118,11 @@ export function JobsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const tz = useOrgTimezone();
+  const { user } = useAuth();
+  // Interviewers read the funnel and never write it — the backend 403s job
+  // create/edit/status/delete, so those affordances are hidden rather than
+  // left to fail on click. The list itself, and Open / View candidates, stay.
+  const canAct = canManageFunnel(user?.role);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [search, setSearch] = useState("");
@@ -215,10 +222,12 @@ export function JobsPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <ClearFiltersButton active={filtersActive} onClear={clearFilters} />
-          <Button size="sm" onClick={() => navigate(ROUTES.JOB_NEW)}>
-            <Plus className="h-4 w-4" strokeWidth={2.2} />
-            Create job
-          </Button>
+          {canAct ? (
+            <Button size="sm" onClick={() => navigate(ROUTES.JOB_NEW)}>
+              <Plus className="h-4 w-4" strokeWidth={2.2} />
+              Create job
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -361,12 +370,16 @@ export function JobsPage() {
               <p className="max-w-[340px] text-[13.5px] text-ink-muted">
                 {search || statusFilter
                   ? "Try a different title or clear the status filter."
-                  : "Create your first posting to start collecting applicants."}
+                  : canAct
+                    ? "Create your first posting to start collecting applicants."
+                    : "Postings appear here once someone on your team creates one."}
               </p>
-              <Button size="sm" onClick={() => navigate(ROUTES.JOB_NEW)}>
-                <Plus className="h-4 w-4" strokeWidth={2.2} />
-                Create job
-              </Button>
+              {canAct ? (
+                <Button size="sm" onClick={() => navigate(ROUTES.JOB_NEW)}>
+                  <Plus className="h-4 w-4" strokeWidth={2.2} />
+                  Create job
+                </Button>
+              ) : null}
             </div>
           ) : (
             rows.map((row) => (
@@ -435,11 +448,13 @@ export function JobsPage() {
                       >
                         Open
                       </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onSelect={() => navigate(jobEdit(row._id))}
-                      >
-                        Edit
-                      </DropdownMenuItem>
+                      {canAct ? (
+                        <DropdownMenuItem
+                          onSelect={() => navigate(jobEdit(row._id))}
+                        >
+                          Edit
+                        </DropdownMenuItem>
+                      ) : null}
                       {/* `state.fromJob` marks this as a deliberate drill-in
                           into one job's candidates, so the list shows its "back
                           to job" chrome (breadcrumb, job name in the title, Back
@@ -458,7 +473,7 @@ export function JobsPage() {
                       {/* Only the transitions legal from THIS status —
                           anything else is a 409. `archived` is terminal,
                           so its list is empty and the separator with it. */}
-                      {STATUS_TRANSITIONS[row.status].length > 0 ? (
+                      {canAct && STATUS_TRANSITIONS[row.status].length > 0 ? (
                         <>
                           <DropdownMenuSeparator />
                           {STATUS_TRANSITIONS[row.status].map((t) => (
@@ -477,13 +492,19 @@ export function JobsPage() {
                           ))}
                         </>
                       ) : null}
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        className="text-[var(--danger)] focus:bg-[var(--danger-soft)] focus:text-[var(--danger)]"
-                        onSelect={() => setDeleteTarget(row)}
-                      >
-                        Delete
-                      </DropdownMenuItem>
+                      {/* Separator goes with the item it introduces, so an
+                          interviewer's menu doesn't end on a rule. */}
+                      {canAct ? (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            className="text-[var(--danger)] focus:bg-[var(--danger-soft)] focus:text-[var(--danger)]"
+                            onSelect={() => setDeleteTarget(row)}
+                          >
+                            Delete
+                          </DropdownMenuItem>
+                        </>
+                      ) : null}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>

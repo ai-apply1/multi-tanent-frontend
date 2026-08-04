@@ -21,6 +21,8 @@ import {
 } from "@/features/candidates/candidatesApi"
 import { invalidateCandidateData } from "@/features/candidates/candidatesCache"
 import { manualMoveBlocker } from "@/features/candidates/manualMove"
+import { useAuth } from "@/features/auth/AuthContext"
+import { canManageFunnel } from "@/features/auth/roles"
 import type { KanbanBoard, KanbanCard } from "@/features/candidates/types"
 import { errorMessage } from "@/lib/errors"
 import { cn } from "@/lib/utils"
@@ -54,6 +56,12 @@ interface Props {
 export function CandidateKanban({ jobId, onOpenCandidate }: Props) {
   const queryClient = useQueryClient()
   const [draggingCard, setDraggingCard] = useState<KanbanCard | null>(null)
+  // The board is the ONE mutation surface here, and the backend 403s the status
+  // PATCH for a view-only role. Unlike every other barred affordance it can't be
+  // hidden — the cards ARE the content — so dragging is disabled instead and the
+  // board stays fully readable.
+  const { user } = useAuth()
+  const canDrag = canManageFunnel(user?.role)
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: kanbanQueryKey(jobId),
@@ -216,6 +224,7 @@ export function CandidateKanban({ jobId, onOpenCandidate }: Props) {
               // candidate. Null when nothing is being dragged, so the resting
               // board looks exactly as it did.
               blocked={draggingCard ? manualMoveBlocker(column, draggingCard) : null}
+              canDrag={canDrag}
               onOpenCandidate={onOpenCandidate}
             />
           ))}
@@ -237,6 +246,7 @@ function KanbanColumnLane({
   count,
   cards,
   blocked,
+  canDrag,
   onOpenCandidate,
 }: {
   columnKey: string
@@ -246,6 +256,8 @@ function KanbanColumnLane({
   cards: KanbanCard[]
   /** Why the in-flight card can't land here; null when it can (or none is). */
   blocked: string | null
+  /** May this role move candidates? False leaves the cards read-only. */
+  canDrag: boolean
   onOpenCandidate: (candidateId: string) => void
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: columnKey })
@@ -297,6 +309,7 @@ function KanbanColumnLane({
               key={card._id}
               card={card}
               fromKey={columnKey}
+              canDrag={canDrag}
               // The drawer shows an INTERVIEW. A card with no attempt yet has
               // nothing to open, so it isn't offered as clickable rather than
               // opening an empty drawer.
@@ -320,15 +333,18 @@ function KanbanColumnLane({
 function DraggableCard({
   card,
   fromKey,
+  canDrag,
   onOpen,
 }: {
   card: KanbanCard
   fromKey: string
+  canDrag: boolean
   onOpen?: () => void
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: card._id,
     data: { card, fromKey },
+    disabled: !canDrag,
   })
 
   return (
@@ -336,7 +352,11 @@ function DraggableCard({
       <CardBody
         card={card}
         onOpen={onOpen}
-        handleProps={{ ...attributes, ...listeners }}
+        // `disabled` already voids the listeners, but `attributes` would still
+        // announce the card as draggable to a screen reader — so drop them too
+        // and let the card keep its own button/keyboard semantics.
+        handleProps={canDrag ? { ...attributes, ...listeners } : undefined}
+        draggable={canDrag}
       />
     </div>
   )
@@ -351,11 +371,14 @@ function CardBody({
   onOpen,
   handleProps,
   dragging,
+  draggable = true,
 }: {
   card: KanbanCard
   onOpen?: () => void
   handleProps?: Record<string, unknown>
   dragging?: boolean
+  /** False for a view-only role — no grab cursor, and touch scrolls the lane. */
+  draggable?: boolean
 }) {
   // Row 2 chips derived from what a KanbanCard actually carries. No interview
   // status/score is projected onto the card, so we surface the proxies we do
@@ -405,7 +428,12 @@ function CardBody({
       title={onOpen ? "Open the interview result" : undefined}
       {...(handleProps ?? {})}
       className={cn(
-        "cursor-grab touch-none select-none rounded-xl border border-line bg-surface p-3 transition-colors hover:border-line-2 hover:shadow-md active:cursor-grabbing",
+        "select-none rounded-xl border border-line bg-surface p-3 transition-colors hover:border-line-2 hover:shadow-md",
+        // `touch-none` only earns its keep on a card that can actually be
+        // dragged — on a read-only one it would swallow the lane's touch scroll.
+        draggable
+          ? "cursor-grab touch-none active:cursor-grabbing"
+          : onOpen && "cursor-pointer",
         dragging && "cursor-grabbing shadow-lg"
       )}
     >

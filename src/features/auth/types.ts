@@ -1,5 +1,11 @@
-/** Wire values, not display labels — `org_admin` unlocks Team + the org-settings write path. */
-export type UserRole = "org_admin" | "hr"
+/**
+ * Wire values, not display labels — `org_admin` unlocks Team + the
+ * org-settings write path; `interviewer` is a view-only reviewer (the
+ * backend 403s every funnel mutation and hides salary figures), so the UI
+ * hides action affordances for it — see `canManageFunnel` in
+ * `features/auth/roles.ts`.
+ */
+export type UserRole = "org_admin" | "hr" | "interviewer"
 
 /**
  * The signed-in user. Login, refresh AND `/admin/auth/me` all return this

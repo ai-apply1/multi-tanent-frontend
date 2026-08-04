@@ -32,7 +32,8 @@ interface NavItem {
   label: string;
   to: string;
   icon: LucideIcon;
-  requiresRole?: UserRole;
+  /** Allow-list, not a single role — a link can be shared by org_admin + hr. */
+  requiresRoles?: UserRole[];
   end?: boolean;
 }
 
@@ -62,19 +63,24 @@ export const navSections: NavSection[] = [
  * templates" deep-links its email tab (the remaining tabs, branding, domains,
  * demo video..., are reached from the in-page tab bar), then the Hiring
  * Pipeline and Team, which were top-level Workspace items before. Team stays
- * org_admin-only, so it carries `requiresRole` and is filtered out for everyone
- * else.
+ * org_admin-only and Email templates is org_admin/hr (the backend 403s an
+ * interviewer on the templates list), so both carry `requiresRoles` and are
+ * filtered out for everyone else.
  */
 const SETTINGS_CHILDREN: Array<{
   label: string;
   to: string;
-  requiresRole?: UserRole;
+  requiresRoles?: UserRole[];
 }> = [
   { label: "General", to: settingsTab("general") },
-  { label: "Email templates", to: ROUTES.EMAIL_TEMPLATES },
+  {
+    label: "Email templates",
+    to: ROUTES.EMAIL_TEMPLATES,
+    requiresRoles: ["org_admin", "hr"],
+  },
   { label: "Hiring Pipeline", to: ROUTES.PIPELINE },
-  { label: "Manage Team", to: ROUTES.TEAM, requiresRole: "org_admin" },
-  // Per-user, so no `requiresRole` — every role manages their own MFA.
+  { label: "Manage Team", to: ROUTES.TEAM, requiresRoles: ["org_admin"] },
+  // Per-user, so no `requiresRoles` — every role manages their own MFA.
   { label: "Security", to: ROUTES.SECURITY },
 ];
 
@@ -86,7 +92,9 @@ export function visibleSections(
     .map((section) => ({
       ...section,
       items: section.items.filter(
-        (item) => !item.requiresRole || item.requiresRole === role,
+        (item) =>
+          !item.requiresRoles ||
+          (role != null && item.requiresRoles.includes(role)),
       ),
     }))
     .filter((section) => section.items.length > 0);
@@ -139,7 +147,9 @@ function SettingsNav({
     onSettings || onPipeline || onTeam || onEmailTemplates || onSecurity;
 
   const children = SETTINGS_CHILDREN.filter(
-    (c) => !c.requiresRole || c.requiresRole === user?.role,
+    (c) =>
+      !c.requiresRoles ||
+      (user?.role != null && c.requiresRoles.includes(user.role)),
   );
 
   // Re-open when navigation lands on an owned route from elsewhere (palette,
@@ -434,7 +444,7 @@ export function Sidebar() {
               {titleCase(user?.fullName || "User")}
             </div>
             <div className="truncate text-[11px] text-ink-muted">
-              {user?.role ? USER_ROLE_LABELS[user.role as UserRole] ?? "" : ""}
+              {user?.role ? (USER_ROLE_LABELS[user.role] ?? "") : ""}
             </div>
           </div>
         )}
@@ -589,7 +599,7 @@ export function MobileNavTrigger() {
                   {titleCase(user?.fullName || "User")}
                 </div>
                 <div className="truncate text-[11px] text-ink-muted">
-                  {user?.role ? USER_ROLE_LABELS[user.role as UserRole] ?? "" : ""}
+                  {user?.role ? (USER_ROLE_LABELS[user.role] ?? "") : ""}
                 </div>
               </div>
               <button
