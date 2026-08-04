@@ -59,27 +59,10 @@ export interface JobEligibility {
   considerRelocators: boolean
   minYearsExperience: number | null
   requiredSkills: string[]
-  university: JobUniversityGate
-  expectedSalary: JobSalaryGate
-}
-
-/**
- * The university gate. `names` is an OR: any one of them clears it, because a
- * candidate has one alma mater, not all of them. Read from the CV, never asked.
- */
-export interface JobUniversityGate {
-  enabled: boolean
-  names: string[]
-}
-
-/**
- * The expected-salary gate. `maxSalary` is the most the JOB pays; the candidate
- * is separately asked the LEAST they will accept, and only a candidate whose
- * minimum sits above this fails. The candidate never sees this number.
- */
-export interface JobSalaryGate {
-  enabled: boolean
-  maxSalary: number | null
+  /** Requirements over the custom form answers. Empty = collect-only form. */
+  customRules: JobCustomRule[]
+  /** Accepted-list eligibility checks, CV-read or form-asked. */
+  customChecks: JobCustomCheck[]
 }
 
 /**
@@ -97,6 +80,152 @@ export interface JobScoringWeights {
   depth: number
   /** Could a listener follow them — substance + spoken fluency? */
   communication: number
+}
+
+// ── custom application form + screening rules ────────────────────────
+
+/**
+ * Input types HR can add to a job's application form. Mirrors the backend's
+ * `ApplicationFieldType`. A field is an INPUT and nothing else — screening
+ * over the answers is a separate config (`JobCustomRule`), which is what
+ * keeps this from being the entangled per-field builder the platform
+ * removed once already.
+ */
+export type ApplicationFieldType =
+  | "text"
+  | "textarea"
+  | "number"
+  | "select"
+  | "multiselect"
+  | "checkbox"
+  | "date"
+  | "url"
+
+/**
+ * One custom field on the job's public application form.
+ *
+ * `id` is the field's PERMANENT identity (opaque, client-minted, never
+ * derived from the label): stored answers and rule conditions key on it, so
+ * relabeling a field never orphans either. Array order is display order —
+ * there is no order field to drift from it.
+ */
+export interface JobFormField {
+  id: string
+  type: ApplicationFieldType
+  label: string
+  help: string
+  required: boolean
+  /**
+   * Choice types only; the strings ARE the canonical answer values.
+   *
+   * Deliberately NO min/max on number fields: a bound with a consequence is
+   * a screening rule (the Eligibility step's Custom requirements), and a
+   * form-level bound would ride the public payload, telling every candidate
+   * the threshold. A field collects; rules judge.
+   */
+  options: string[]
+}
+
+/**
+ * Operators a screening-rule condition can apply, by the field's type. A
+ * client copy of the backend's `RULE_OPERATORS_BY_FIELD_TYPE` — the server
+ * re-validates, this one just keeps the editor from offering a combination
+ * the save would 422. Types absent here (text, textarea, date, url) are
+ * collect-only: shown to HR on the candidate, never auto-gated.
+ */
+export type CustomRuleOperator =
+  | "eq"
+  | "gte"
+  | "lte"
+  | "between"
+  | "is_one_of"
+  | "includes_any"
+  | "includes_all"
+
+export type CustomRuleOnFail = "reject" | "review"
+
+export interface JobCustomRuleCondition {
+  fieldId: string
+  op: CustomRuleOperator
+  /**
+   * Shape depends on `op`: number (gte/lte, eq on number), string (eq on
+   * select), boolean (eq on checkbox), [min, max] pair (between), or
+   * string[] (is_one_of / includes_*).
+   */
+  value: unknown
+}
+
+/**
+ * One screening requirement over the form answers: ALL conditions must hold,
+ * else `onFail` decides reject-vs-review. A candidate whose answer is
+ * MISSING always parks for HR review, whatever `onFail` says. Rules are
+ * server-only: the apply page receives the fields, never these.
+ */
+export interface JobCustomRule {
+  id: string
+  label: string
+  conditions: JobCustomRuleCondition[]
+  onFail: CustomRuleOnFail
+}
+
+/**
+ * Where a custom eligibility check's answer comes from. `cv` = the AI judges
+ * the CV at parse time (the accepted list stays server-side); `form` = the
+ * apply form gains a dropdown of the accepted values plus an automatic
+ * "None of the above", the only answer that fails it.
+ */
+export type CustomCheckSource = "cv" | "form"
+
+/**
+ * One accepted-list eligibility check: any ONE accepted value clears it.
+ * Lives in `eligibility.customChecks` server-side; a form-sourced check also
+ * synthesizes a question onto the apply form under this same `id`, which is
+ * why check ids and form-field ids share one namespace (backend-enforced).
+ */
+export interface JobCustomCheck {
+  id: string
+  label: string
+  acceptedValues: string[]
+  source: CustomCheckSource
+  onFail: CustomRuleOnFail
+}
+
+/**
+ * The fixed escape-hatch option the backend appends to every form-sourced
+ * check's dropdown. Mirrored here only to refuse an accepted value that
+ * collides with it (the backend 422s the same collision).
+ */
+export const CHECK_NONE_OPTION = "None of the above"
+
+export const RULE_OPERATORS_BY_FIELD_TYPE: Partial<
+  Record<ApplicationFieldType, readonly CustomRuleOperator[]>
+> = {
+  number: ["eq", "gte", "lte", "between"],
+  select: ["eq", "is_one_of"],
+  multiselect: ["includes_any", "includes_all"],
+  checkbox: ["eq"],
+}
+
+export const FIELD_TYPE_LABELS: Record<ApplicationFieldType, string> = {
+  text: "Short text",
+  textarea: "Paragraph",
+  number: "Number",
+  select: "Dropdown",
+  multiselect: "Multiple choice",
+  checkbox: "Checkbox",
+  date: "Date",
+  url: "Link",
+}
+
+/** Editor copy: what each operator reads as, in a requirement sentence. */
+export const OPERATOR_LABELS: Record<CustomRuleOperator, string> = {
+  eq: "is exactly",
+  gte: "is at least",
+  lte: "is at most",
+  between: "is between",
+  is_one_of: "is one of",
+  includes_any: "includes any of",
+  includes_all: "includes all of",
 }
 
 /** Everything a job carries except its questions. */
@@ -123,6 +252,8 @@ export interface JobBase {
    * candidate has already been emailed about.
    */
   interviewDurationMinutes: number | null
+  /** Custom application-form fields, in display order. */
+  formFields: JobFormField[]
   createdBy: string | null
   updatedBy: string | null
   createdAt: string
@@ -185,8 +316,27 @@ export interface JobEligibilityPayload {
   considerRelocators?: boolean
   minYearsExperience?: number
   requiredSkills?: string[]
-  university?: JobUniversityGate
-  expectedSalary?: { enabled: boolean; maxSalary?: number }
+  /**
+   * REPLACE semantics with the rest of the block. Every condition must
+   * reference a field present in the job's (possibly simultaneously updated)
+   * `formFields`, or the backend 422s the save.
+   */
+  customRules?: JobCustomRule[]
+  /** REPLACE semantics with the rest of the block, like customRules. */
+  customChecks?: JobCustomCheck[]
+}
+
+/**
+ * One form field as the API accepts it — optional where the backend
+ * defaults.
+ */
+export interface JobFormFieldPayload {
+  id: string
+  type: ApplicationFieldType
+  label: string
+  help?: string
+  required?: boolean
+  options?: string[]
 }
 
 /**
@@ -213,6 +363,11 @@ export interface CreateJobPayload {
    * it, or clearing the last gate would be a silent no-op.
    */
   eligibility?: JobEligibilityPayload
+  /**
+   * REPLACE semantics on PATCH, like eligibility: sending it swaps the whole
+   * list. Always send it, or deleting the last field would silently no-op.
+   */
+  formFields?: JobFormFieldPayload[]
   /** `technical + communication` must equal 100 (422 otherwise). */
   scoringWeights?: JobScoringWeights
   rejectionThreshold?: number

@@ -3,14 +3,17 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDown,
+  FileText,
   Loader2,
   Pencil,
   RefreshCw,
   Share2,
+  ShieldCheck,
   Star,
   Upload,
   User,
   UserCheck,
+  UserRound,
   Users,
   X as XIcon,
 } from "lucide-react";
@@ -31,11 +34,14 @@ import { JobSwitcher } from "@/features/jobs/components/JobSwitcher";
 import { getJob, setJobStatus } from "@/features/jobs/jobsApi";
 import {
   EMPLOYMENT_TYPE_LABELS,
+  FIELD_TYPE_LABELS,
   JOB_STATUS_LABELS,
+  OPERATOR_LABELS,
   SENIORITY_LABELS,
   STATUS_TRANSITIONS,
   WORK_MODE_LABELS,
   type Job,
+  type JobCustomRuleCondition,
   type JobStatus,
 } from "@/features/jobs/types";
 import { useOrganization } from "@/features/organization/useOrganization";
@@ -551,6 +557,8 @@ function OverviewTab({
             </MetaCell>
           </div>
         </SectionCard>
+
+        <ApplicationFormCard job={job} />
       </div>
 
       {/* Right column. `sticky` inside the two-column grid keeps the rail
@@ -628,6 +636,195 @@ function OverviewTab({
         </SectionCard>
       </div>
     </div>
+  );
+}
+
+// ── Application form & screening card ────────────────────────────────
+
+/**
+ * Render one custom-rule condition as the sentence HR configured it as:
+ * `<field label> <operator> <value>`. The field label comes from the job's
+ * CURRENT form (a deleted field cannot survive a save while a rule still
+ * references it, so a miss here means a hand-edited document).
+ */
+function conditionSentence(job: Job, condition: JobCustomRuleCondition): string {
+  const field = (job.formFields ?? []).find((f) => f.id === condition.fieldId);
+  const name = field?.label ?? "a removed field";
+  const op = OPERATOR_LABELS[condition.op] ?? condition.op;
+  return `${name} ${op} ${ruleValueText(condition.value)}`;
+}
+
+function ruleValueText(value: unknown): string {
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "number") {
+    return value.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  }
+  if (Array.isArray(value)) {
+    // A `between` pair reads as a range; option lists read as a list.
+    if (
+      value.length === 2 &&
+      typeof value[0] === "number" &&
+      typeof value[1] === "number"
+    ) {
+      return `${ruleValueText(value[0])} and ${ruleValueText(value[1])}`;
+    }
+    return value.map((v) => ruleValueText(v)).join(", ");
+  }
+  return String(value ?? "");
+}
+
+/** Small uppercase heading used for each group inside the card. */
+function GroupLabel({ children }: { children: ReactNode }) {
+  return (
+    <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle">
+      {children}
+    </div>
+  );
+}
+
+/**
+ * What this job's application form asks and how the answers are screened —
+ * the read-only mirror of the wizard's "Application form" and "Eligibility &
+ * vetting" steps, so HR can see a job's setup without opening the editor.
+ */
+function ApplicationFormCard({ job }: { job: Job }) {
+  const formFields = job.formFields ?? [];
+  const customChecks = job.eligibility.customChecks ?? [];
+  const customRules = job.eligibility.customRules ?? [];
+  const cityGateOn = Boolean(job.eligibility.city) && job.workMode !== "remote";
+
+  return (
+    <SectionCard>
+      <h2 className="mb-3 text-[15px] font-semibold text-ink">
+        Application form &amp; screening
+      </h2>
+
+      <GroupLabel>Form questions</GroupLabel>
+      <p className="mb-2 text-[12.5px] text-ink-muted">
+        Every application asks for name, email, phone, city and a PDF CV
+        {cityGateOn ? ", plus whether the candidate would relocate" : ""}.
+      </p>
+      {formFields.length > 0 ? (
+        <ul className="grid gap-1.5 sm:grid-cols-2">
+          {formFields.map((field) => (
+            <li
+              key={field.id}
+              className="flex items-baseline justify-between gap-2 rounded-lg border border-line px-3 py-2"
+            >
+              <span className="min-w-0 truncate text-[13px] font-medium text-ink">
+                {field.label}
+                {field.required ? (
+                  <span className="ml-1 text-[var(--danger)]">*</span>
+                ) : null}
+              </span>
+              <span className="shrink-0 text-[11.5px] text-ink-subtle">
+                {FIELD_TYPE_LABELS[field.type] ?? field.type}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-[13px] text-ink-muted">
+          No custom questions were added.
+        </p>
+      )}
+
+      <div className="mt-5">
+        <GroupLabel>Eligibility checks</GroupLabel>
+        {customChecks.length > 0 ? (
+          <ul className="grid gap-2">
+            {customChecks.map((check) => (
+              <li
+                key={check.id}
+                className="rounded-lg border border-line px-3 py-2.5"
+              >
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <ShieldCheck
+                    className="h-3.5 w-3.5 shrink-0 text-primary"
+                    strokeWidth={2}
+                  />
+                  <span className="text-[13px] font-semibold text-ink">
+                    {check.label}
+                  </span>
+                  <span className="inline-flex items-center gap-1 text-[11.5px] text-ink-subtle">
+                    {check.source === "cv" ? (
+                      <>
+                        <FileText className="h-3 w-3" strokeWidth={2} />
+                        Read from the CV
+                      </>
+                    ) : (
+                      <>
+                        <UserRound className="h-3 w-3" strokeWidth={2} />
+                        Asked on the form
+                      </>
+                    )}
+                  </span>
+                  <span className="ml-auto text-[11.5px] text-ink-subtle">
+                    {check.onFail === "reject"
+                      ? "Misses are rejected"
+                      : "Misses go to review"}
+                  </span>
+                </div>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {check.acceptedValues.map((value) => (
+                    <span
+                      key={value}
+                      className="rounded-full bg-accent px-2.5 py-0.5 text-[11.5px] font-semibold text-primary"
+                    >
+                      {value}
+                    </span>
+                  ))}
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-[13px] text-ink-muted">None configured.</p>
+        )}
+      </div>
+
+      <div className="mt-5">
+        <GroupLabel>Custom requirements</GroupLabel>
+        {customRules.length > 0 ? (
+          <ul className="grid gap-2">
+            {customRules.map((rule) => (
+              <li
+                key={rule.id}
+                className="rounded-lg border border-line px-3 py-2.5"
+              >
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="text-[13px] font-semibold text-ink">
+                    {rule.label}
+                  </span>
+                  <span className="ml-auto text-[11.5px] text-ink-subtle">
+                    {rule.onFail === "reject"
+                      ? "Misses are rejected"
+                      : "Misses go to review"}
+                  </span>
+                </div>
+                <p className="mt-1 text-[12.5px] text-ink-muted">
+                  Passes when {rule.conditions
+                    .map((condition) => conditionSentence(job, condition))
+                    .join(", and ")}
+                  .
+                </p>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-[13px] text-ink-muted">None configured.</p>
+        )}
+      </div>
+
+      {cityGateOn ? (
+        <p className="mt-4 border-t border-line pt-3 text-[12px] text-ink-muted">
+          City mismatch policy:{" "}
+          {job.eligibility.considerRelocators
+            ? "a candidate in another city who says they would relocate goes to your review queue instead of being rejected."
+            : "any candidate outside the required city is rejected, even if they would relocate."}
+        </p>
+      ) : null}
+    </SectionCard>
   );
 }
 

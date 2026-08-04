@@ -113,6 +113,7 @@ import {
   REJECTED_STATUS_KEYS,
   type BuiltinCandidateStatusKey,
   type CandidateActivity,
+  type CandidateAnswer,
   type CandidateDetail,
   type CandidateProfile,
   type CandidateStatus,
@@ -1010,11 +1011,9 @@ function citiesDisagree(applied: string, fromCv: string): boolean {
 }
 
 /**
- * What the job's optional gates actually found for this candidate.
- *
- * Separate from the pre-screen checklist below on purpose: that card shows
- * VERDICTS, this one shows the underlying facts, and a candidate who was
- * accepted has no checklist at all but still has these.
+ * The fixed application facts worth a reviewer's eye: the relocation answer
+ * and a CV-vs-form city disagreement. (Custom-form answers have their own
+ * card below; check verdicts live in the pre-screen checklist.)
  *
  * The city row appears ONLY on a disagreement. The city itself is already in
  * the drawer header, so repeating it unconditionally would be noise; what the
@@ -1024,8 +1023,6 @@ function citiesDisagree(applied: string, fromCv: string): boolean {
  * so it is context for the reviewer and gates nothing.
  */
 interface ExtraGatesCardProps {
-  university: CandidateProfile["universityCheck"] | null
-  expectedSalaryMin: number | null
   willingToRelocate: boolean | null
   city: string | null
   profileCity: string | null
@@ -1042,21 +1039,15 @@ interface ExtraGatesCardProps {
  */
 function hasExtraGates(p: ExtraGatesCardProps): boolean {
   return (
-    Boolean(p.university) ||
-    p.expectedSalaryMin != null ||
     p.willingToRelocate != null ||
     citiesDisagree(p.city ?? "", p.profileCity ?? "")
   );
 }
 
 function ExtraGatesCard(props: ExtraGatesCardProps) {
-  const { university, expectedSalaryMin, willingToRelocate, city, profileCity } =
-    props;
+  const { willingToRelocate, city, profileCity } = props;
   const cityConflict = citiesDisagree(city ?? "", profileCity ?? "");
   if (!hasExtraGates(props)) return null;
-
-  const money = (n: number) =>
-    n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 
   return (
     <div className="rounded-2xl border border-line bg-surface p-[18px]">
@@ -1067,44 +1058,6 @@ function ExtraGatesCard(props: ExtraGatesCardProps) {
         <h4 className="text-[13.5px] font-bold text-ink">Role requirements</h4>
       </div>
       <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
-        {university ? (
-          <div className="grid gap-0.5">
-            <dt className="flex flex-wrap items-center gap-x-1.5 text-[12px] text-ink-muted">
-              University
-              <span className="text-[11px] text-ink-subtle">from the CV</span>
-            </dt>
-            <dd
-              className={cn(
-                "text-[13.5px] font-semibold",
-                university.verdict === "unclear" ? "text-ink-subtle" : "text-ink",
-              )}
-            >
-              {university.verdict === "yes"
-                ? university.matched || "An accepted university"
-                : university.verdict === "no"
-                  ? "Not an accepted university"
-                  : "Could not be matched"}
-            </dd>
-            {university.evidence ? (
-              <dd className="text-[12px] italic leading-snug text-ink-muted">
-                “{university.evidence}”
-              </dd>
-            ) : null}
-          </div>
-        ) : null}
-        {expectedSalaryMin != null ? (
-          <div className="grid gap-0.5">
-            <dt className="flex flex-wrap items-center gap-x-1.5 text-[12px] text-ink-muted">
-              Expected salary
-              <span className="text-[11px] text-ink-subtle">
-                from the application
-              </span>
-            </dt>
-            <dd className="text-[13.5px] font-semibold text-ink">
-              {money(expectedSalaryMin)}
-            </dd>
-          </div>
-        ) : null}
         {willingToRelocate != null ? (
           <div className="grid gap-0.5">
             <dt className="flex flex-wrap items-center gap-x-1.5 text-[12px] text-ink-muted">
@@ -1134,6 +1087,74 @@ function ExtraGatesCard(props: ExtraGatesCardProps) {
             </dd>
           </div>
         ) : null}
+      </dl>
+    </div>
+  );
+}
+
+/**
+ * The candidate's custom application-form answers, from the snapshots taken
+ * at submit. Labels and types were frozen WITH the values, so this renders
+ * the questions as they were actually asked — deliberately not enriched from
+ * the job's current form config, which may have changed since. Hidden
+ * entirely when there are none (imports, or a job with no custom fields).
+ */
+function ApplicationAnswersCard({
+  answers,
+}: {
+  answers: CandidateAnswer[] | undefined;
+}) {
+  if (!answers || answers.length === 0) return null;
+
+  const display = (answer: CandidateAnswer): React.ReactNode => {
+    if (answer.type === "checkbox") return answer.value === true ? "Yes" : "No";
+    if (Array.isArray(answer.value)) return answer.value.join(", ");
+    if (answer.type === "url" && typeof answer.value === "string") {
+      return (
+        <a
+          href={answer.value}
+          target="_blank"
+          rel="noreferrer"
+          className="break-all text-primary underline-offset-2 hover:underline"
+        >
+          {answer.value}
+        </a>
+      );
+    }
+    if (typeof answer.value === "number") {
+      return answer.value.toLocaleString("en-US", {
+        maximumFractionDigits: 2,
+      });
+    }
+    return String(answer.value);
+  };
+
+  return (
+    <div className="rounded-2xl border border-line bg-surface p-[18px]">
+      <div className="mb-3.5 flex items-center gap-2">
+        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent text-primary">
+          <ClipboardCheck className="h-3.5 w-3.5" strokeWidth={2} />
+        </span>
+        <h4 className="text-[13.5px] font-bold text-ink">
+          Application answers
+        </h4>
+      </div>
+      <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+        {answers.map((answer) => (
+          <div
+            key={answer.fieldId}
+            className={cn(
+              "grid gap-0.5",
+              // A long-text answer needs the full row to stay readable.
+              answer.type === "textarea" && "sm:col-span-2",
+            )}
+          >
+            <dt className="text-[12px] text-ink-muted">{answer.label}</dt>
+            <dd className="whitespace-pre-wrap text-[13.5px] font-semibold text-ink">
+              {display(answer)}
+            </dd>
+          </div>
+        ))}
       </dl>
     </div>
   );
@@ -1423,15 +1444,11 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   const statuses = statusesQuery.data ?? [];
   const candidate = candidateQuery.data ?? null;
   const profile = candidate?.profile ?? null;
-  const universityCheck = profile?.universityCheck ?? null;
-  const expectedSalaryMin = candidate?.expectedSalaryMin ?? null;
   // Bundled because two call sites render this card and one of them also has
   // to ask `hasExtraGates` the same question, so the inputs must not drift.
   // `city` and `profileCity` are passed RAW: whether they actually disagree is
   // decided inside the card, next to the matching rule it depends on.
   const extraGatesProps: ExtraGatesCardProps = {
-    university: universityCheck,
-    expectedSalaryMin,
     willingToRelocate: candidate?.willingToRelocate ?? null,
     city: candidate?.city ?? null,
     profileCity: profile?.city ?? null,
@@ -2035,6 +2052,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                     just the parsed-CV profile and a note. */}
                 <ProfileCard profile={profile} />
                 <ExtraGatesCard {...extraGatesProps} />
+                <ApplicationAnswersCard answers={candidate?.answers} />
 
                 {isInitialRejected ? (
                   // Rejected at the CV pre-screen, no interview will ever exist,
@@ -2095,6 +2113,11 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                 {hasExtraGates(extraGatesProps) ? (
                   <div className="mb-4">
                     <ExtraGatesCard {...extraGatesProps} />
+                  </div>
+                ) : null}
+                {candidate?.answers?.length ? (
+                  <div className="mb-4">
+                    <ApplicationAnswersCard answers={candidate.answers} />
                   </div>
                 ) : null}
 

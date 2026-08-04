@@ -27,11 +27,23 @@ import {
 } from "@/components/ui/tooltip";
 import { ChipInput } from "@/features/jobs/components/ChipInput";
 import {
-  ExtraGatesEditor,
-  emptyExtraGates,
-  validateExtraGates,
-  type ExtraGatesValue,
-} from "@/features/jobs/components/ExtraGatesEditor";
+  ApplicationFormEditor,
+  checksFromJob,
+  draftsFromJob,
+  serializeCustomChecks,
+  serializeFormFields,
+  validateCustomChecks,
+  validateFormFields,
+  type CheckDraft,
+  type FormFieldDraft,
+} from "@/features/jobs/components/ApplicationFormEditor";
+import {
+  CustomRulesEditor,
+  rulesFromJob,
+  serializeCustomRules,
+  validateCustomRules,
+  type RuleDraft,
+} from "@/features/jobs/components/CustomRulesEditor";
 import { MarkdownEditor } from "@/features/jobs/components/MarkdownEditor";
 import {
   ANY_CITY_VALUE,
@@ -85,8 +97,12 @@ const SENIORITY_LEVELS = Object.keys(SENIORITY_LABELS) as SeniorityLevel[];
 const STEPS: Array<[string, string]> = [
   ["Basics", "Role title & description"],
   ["Classification", "Type, mode & seniority"],
-  ["Scoring", "Split & shortlist line"],
+  ["Application form", "What candidates fill in"],
+  // Eligibility directly follows the form on purpose: its Custom
+  // requirements section screens the answers configured one step back,
+  // so the two read as one thought. Scoring closes the wizard.
   ["Eligibility & vetting", "Pre-screen gates"],
+  ["Scoring", "Split & shortlist line"],
 ];
 
 /** Parse a numeric field that is allowed to be blank. */
@@ -226,16 +242,20 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
   const [requiredSkills, setRequiredSkills] = useState<string[]>(
     job?.eligibility.requiredSkills ?? [],
   );
-  const [extraGates, setExtraGates] = useState<ExtraGatesValue>(() => ({
-    ...emptyExtraGates(),
-    universityEnabled: job?.eligibility.university?.enabled ?? false,
-    universityNames: job?.eligibility.university?.names ?? [],
-    salaryEnabled: job?.eligibility.expectedSalary?.enabled ?? false,
-    salaryMax:
-      job?.eligibility.expectedSalary?.maxSalary == null
-        ? ""
-        : String(job.eligibility.expectedSalary.maxSalary),
-  }));
+
+  // ── Application form + the requirements over its answers. Two configs on
+  // two steps, edited against each other: the requirements editor reads the
+  // CURRENT field drafts, so renaming or deleting a field is reflected there
+  // immediately rather than at save time.
+  const [formFields, setFormFields] = useState<FormFieldDraft[]>(() =>
+    draftsFromJob(job?.formFields),
+  );
+  const [customRules, setCustomRules] = useState<RuleDraft[]>(() =>
+    rulesFromJob(job?.eligibility.customRules),
+  );
+  const [customChecks, setCustomChecks] = useState<CheckDraft[]>(() =>
+    checksFromJob(job?.eligibility.customChecks),
+  );
 
   const { data: organization } = useOrganization();
 
@@ -296,28 +316,46 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
   // were dropped when main simplified the eligibility schema.
   // Mirrors the server's 422 checks so the wizard blocks the step instead of
   // bouncing the whole save. The server still re-checks.
-  const extraGateErrors = useMemo(
-    () => validateExtraGates(extraGates),
-    [extraGates],
+  const formFieldErrors = useMemo(
+    () => validateFormFields(formFields),
+    [formFields],
+  );
+
+  const customCheckErrors = useMemo(
+    () => validateCustomChecks(customChecks),
+    [customChecks],
+  );
+
+  // Validated against the CURRENT field drafts, so deleting a field a
+  // requirement still checks blocks the eligibility step with a message,
+  // mirroring the server's cross-config 422.
+  const customRuleErrors = useMemo(
+    () => validateCustomRules(customRules, formFields),
+    [customRules, formFields],
   );
 
   const stepValid = useMemo(
     () => [
       trimmedTitle.length > 0,
       Boolean(employmentType && workMode && seniorityLevel),
+      // Everything edited on the Application form step gates THAT step:
+      // the fields and HR's eligibility checks.
+      formFieldErrors.length === 0 && customCheckErrors.length === 0,
+      !minYearsError && customRuleErrors.length === 0,
       !rejectionError && !maxAttemptsError && !durationError,
-      !minYearsError && extraGateErrors.length === 0,
     ],
     [
       trimmedTitle,
       employmentType,
       workMode,
       seniorityLevel,
+      formFieldErrors,
       rejectionError,
       maxAttemptsError,
       durationError,
       minYearsError,
-      extraGateErrors,
+      customRuleErrors,
+      customCheckErrors,
     ],
   );
 
@@ -328,7 +366,7 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
   const buildEligibility = (): JobEligibilityPayload => {
     const eligibility: JobEligibilityPayload = {};
     if (city.trim()) eligibility.city = city.trim();
-    // Sent unconditionally, like the two gate blocks below: eligibility is
+    // Sent unconditionally, like the two lists below: eligibility is
     // REPLACE-semantics, so omitting it would reset the server to the default.
     eligibility.considerRelocators = considerRelocators;
     if (parsedMinYears !== undefined) {
@@ -337,18 +375,10 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
     if (requiredSkills.length > 0) {
       eligibility.requiredSkills = requiredSkills;
     }
-    // Always sent, both halves: eligibility is REPLACE-semantics, so omitting
-    // a switched-off gate would leave the previous one enabled on the server.
-    eligibility.university = {
-      enabled: extraGates.universityEnabled,
-      names: extraGates.universityNames,
-    };
-    eligibility.expectedSalary = {
-      enabled: extraGates.salaryEnabled,
-      ...(extraGates.salaryMax.trim()
-        ? { maxSalary: Number(extraGates.salaryMax.trim()) }
-        : {}),
-    };
+    // Always sent, same REPLACE contract: omitting it would resurrect
+    // whatever rules the server already stores after HR deleted them here.
+    eligibility.customRules = serializeCustomRules(customRules, formFields);
+    eligibility.customChecks = serializeCustomChecks(customChecks);
     return eligibility;
   };
 
@@ -365,6 +395,9 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
     // an omitted block leaves the old one intact (clearing the last gate would
     // silently no-op) and an omitted sub-field resets to null.
     eligibility: buildEligibility(),
+    // Same REPLACE contract as eligibility: always sent, always complete, so
+    // deleting the last custom field actually clears it server-side.
+    formFields: serializeFormFields(formFields),
     scoringWeights: {
       correctness: correctnessWeight,
       depth: depthWeight,
@@ -605,6 +638,18 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
           ) : null}
 
           {step === 2 ? (
+            <ApplicationFormStep
+              formFields={formFields}
+              setFormFields={setFormFields}
+              formFieldErrors={formFieldErrors}
+              customChecks={customChecks}
+              setCustomChecks={setCustomChecks}
+              customCheckErrors={customCheckErrors}
+              asksRelocation={workMode !== "remote" && city.trim().length > 0}
+            />
+          ) : null}
+
+          {step === 4 ? (
             <ScoringStep
               correctnessWeight={correctnessWeight}
               depthWeight={depthWeight}
@@ -637,8 +682,10 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
               minYearsError={minYearsError}
               requiredSkills={requiredSkills}
               setRequiredSkills={setRequiredSkills}
-              extraGates={extraGates}
-              setExtraGates={setExtraGates}
+              formFields={formFields}
+              customRules={customRules}
+              setCustomRules={setCustomRules}
+              customRuleErrors={customRuleErrors}
             />
           ) : null}
         </div>
@@ -972,7 +1019,53 @@ function ClassificationStep({
   );
 }
 
-/* ───────────────────────  Step 2 · Scoring  ───────────────────────── */
+/* ─────────────────  Step 2 · Application form  ─────────────────────── */
+
+function ApplicationFormStep({
+  formFields,
+  setFormFields,
+  formFieldErrors,
+  customChecks,
+  setCustomChecks,
+  customCheckErrors,
+  asksRelocation,
+}: {
+  formFields: FormFieldDraft[];
+  setFormFields: (v: FormFieldDraft[]) => void;
+  formFieldErrors: string[];
+  customChecks: CheckDraft[];
+  setCustomChecks: (v: CheckDraft[]) => void;
+  customCheckErrors: string[];
+  asksRelocation: boolean;
+}) {
+  const errors = [...formFieldErrors, ...customCheckErrors];
+  return (
+    <div>
+      <StepHead
+        title="Application form"
+        subtitle="What candidates fill in on your careers page. Add your own questions or eligibility checks; screening on your questions' answers is set up on the Eligibility step."
+      />
+      <ApplicationFormEditor
+        fields={formFields}
+        onChange={setFormFields}
+        checks={customChecks}
+        onChecksChange={setCustomChecks}
+        asksRelocation={asksRelocation}
+      />
+      {errors.length > 0 ? (
+        <ul className="mt-3 grid gap-1">
+          {errors.map((message) => (
+            <li key={message} className={ERROR_CLASS}>
+              {message}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+/* ───────────────────────  Step 4 · Scoring  ───────────────────────── */
 
 /**
  * The three axes share ONE hue at three intensities rather than three
@@ -1516,8 +1609,10 @@ function EligibilityStep({
   minYearsError,
   requiredSkills,
   setRequiredSkills,
-  extraGates,
-  setExtraGates,
+  formFields,
+  customRules,
+  setCustomRules,
+  customRuleErrors,
 }: {
   city: string;
   setCity: (v: string) => void;
@@ -1529,8 +1624,10 @@ function EligibilityStep({
   minYearsError: string;
   requiredSkills: string[];
   setRequiredSkills: (v: string[]) => void;
-  extraGates: ExtraGatesValue;
-  setExtraGates: (v: ExtraGatesValue) => void;
+  formFields: FormFieldDraft[];
+  customRules: RuleDraft[];
+  setCustomRules: (v: RuleDraft[]) => void;
+  customRuleErrors: string[];
 }) {
   // City is picked from a fixed list (shared with /apply so a job's required
   // city and an applicant's stored city are drawn from one vocabulary), with
@@ -1708,14 +1805,31 @@ function EligibilityStep({
           </p>
         </div>
 
+        {/* The hardcoded salary + university built-in checks that once sat
+            here are gone: an "Eligibility check" (Application form step)
+            covers the university-style accepted list, and a number field
+            plus a Custom requirement below covers a salary ceiling. */}
         <div className="border-t border-[var(--field-border)] pt-4">
-          <label className={LABEL_CLASS}>Extra checks</label>
+          <label className={LABEL_CLASS}>Custom requirements</label>
           <p className="mb-3 text-[12px] text-ink-muted">
-            Two optional checks, off unless you switch them on. Each says where
-            its answer comes from, so there is nothing to configure beyond the
-            values themselves.
+            Your own pass/fail checks on the answers from the Application form
+            step. A candidate who misses one is rejected or sent to your
+            review queue, whichever you pick per requirement.
           </p>
-          <ExtraGatesEditor value={extraGates} onChange={setExtraGates} />
+          <CustomRulesEditor
+            rules={customRules}
+            onChange={setCustomRules}
+            fields={formFields}
+          />
+          {customRuleErrors.length > 0 ? (
+            <ul className="mt-3 grid gap-1">
+              {customRuleErrors.map((message) => (
+                <li key={message} className={ERROR_CLASS}>
+                  {message}
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       </div>
     </div>
