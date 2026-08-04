@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   keepPreviousData,
@@ -36,10 +36,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { SortHeader, SortScopeNote } from "@/components/ui/sort-header";
+import { SortHeader } from "@/components/ui/sort-header";
 import { useAuth } from "@/features/auth/AuthContext";
 import { canManageFunnel } from "@/features/auth/roles";
-import { deleteJob, listJobs, setJobStatus } from "@/features/jobs/jobsApi";
+import {
+  deleteJob,
+  listJobs,
+  setJobStatus,
+  type JobSortField,
+} from "@/features/jobs/jobsApi";
 import {
   EMPLOYMENT_TYPE_LABELS,
   JOB_STATUS_LABELS,
@@ -53,13 +58,7 @@ import { useOrgTimezone } from "@/features/organization/useOrgTimezone";
 import { ROUTES, jobDetail, jobEdit } from "@/routes";
 import { formatDate } from "@/lib/date";
 import { errorMessage } from "@/lib/errors";
-import {
-  dateSortValue,
-  rankSortValue,
-  sortRows,
-  type SortState,
-  type SortValue,
-} from "@/lib/sort";
+import { type SortState } from "@/lib/sort";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { ClearFiltersButton } from "@/components/common/ClearFiltersButton";
 
@@ -75,45 +74,6 @@ const JOB_STATUSES: JobStatus[] = ["draft", "open", "closed", "archived"];
  * rows can never drift out of alignment. */
 const COLS = "grid-cols-[2.2fr_0.8fr_1.2fr_0.7fr_0.7fr_0.7fr_0.9fr_40px]";
 
-/**
- * The columns worth ordering by. "Classification" is absent on purpose: the
- * cell is up to three independent chips (employment type, work mode,
- * seniority), so there is no single value to compare — any ordering it appeared
- * to have would be one of the three winning silently.
- */
-type JobSortField =
-  | "title"
-  | "status"
-  | "applicants"
-  | "questions"
-  | "threshold"
-  | "created";
-
-/**
- * A job's value for one sort column.
- *
- * Status sorts by LIFECYCLE position, not alphabetically — `JOB_STATUSES` is
- * already in that order (draft → open → closed → archived), and it's the order
- * the product means. A–Z would put "archived" first and interleave the rest by
- * accident of spelling.
- */
-function jobSortValue(job: JobListItem, field: JobSortField): SortValue {
-  switch (field) {
-    case "title":
-      return job.title;
-    case "status":
-      return rankSortValue(job.status, JOB_STATUSES);
-    case "applicants":
-      return job.applicantCount;
-    case "questions":
-      return job.questionCount;
-    case "threshold":
-      return job.rejectionThreshold;
-    case "created":
-      return dateSortValue(job.createdAt);
-  }
-}
-
 export function JobsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -128,16 +88,30 @@ export function JobsPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<JobStatus | "">("");
   const [deleteTarget, setDeleteTarget] = useState<JobListItem | null>(null);
-  // `null` = the order the API returned (newest first). Kept out of the query
-  // key on purpose: sorting happens over the rows already in hand, so changing
-  // it must not refetch, and it must not move you off the page you're reading.
+  // `null` = the order the API returned (newest first). Part of the query key,
+  // because the SERVER orders the rows — a click has to refetch, or the table
+  // would show the old order under the new arrow.
   const [sort, setSort] = useState<SortState<JobSortField> | null>(null);
   const debouncedSearch = useDebouncedValue(search);
+
+  // Page 1 on every sort change: "page 3" names a slice of the ORDER, and the
+  // order just changed, so staying put would land you somewhere arbitrary in a
+  // list you haven't seen the top of.
+  const changeSort = (next: SortState<JobSortField>) => {
+    setSort(next);
+    setPage(1);
+  };
 
   const { data, isLoading, isFetching, isError, refetch } = useQuery({
     queryKey: [
       "jobs",
-      { page, limit: pageSize, search: debouncedSearch, status: statusFilter },
+      {
+        page,
+        limit: pageSize,
+        search: debouncedSearch,
+        status: statusFilter,
+        sort,
+      },
     ],
     queryFn: () =>
       listJobs({
@@ -145,6 +119,8 @@ export function JobsPage() {
         limit: pageSize,
         search: debouncedSearch.trim() || undefined,
         status: statusFilter || undefined,
+        sortBy: sort?.by,
+        sortDir: sort?.dir,
       }),
     placeholderData: keepPreviousData,
   });
@@ -187,10 +163,7 @@ export function JobsPage() {
     },
   });
 
-  const rows = useMemo(
-    () => sortRows(data?.data ?? [], sort, jobSortValue),
-    [data?.data, sort],
-  );
+  const rows = data?.data ?? [];
   const total = data?.count ?? 0;
   const totalPages = data?.totalPage ?? 0;
   const showingFrom = total === 0 ? 0 : (page - 1) * pageSize + 1;
@@ -299,13 +272,13 @@ export function JobsPage() {
               label="Title"
               field="title"
               sort={sort}
-              onSortChange={setSort}
+              onSortChange={changeSort}
             />
             <SortHeader
               label="Status"
               field="status"
               sort={sort}
-              onSortChange={setSort}
+              onSortChange={changeSort}
             />
             {/* Not sortable — see `JobSortField`. */}
             <span>Classification</span>
@@ -317,7 +290,7 @@ export function JobsPage() {
               field="applicants"
               firstDir="desc"
               sort={sort}
-              onSortChange={setSort}
+              onSortChange={changeSort}
               align="center"
             />
             <SortHeader
@@ -325,7 +298,7 @@ export function JobsPage() {
               field="questions"
               firstDir="desc"
               sort={sort}
-              onSortChange={setSort}
+              onSortChange={changeSort}
               align="center"
             />
             <SortHeader
@@ -333,7 +306,7 @@ export function JobsPage() {
               field="threshold"
               firstDir="desc"
               sort={sort}
-              onSortChange={setSort}
+              onSortChange={changeSort}
               align="center"
             />
             <SortHeader
@@ -341,7 +314,7 @@ export function JobsPage() {
               field="created"
               firstDir="desc"
               sort={sort}
-              onSortChange={setSort}
+              onSortChange={changeSort}
             />
             <span />
           </div>
@@ -541,9 +514,6 @@ export function JobsPage() {
               <span>
                 Page {page} of {Math.max(totalPages, 1)}
               </span>
-              {/* Only when it can mislead: a sort over one page of many orders
-                  those rows, not the whole job board. */}
-              {sort && totalPages > 1 ? <SortScopeNote /> : null}
               {isFetching ? (
                 <span className="inline-flex items-center gap-1">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />

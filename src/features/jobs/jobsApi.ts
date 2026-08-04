@@ -10,6 +10,19 @@ import type {
 } from "@/features/jobs/types"
 
 /**
+ * The columns `GET /admin/jobs` can order by, mirroring the backend's
+ * `JOB_SORT_FIELDS`. "Classification" is absent there and here: the cell is up
+ * to three independent chips, so there is no single value to compare.
+ */
+export type JobSortField =
+  | "title"
+  | "status"
+  | "applicants"
+  | "questions"
+  | "threshold"
+  | "created"
+
+/**
  * The org's job board. `organizationId` is never sent — the backend scopes
  * every route to the JWT's org.
  */
@@ -19,6 +32,9 @@ export async function listJobs(
     limit?: number
     search?: string
     status?: JobStatus
+    /** Omit for the API's own order (newest first). */
+    sortBy?: JobSortField
+    sortDir?: "asc" | "desc"
   } = {}
 ) {
   const { data } = await api.get<Paginated<JobListItem>>("/admin/jobs", {
@@ -27,6 +43,10 @@ export async function listJobs(
       limit: params.limit ?? 25,
       ...(params.search ? { search: params.search } : {}),
       ...(params.status ? { status: params.status } : {}),
+      // Both keys or neither — `sortDir` alone orders nothing.
+      ...(params.sortBy
+        ? { sortBy: params.sortBy, sortDir: params.sortDir ?? "asc" }
+        : {}),
     },
   })
   return data

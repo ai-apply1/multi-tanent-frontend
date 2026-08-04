@@ -29,6 +29,11 @@ export async function listCandidates(params: ListCandidatesParams = {}) {
       ...(params.jobId ? { jobId: params.jobId } : {}),
       ...(params.statusKey ? { statusKey: params.statusKey } : {}),
       ...(params.search?.trim() ? { search: params.search.trim() } : {}),
+      // Both keys or neither — `sortDir` alone orders nothing, and the backend
+      // ignores it without a `sortBy` to apply it to.
+      ...(params.sortBy
+        ? { sortBy: params.sortBy, sortDir: params.sortDir ?? "asc" }
+        : {}),
     },
   })
   return data

@@ -47,7 +47,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { SortHeader, SortScopeNote } from "@/components/ui/sort-header";
+import { SortHeader } from "@/components/ui/sort-header";
 import { InterviewDetailDrawer } from "@/components/interviews/InterviewDetailDrawer";
 import { BulkEmailDialog } from "@/features/candidates/components/BulkEmailDialog";
 import { ChangeStatusSubMenu } from "@/features/candidates/components/ChangeStatusSubMenu";
@@ -69,6 +69,7 @@ import { canManageFunnel } from "@/features/auth/roles";
 import { aiScoreState, type AiScoreState } from "@/features/candidates/aiScore";
 import {
   type CandidateListItem,
+  type CandidateSortField,
   type CandidateStatus,
 } from "@/features/candidates/types";
 import { JOB_OPTIONS_QUERY_KEY, listJobOptions } from "@/features/jobs/jobsApi";
@@ -76,13 +77,7 @@ import { useOrgTimezone } from "@/features/organization/useOrgTimezone";
 import { jobDetail } from "@/routes";
 import { formatDate } from "@/lib/date";
 import { errorMessage } from "@/lib/errors";
-import {
-  dateSortValue,
-  sortRows,
-  type SortDir,
-  type SortState,
-  type SortValue,
-} from "@/lib/sort";
+import { type SortDir, type SortState } from "@/lib/sort";
 import { cn } from "@/lib/utils";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { ClearFiltersButton } from "@/components/common/ClearFiltersButton";
@@ -105,9 +100,6 @@ const DEFAULT_PAGE_SIZE = 25;
  */
 const ROW_GRID = "grid-cols-[1.7fr_1.3fr_1.1fr_1.1fr_0.8fr_200px]";
 
-/** Every visible column here has a meaningful order, so every one of them sorts. */
-type CandidateSortField = "name" | "job" | "status" | "score" | "date";
-
 /** Which way each column opens — see `SortHeader.firstDir`. */
 const CANDIDATE_SORT_FIRST_DIR: Record<CandidateSortField, SortDir> = {
   name: "asc",
@@ -125,9 +117,11 @@ const CANDIDATE_SORT_FIELDS = Object.keys(
  * Read a sort back out of the URL, or `null` for the API's own order.
  *
  * Validated against the field list rather than trusted, because this value is
- * whatever is in the address bar: a hand-typed or stale `?sort=` must land on
- * "unsorted", not feed an unknown key into the comparator where every row would
- * compare blank and the table would silently stop reflecting its own header.
+ * whatever is in the address bar and it now goes STRAIGHT INTO A REQUEST: the
+ * backend's `sortBy` is an allow-list, so a hand-typed or stale `?sort=` would
+ * 400 the whole list and leave the table showing "Could not load candidates"
+ * over a link that merely names a column this build dropped. Unknown key ⇒
+ * unsorted.
  */
 function readSortParam(
   params: URLSearchParams,
@@ -278,9 +272,9 @@ export function CandidatesPage() {
   );
   const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
   // Column sort. URL-backed like the filters above, so a refresh or a shared
-  // link restores the view someone was actually looking at. It is NOT part of
-  // `listParams` — sorting runs over the rows already fetched, so it must not
-  // spawn a request, and it must not move the reviewer off their page.
+  // link restores the view someone was actually looking at — and, since the
+  // SERVER does the ordering now, it is part of `listParams` too: a click has
+  // to refetch or the table shows the old order under the new arrow.
   const [sort, setSort] = useState<SortState<CandidateSortField> | null>(() =>
     readSortParam(searchParams),
   );
@@ -480,6 +474,16 @@ export function CandidatesPage() {
     ...(jobFilter !== ALL ? { jobId: jobFilter } : {}),
     ...(statusFilter !== ALL ? { statusKey: statusFilter } : {}),
     ...(debouncedSearch.trim() ? { search: debouncedSearch.trim() } : {}),
+    ...(sort ? { sortBy: sort.by, sortDir: sort.dir } : {}),
+  };
+
+  // Page 1 on every sort change. The page number named a slice of the previous
+  // order — keeping it drops the reviewer into the middle of a list whose top
+  // they have not seen, which is the opposite of what clicking "AI score,
+  // highest first" is asking for.
+  const changeSort = (next: SortState<CandidateSortField>) => {
+    setSort(next);
+    setPage(1);
   };
 
   const { data, isLoading, isError, isFetching, refetch } = useQuery({
@@ -497,44 +501,18 @@ export function CandidatesPage() {
   });
 
   /**
-   * The page's rows in the order the table renders them.
+   * The page's rows, already in the order the table renders them.
    *
-   * The value function lives here rather than at module scope because two of
-   * the columns aren't on the candidate at all: Role is a client-side join
-   * against the loaded job options, and AI score comes from the same
-   * `aiScoreState` the cell renders — reading it any other way would let the
-   * order disagree with the number printed next to it.
+   * The server ordered these (`CANDIDATE_SORT_PLANS`), which is what makes the
+   * Role column trustworthy: sorting by job title used to mean joining against
+   * the loaded job options, and that list is capped at 100, so every candidate
+   * whose job fell outside it sank to the bottom regardless of its title.
+   *
+   * Memoised only to keep its IDENTITY stable across renders — the `?? []`
+   * fallback would otherwise mint a fresh array every time and re-run the two
+   * `useMemo`s downstream that take it as a dependency.
    */
-  const rows = useMemo(
-    () =>
-      sortRows(
-        data?.data ?? [],
-        sort,
-        (row, field): SortValue => {
-          switch (field) {
-            case "name":
-              return row.fullName;
-            case "job":
-              // `null` when the job isn't in the options page (capped at 100),
-              // which sinks those rows rather than grouping them under "".
-              return jobsById.get(row.jobId)?.title ?? null;
-            case "status":
-              // Pipeline position, not the label's spelling: ascending walks
-              // the funnel Applied → … → Hired, which is what the column means.
-              return row.currentStatusId?.stageOrder ?? null;
-            case "score": {
-              // Only a real number sorts; "Scoring…", "Failed", "Awaiting" and
-              // "no interview" are all absent, not zero, and sink to the bottom.
-              const state = aiScoreState(row.latestInterviewId);
-              return state.kind === "scored" ? state.value : null;
-            }
-            case "date":
-              return dateSortValue(row.createdAt);
-          }
-        },
-      ),
-    [data?.data, sort, jobsById],
-  );
+  const rows = useMemo(() => data?.data ?? [], [data?.data]);
   /** Rows this page is knowingly showing a soon-to-be-stale status for. */
   const processingCount = useMemo(
     () => rows.filter(isProcessing).length,
@@ -1057,7 +1035,7 @@ export function CandidatesPage() {
                   field="name"
                   firstDir={CANDIDATE_SORT_FIRST_DIR.name}
                   sort={sort}
-                  onSortChange={setSort}
+                  onSortChange={changeSort}
                 />
 
               </span>
@@ -1066,14 +1044,14 @@ export function CandidatesPage() {
                 field="job"
                 firstDir={CANDIDATE_SORT_FIRST_DIR.job}
                 sort={sort}
-                onSortChange={setSort}
+                onSortChange={changeSort}
               />
               <SortHeader
                 label="Status"
                 field="status"
                 firstDir={CANDIDATE_SORT_FIRST_DIR.status}
                 sort={sort}
-                onSortChange={setSort}
+                onSortChange={changeSort}
               />
               {/* Opens highest-first: "who scored best" is the reason anyone
                   sorts this column, and it should cost one click. */}
@@ -1082,7 +1060,7 @@ export function CandidatesPage() {
                 field="score"
                 firstDir={CANDIDATE_SORT_FIRST_DIR.score}
                 sort={sort}
-                onSortChange={setSort}
+                onSortChange={changeSort}
                 align="center"
               />
               <SortHeader
@@ -1090,7 +1068,7 @@ export function CandidatesPage() {
                 field="date"
                 firstDir={CANDIDATE_SORT_FIRST_DIR.date}
                 sort={sort}
-                onSortChange={setSort}
+                onSortChange={changeSort}
               />
               <span />
             </div>
@@ -1201,11 +1179,6 @@ export function CandidatesPage() {
                   <span className="mono">
                     Page {page} of {Math.max(totalPages, 1)}
                   </span>
-                  {/* Sorting is client-side, so on a multi-page result it
-                      orders THESE rows, not the whole funnel. Said out loud
-                      because "AI score, highest first" showing the best of this
-                      page reads exactly like the best overall. */}
-                  {sort && totalPages > 1 ? <SortScopeNote /> : null}
                   {/* Rows stay put via keepPreviousData, so without this a page
                       change would feel like nothing happened. */}
                   {isFetching ? (

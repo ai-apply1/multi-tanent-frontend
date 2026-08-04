@@ -20,6 +20,10 @@ import { cn } from "@/lib/utils";
  * The icon is always visible, never hover-only. A control you can't see is a
  * control nobody uses, and the whole point of the affordance is that a person
  * who has never clicked a header learns the table sorts.
+ *
+ * Clicking one of these refetches: the ordering is the server's (see
+ * `@/lib/sort`), so `onSortChange` should also send the table back to page 1 —
+ * the page you were on named a slice of the OLD order.
  */
 export function SortHeader<F extends string>({
   label,
@@ -106,20 +110,7 @@ export function SortHeader<F extends string>({
   );
 }
 
-/**
- * The one-line caveat a page shows next to its pagination controls while a
- * sort is active and the result set spans more than one page.
- *
- * Sorting is client-side, so it orders the loaded page and nothing else. On a
- * single page that distinction doesn't exist and the note would be noise; on
- * four pages, "AI score, highest first" showing the best of THIS 25 rather than
- * the best 25 is the difference between a useful ordering and a wrong answer.
- * Render it only when it's true, and say it plainly.
- */
-export function SortScopeNote({ className }: { className?: string }) {
-  return (
-    <span className={cn("text-[12px] text-ink-subtle", className)}>
-      Sorted within this page
-    </span>
-  );
-}
+// There is no `SortScopeNote` any more. It said "Sorted within this page",
+// which was the honest caveat while sorting ran in the browser over one loaded
+// page. The server sorts the whole result set now, so the note would be a
+// warning about a limitation that no longer exists.
