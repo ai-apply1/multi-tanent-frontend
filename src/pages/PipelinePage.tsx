@@ -266,7 +266,10 @@ export function PipelinePage() {
   };
 
   return (
-    <div className="mx-auto max-w-[1100px] px-6 py-6 lg:px-8 lg:py-8">
+    // 1240px is the shell-wide page measure — every destination uses it, so
+    // their left edges line up as you move between them. A page-specific
+    // width re-centres the whole column and the content visibly shifts.
+    <div className="mx-auto max-w-[1240px] px-6 py-6 lg:px-8 lg:py-8">
       {/* Page header */}
       <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
         <div>
