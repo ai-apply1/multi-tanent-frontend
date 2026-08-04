@@ -36,6 +36,48 @@ const inputBase =
   "h-11 w-full rounded-lg border border-[var(--field-border)] bg-surface px-3.5 text-[14px] text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)]";
 
 /**
+ * Injected into the preview document so the mail is LOOKED at, not used.
+ *
+ * The preview is the real server-rendered email, so its call-to-action is a
+ * real `<a href>` pointing at the SAMPLE interview URL. Clicking it navigated
+ * the iframe itself — `sandbox=""` blocks TOP-level navigation, but it does not
+ * stop a frame navigating itself — and the preview was replaced by the
+ * browser's "screening.your-domain.com refused to connect" page until the next
+ * keystroke re-rendered it. Nothing in a preview should be actionable anyway:
+ * the link shown is a placeholder, and the real one is minted per recipient at
+ * send time.
+ *
+ * Two guards, because they cover different activation paths:
+ * - `pointer-events: none` kills the click, and with it the pointer cursor and
+ *   the status-bar URL, so the button reads as part of a picture.
+ * - `<base target="_top">` catches what a pointer rule cannot: tabbing into the
+ *   frame and pressing Enter. The iframe's `sandbox=""` grants no
+ *   `allow-top-navigation`, so the browser refuses that navigation outright.
+ *   The `<base>` carries NO `href`, so it changes link targeting only and
+ *   leaves every URL in the document resolving exactly as before.
+ *
+ * This lives in the client, deliberately: the shell the server renders is the
+ * mail that actually gets sent, and its links must of course still work.
+ */
+const PREVIEW_INERT_HEAD =
+  '<base target="_top" /><style>a{pointer-events:none !important;}</style>';
+
+/** Apply {@link PREVIEW_INERT_HEAD} to a server-rendered email document. */
+function makePreviewInert(html: string) {
+  const headClose = html.search(/<\/head>/i);
+  if (headClose !== -1) {
+    return (
+      html.slice(0, headClose) + PREVIEW_INERT_HEAD + html.slice(headClose)
+    );
+  }
+  // No `</head>` — append rather than prepend. A `<style>`/`<base>` in the body
+  // still applies (the spec picks the first `<base target>` in tree order, and
+  // CSS does not care where it was parsed), whereas prepending would push the
+  // `<!doctype>` off the front and drop the whole preview into quirks mode.
+  return html + PREVIEW_INERT_HEAD;
+}
+
+/**
  * Compose + send one email template to a set of candidates. HR picks a
  * template, edits the copy (with a live server preview so it matches the sent
  * mail byte-for-byte), and sends. INVITE / FOLLOWUP re-mint each recipient's
@@ -178,6 +220,15 @@ export function BulkEmailDialog({
       clearTimeout(id);
     };
   }, [open, selected, subject, body, applyMerge]);
+
+  // What the iframe actually renders: the server's HTML with its links made
+  // inert. Derived rather than stored so `previewHtml` keeps holding exactly
+  // what the server returned, and so a failed preview (empty string) stays
+  // empty and keeps falling through to the error/loading branches below.
+  const previewDoc = useMemo(
+    () => (previewHtml ? makePreviewInert(previewHtml) : ""),
+    [previewHtml],
+  );
 
   // Reset to a fresh compose each time the dialog is reopened. This component
   // stays mounted after close (the dialog content unmounts, not us), so the
@@ -407,7 +458,7 @@ export function BulkEmailDialog({
                     <iframe
                       title="Email preview"
                       sandbox=""
-                      srcDoc={previewHtml}
+                      srcDoc={previewDoc}
                       className="h-[440px] w-full"
                     />
                   </>
