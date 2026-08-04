@@ -1,15 +1,19 @@
-import axios, { AxiosError, type AxiosRequestConfig, type InternalAxiosRequestConfig } from "axios"
+import axios, {
+  AxiosError,
+  type AxiosRequestConfig,
+  type InternalAxiosRequestConfig,
+} from "axios";
 import {
   decryptBody,
   encryptBody,
   invalidateCryptoBootstrap,
   makeRequestCrypto,
   type EncryptedEnvelope,
-  type RequestCrypto
-} from "@/lib/crypto"
-import { BASIC_AUTH_HEADER } from "@/lib/basicAuth"
-import { devTenant } from "@/lib/devTenant"
-import { API_PREFIX } from "@/lib/apiPrefix"
+  type RequestCrypto,
+} from "@/lib/crypto";
+import { BASIC_AUTH_HEADER } from "@/lib/basicAuth";
+import { devTenant } from "@/lib/devTenant";
+import { API_PREFIX } from "@/lib/apiPrefix";
 
 /**
  * Default request headers sent on every backend call.
@@ -22,9 +26,9 @@ import { API_PREFIX } from "@/lib/apiPrefix"
  * cookie-based admin session even exists.
  */
 const defaultHeaders: Record<string, string> = {
-  "X-Requested-With": "XMLHttpRequest"
-}
-if (BASIC_AUTH_HEADER) defaultHeaders.Authorization = BASIC_AUTH_HEADER
+  "X-Requested-With": "XMLHttpRequest",
+};
+if (BASIC_AUTH_HEADER) defaultHeaders.Authorization = BASIC_AUTH_HEADER;
 
 /**
  * Absolute origin of the multi-tenant backend (no trailing slash, no `/api`).
@@ -43,15 +47,14 @@ if (BASIC_AUTH_HEADER) defaultHeaders.Authorization = BASIC_AUTH_HEADER
  * `SameSite=Lax` cookies ride along. A cross-SITE pair (e.g. `*.vercel.app`
  * ↔ `*.up.railway.app`) needs `SameSite=None; Secure` on the backend.
  */
-export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001").replace(
-  /\/+$/,
-  ""
-)
+export const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001"
+).replace(/\/+$/, "");
 
 // Re-exported (imported at the top) from its own zero-import module so
 // `crypto.ts` can share the constant without a load-time cycle. Spelled ONCE now
 // (this app used to inline `/api/v1` here and in the crypto bootstrap).
-export { API_PREFIX }
+export { API_PREFIX };
 
 /**
  * Resolve a backend path (e.g. `/api/v1/admin/interviews/:id/video`) to an
@@ -64,8 +67,8 @@ export { API_PREFIX }
  */
 export function apiUrl(path: string): string {
   // Already an absolute URL (e.g. a direct S3 link) — leave it alone.
-  if (/^https?:\/\//i.test(path)) return path
-  return `${API_BASE_URL}${path.startsWith("/") ? "" : "/"}${path}`
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${API_BASE_URL}${path.startsWith("/") ? "" : "/"}${path}`;
 }
 
 /**
@@ -88,8 +91,8 @@ export function apiUrl(path: string): string {
  *    the response body, so the JSON budget would sever a healthy download on
  *    a slow link. 10 minutes is unreachable in practice but still a bound.
  */
-const JSON_TIMEOUT_MS = 30_000
-const BLOB_TIMEOUT_MS = 10 * 60_000
+const JSON_TIMEOUT_MS = 30_000;
+const BLOB_TIMEOUT_MS = 10 * 60_000;
 
 /**
  * The org dashboard uses cookie-auth (httpOnly access + refresh tokens).
@@ -102,8 +105,8 @@ export const api = axios.create({
   baseURL: `${API_BASE_URL}${API_PREFIX}`,
   withCredentials: true,
   timeout: JSON_TIMEOUT_MS,
-  headers: defaultHeaders
-})
+  headers: defaultHeaders,
+});
 
 /**
  * URLs that must NEVER trigger the refresh-and-retry flow:
@@ -132,16 +135,18 @@ const AUTH_ENDPOINTS_NO_REFRESH = [
   "/admin/auth/refresh",
   "/admin/auth/logout",
   "/admin/auth/forgot-password",
-  "/admin/auth/reset-password"
-]
+  "/admin/auth/reset-password",
+];
 
 function shouldSkipRefresh(url: string | undefined): boolean {
-  if (!url) return false
-  return AUTH_ENDPOINTS_NO_REFRESH.some((ep) => url === ep || url.startsWith(`${ep}?`))
+  if (!url) return false;
+  return AUTH_ENDPOINTS_NO_REFRESH.some(
+    (ep) => url === ep || url.startsWith(`${ep}?`),
+  );
 }
 
 interface RetryConfig extends InternalAxiosRequestConfig {
-  _retry?: boolean
+  _retry?: boolean;
   /**
    * Separate from `_retry` on purpose: a REFRESH_IN_FLIGHT replay must not
    * consume the refresh-and-retry budget (the replay can still 401 for a
@@ -149,7 +154,7 @@ interface RetryConfig extends InternalAxiosRequestConfig {
    * retry must not consume this one. Two flags, each capping its own path
    * at exactly one extra attempt, so the two can't ping-pong.
    */
-  _retriedAfterRefreshInFlight?: boolean
+  _retriedAfterRefreshInFlight?: boolean;
 }
 
 /**
@@ -157,7 +162,7 @@ interface RetryConfig extends InternalAxiosRequestConfig {
  * one time and replay them all once the rotation completes (or all fail if it
  * doesn't).
  */
-let refreshInFlight: Promise<void> | null = null
+let refreshInFlight: Promise<void> | null = null;
 
 async function refreshSession(): Promise<void> {
   if (!refreshInFlight) {
@@ -165,29 +170,29 @@ async function refreshSession(): Promise<void> {
       .post("/admin/auth/refresh")
       .then(() => undefined)
       .finally(() => {
-        refreshInFlight = null
-      })
+        refreshInFlight = null;
+      });
   }
-  return refreshInFlight
+  return refreshInFlight;
 }
 
-const onAuthFailureSubscribers = new Set<() => void>()
+const onAuthFailureSubscribers = new Set<() => void>();
 
 export function subscribeToAuthFailure(cb: () => void) {
-  onAuthFailureSubscribers.add(cb)
+  onAuthFailureSubscribers.add(cb);
   return () => {
-    onAuthFailureSubscribers.delete(cb)
-  }
+    onAuthFailureSubscribers.delete(cb);
+  };
 }
 
 function notifyAuthFailure() {
   onAuthFailureSubscribers.forEach((cb) => {
     try {
-      cb()
+      cb();
     } catch {
       // ignore
     }
-  })
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -207,7 +212,7 @@ function notifyAuthFailure() {
 // ---------------------------------------------------------------------------
 
 interface CryptoRequestMeta {
-  __crypto?: RequestCrypto
+  __crypto?: RequestCrypto;
   /**
    * Snapshot of `config.data` taken BEFORE encryption so a kid-mismatch
    * retry can replay the ORIGINAL payload — without it the retry would
@@ -215,11 +220,11 @@ interface CryptoRequestMeta {
    * attempt and fail server-side validation, forcing the user to
    * manually refresh after every backend restart.
    */
-  __originalData?: unknown
-  _retriedAfterKidMismatch?: boolean
+  __originalData?: unknown;
+  _retriedAfterKidMismatch?: boolean;
 }
 
-const SKIP_HEADER = "x-skip-crypto"
+const SKIP_HEADER = "x-skip-crypto";
 
 /**
  * Read/remove the skip marker case-INSENSITIVELY. Axios preserves a header key
@@ -231,44 +236,45 @@ const SKIP_HEADER = "x-skip-crypto"
  */
 type LooseHeaders =
   | {
-      get?: (n: string) => unknown
-      delete?: (n: string) => unknown
-      [k: string]: unknown
+      get?: (n: string) => unknown;
+      delete?: (n: string) => unknown;
+      [k: string]: unknown;
     }
-  | undefined
+  | undefined;
 
 const readSkipHeader = (headers: LooseHeaders): unknown => {
-  if (!headers) return undefined
-  if (typeof headers.get === "function") return headers.get(SKIP_HEADER)
-  const key = Object.keys(headers).find((h) => h.toLowerCase() === SKIP_HEADER)
-  return key ? headers[key] : undefined
-}
+  if (!headers) return undefined;
+  if (typeof headers.get === "function") return headers.get(SKIP_HEADER);
+  const key = Object.keys(headers).find((h) => h.toLowerCase() === SKIP_HEADER);
+  return key ? headers[key] : undefined;
+};
 
 const removeSkipHeader = (headers: LooseHeaders): void => {
-  if (!headers) return
+  if (!headers) return;
   if (typeof headers.delete === "function") {
-    headers.delete(SKIP_HEADER)
-    return
+    headers.delete(SKIP_HEADER);
+    return;
   }
   for (const h of Object.keys(headers)) {
-    if (h.toLowerCase() === SKIP_HEADER) delete headers[h]
+    if (h.toLowerCase() === SKIP_HEADER) delete headers[h];
   }
-}
+};
 
 function shouldSkipEntirely(config: InternalAxiosRequestConfig): boolean {
-  const skipHeader = readSkipHeader(config.headers as LooseHeaders)
-  if (skipHeader === "1" || skipHeader === 1 || skipHeader === true) return true
-  const url = config.url ?? ""
-  if (url.includes("/crypto/public-key")) return true
-  return false
+  const skipHeader = readSkipHeader(config.headers as LooseHeaders);
+  if (skipHeader === "1" || skipHeader === 1 || skipHeader === true)
+    return true;
+  const url = config.url ?? "";
+  if (url.includes("/crypto/public-key")) return true;
+  return false;
 }
 
 function isBinaryBody(data: unknown): boolean {
-  if (typeof FormData !== "undefined" && data instanceof FormData) return true
-  if (typeof Blob !== "undefined" && data instanceof Blob) return true
-  if (data instanceof ArrayBuffer) return true
-  if (ArrayBuffer.isView(data as ArrayBufferView)) return true
-  return false
+  if (typeof FormData !== "undefined" && data instanceof FormData) return true;
+  if (typeof Blob !== "undefined" && data instanceof Blob) return true;
+  if (data instanceof ArrayBuffer) return true;
+  if (ArrayBuffer.isView(data as ArrayBufferView)) return true;
+  return false;
 }
 
 api.interceptors.request.use(async (config) => {
@@ -290,11 +296,11 @@ api.interceptors.request.use(async (config) => {
    * unknown property (e.g. `GET /admin/jobs` rejected `tenant`). A header is
    * invisible to that pipe. `X-Dev-Tenant` is in the backend CORS allow-list.
    */
-  const tenant = devTenant()
+  const tenant = devTenant();
   if (tenant) {
     config.headers =
-      config.headers ?? ({} as InternalAxiosRequestConfig["headers"])
-    config.headers["X-Dev-Tenant"] = tenant
+      config.headers ?? ({} as InternalAxiosRequestConfig["headers"]);
+    config.headers["X-Dev-Tenant"] = tenant;
   }
 
   // Lift the instance's JSON ceiling for raw-byte downloads. `responseType`
@@ -305,64 +311,72 @@ api.interceptors.request.use(async (config) => {
   // below forces it back to "json", so this can only widen a request that
   // also skips the envelope.
   if (config.responseType && config.responseType !== "json") {
-    config.timeout = BLOB_TIMEOUT_MS
+    config.timeout = BLOB_TIMEOUT_MS;
   }
 
   if (shouldSkipEntirely(config)) {
-    removeSkipHeader(config.headers as LooseHeaders)
-    return config
+    removeSkipHeader(config.headers as LooseHeaders);
+    return config;
   }
 
-  const meta = config as InternalAxiosRequestConfig & CryptoRequestMeta
+  const meta = config as InternalAxiosRequestConfig & CryptoRequestMeta;
 
-  const reqCrypto = await makeRequestCrypto()
+  const reqCrypto = await makeRequestCrypto();
   // `null` when the browser withholds WebCrypto (insecure context — see
   // `makeRequestCrypto`, which has already warned). Send in the clear: with
   // no `X-Crypto-Key` the backend treats this as plain JSON, which it accepts
   // by design, and its reply then carries no `X-Crypto-Encrypted` so the
   // response interceptors pass it through untouched. Leaving `responseType`
   // alone here is deliberate — there's no envelope to force it to "json" for.
-  if (!reqCrypto) return config
-  meta.__crypto = reqCrypto
+  if (!reqCrypto) return config;
+  meta.__crypto = reqCrypto;
 
-  config.headers = config.headers ?? ({} as InternalAxiosRequestConfig["headers"])
-  config.headers["X-Crypto-Key"] = reqCrypto.wrappedKeyB64
-  config.headers["X-Crypto-Kid"] = reqCrypto.kid
+  config.headers =
+    config.headers ?? ({} as InternalAxiosRequestConfig["headers"]);
+  config.headers["X-Crypto-Key"] = reqCrypto.wrappedKeyB64;
+  config.headers["X-Crypto-Kid"] = reqCrypto.kid;
 
-  const isGetLike = config.method?.toLowerCase() === "get"
-  const hasBody = config.data !== undefined && config.data !== null && !isGetLike
+  const isGetLike = config.method?.toLowerCase() === "get";
+  const hasBody =
+    config.data !== undefined && config.data !== null && !isGetLike;
   if (hasBody && !isBinaryBody(config.data)) {
     if (meta.__originalData === undefined) {
-      meta.__originalData = config.data
+      meta.__originalData = config.data;
     }
-    const env = await encryptBody(meta.__originalData, reqCrypto.aesKey)
-    config.data = env
-    config.headers["Content-Type"] = "application/json"
+    const env = await encryptBody(meta.__originalData, reqCrypto.aesKey);
+    config.data = env;
+    config.headers["Content-Type"] = "application/json";
   }
 
-  config.responseType = "json"
-  return config
-})
+  config.responseType = "json";
+  return config;
+});
 
 // Decrypt successful responses + decrypt + (maybe) recover on errors.
 api.interceptors.response.use(
   async (response) => {
-    if (response.headers["x-crypto-encrypted"] !== "1") return response
-    const reqCrypto = (response.config as CryptoRequestMeta).__crypto
+    if (response.headers["x-crypto-encrypted"] !== "1") return response;
+    const reqCrypto = (response.config as CryptoRequestMeta).__crypto;
     if (!reqCrypto) {
-      throw new Error("Server returned an encrypted response but no AES key was available.")
+      throw new Error(
+        "Server returned an encrypted response but no AES key was available.",
+      );
     }
-    const env = response.data as EncryptedEnvelope
-    if (env && typeof env.iv === "string" && typeof env.ciphertext === "string") {
-      response.data = await decryptBody(env, reqCrypto.aesKey)
+    const env = response.data as EncryptedEnvelope;
+    if (
+      env &&
+      typeof env.iv === "string" &&
+      typeof env.ciphertext === "string"
+    ) {
+      response.data = await decryptBody(env, reqCrypto.aesKey);
     }
-    return response
+    return response;
   },
   async (error: AxiosError) => {
-    const response = error.response
+    const response = error.response;
     const config = error.config as
       | (InternalAxiosRequestConfig & CryptoRequestMeta)
-      | undefined
+      | undefined;
 
     // Decrypt error bodies first so all downstream handlers (including
     // the 401-refresh logic below) can see the real payload.
@@ -375,8 +389,8 @@ api.interceptors.response.use(
       try {
         response.data = await decryptBody(
           response.data as EncryptedEnvelope,
-          config.__crypto.aesKey
-        )
+          config.__crypto.aesKey,
+        );
       } catch {
         // Leave it as-is.
       }
@@ -389,47 +403,48 @@ api.interceptors.response.use(
     if (response?.status === 400 && config) {
       const data = response.data as
         | { code?: string; message?: string }
-        | undefined
-      const code = typeof data?.code === "string" ? data.code : undefined
-      const message = typeof data?.message === "string" ? data.message : undefined
+        | undefined;
+      const code = typeof data?.code === "string" ? data.code : undefined;
+      const message =
+        typeof data?.message === "string" ? data.message : undefined;
 
       // Defense-in-depth: older deployments don't echo `code` on the
       // wire. Fall back to a message-keyword check so the experience
       // stays smooth on a mixed-version cluster.
       const messageLooksLikeKidMismatch =
         typeof message === "string" &&
-        /encryption key id|public key|crypto[_-]?(kid|unwrap)/i.test(message)
+        /encryption key id|public key|crypto[_-]?(kid|unwrap)/i.test(message);
 
       const isCryptoRotation =
         code === "CRYPTO_KID_MISMATCH" ||
         code === "CRYPTO_UNWRAP_FAILED" ||
         code === "CRYPTO_BODY_DECRYPT_FAILED" ||
-        messageLooksLikeKidMismatch
+        messageLooksLikeKidMismatch;
 
       if (isCryptoRotation) {
-        invalidateCryptoBootstrap()
+        invalidateCryptoBootstrap();
         if (!config._retriedAfterKidMismatch) {
-          config._retriedAfterKidMismatch = true
-          delete config.__crypto
+          config._retriedAfterKidMismatch = true;
+          delete config.__crypto;
           // Restore the plaintext body — `config.data` currently holds
           // the encrypted envelope from the failed first attempt.
           if (config.__originalData !== undefined) {
-            config.data = config.__originalData
+            config.data = config.__originalData;
           }
-          return api(config as AxiosRequestConfig)
+          return api(config as AxiosRequestConfig);
         }
       }
     }
 
-    return Promise.reject(error)
-  }
-)
+    return Promise.reject(error);
+  },
+);
 
 api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
-    const original = error.config as RetryConfig | undefined
-    const status = error.response?.status
+    const original = error.config as RetryConfig | undefined;
+    const status = error.response?.status;
 
     // Racing tabs. The backend keeps a ~30s grace window while a refresh
     // rotation is in flight and answers concurrent requests with
@@ -442,10 +457,11 @@ api.interceptors.response.use(
     // `error.response.data` is already decrypted: the crypto response
     // interceptor is registered before this one, so it runs first.
     if (status === 401 && original && !original._retriedAfterRefreshInFlight) {
-      const code = (error.response?.data as { code?: string } | undefined)?.code
+      const code = (error.response?.data as { code?: string } | undefined)
+        ?.code;
       if (code === "REFRESH_IN_FLIGHT") {
-        original._retriedAfterRefreshInFlight = true
-        return api(original as AxiosRequestConfig)
+        original._retriedAfterRefreshInFlight = true;
+        return api(original as AxiosRequestConfig);
       }
     }
 
@@ -455,18 +471,18 @@ api.interceptors.response.use(
       original._retry ||
       shouldSkipRefresh(original.url)
     ) {
-      return Promise.reject(error)
+      return Promise.reject(error);
     }
 
-    original._retry = true
+    original._retry = true;
     try {
-      await refreshSession()
-      return api(original as AxiosRequestConfig)
+      await refreshSession();
+      return api(original as AxiosRequestConfig);
     } catch (refreshError) {
-      notifyAuthFailure()
-      return Promise.reject(refreshError)
+      notifyAuthFailure();
+      return Promise.reject(refreshError);
     }
-  }
-)
+  },
+);
 
-export default api
+export default api;

@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDown,
+  ChevronRight,
   FileText,
   Loader2,
   Pencil,
@@ -22,15 +23,19 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Markdown } from "@/components/Markdown";
+import { InterviewDetailDrawer } from "@/components/interviews/InterviewDetailDrawer";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useAuth } from "@/features/auth/AuthContext";
+import { canManageFunnel } from "@/features/auth/roles";
 import { JobQuestionsManager } from "@/features/jobs/components/JobQuestionsManager";
 import { JobShareDialog } from "@/features/jobs/components/JobShareDialog";
 import { JobSwitcher } from "@/features/jobs/components/JobSwitcher";
+import { JobLinkedInControls } from "@/features/jobs/components/JobLinkedInControls";
 import { getJob, setJobStatus } from "@/features/jobs/jobsApi";
 import {
   EMPLOYMENT_TYPE_LABELS,
@@ -82,6 +87,13 @@ export function JobDetailPage() {
   const { jobId } = useParams<{ jobId: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  // Interviewers read this page and never write it — the backend 403s the job
+  // edit / status / threshold-reprocess / CV-import / LinkedIn calls, so those
+  // buttons are hidden rather than left to fail on click. Share stays: the link
+  // itself and copying it are reads (the send-invites half is hidden inside the
+  // dialog).
+  const canAct = canManageFunnel(user?.role);
   const [tab, setTab] = useState<TabId>("overview");
   const [uploadOpen, setUploadOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -142,10 +154,11 @@ export function JobDetailPage() {
           `Threshold re-applied: ${result.movedToShortlisted} moved to shortlisted, ${result.movedToFinalRejected} to rejected.`,
         );
       }
-      // Statuses moved, refresh the board counts, the top-ranked list, and the
-      // candidate-derived surfaces.
-      void queryClient.invalidateQueries({ queryKey: ["candidateKanban", jobId] });
-      void queryClient.invalidateQueries({ queryKey: ["jobTopCandidates", jobId] });
+      // Statuses moved: refresh the board counts, the top-ranked list, and the
+      // rest of the candidate-derived surfaces. The one fan-out covers all
+      // three — `candidateKanban` and `jobTopCandidates` are both prefixes in
+      // it, so hand-listing this job's two keys here as well was duplicate work
+      // and one more place to forget a key.
       invalidateCandidateDataAndJobCounts(queryClient);
     },
     onError: (err) => {
@@ -235,6 +248,21 @@ export function JobDetailPage() {
     job.seniorityLevel ? SENIORITY_LABELS[job.seniorityLevel] : null,
   ].filter((c): c is string => Boolean(c));
 
+  /*
+   * Leave this page for THIS job's slice of the org-wide Candidates list.
+   *
+   * Two entry points share it — the "Candidates" pseudo-tab in the row below
+   * and the "View all" button on the Overview tab's ranking card — and they
+   * have to land identically, `state.fromJob` included. Defined once here
+   * rather than inlined at both, so the second one can't drift into a plain
+   * `?job=` navigation that leaves the destination without its back-to-job
+   * chrome.
+   */
+  const openCandidates = () =>
+    navigate(`${ROUTES.CANDIDATES}?job=${job._id}`, {
+      state: { fromJob: true },
+    });
+
   return (
     <div className="mx-auto max-w-[1240px] px-6 py-6 lg:px-8 lg:py-8">
       {/* Breadcrumb */}
@@ -281,20 +309,22 @@ export function JobDetailPage() {
           ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => setReprocessOpen(true)}
-            disabled={reprocessMutation.isPending}
-          >
-            {reprocessMutation.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" strokeWidth={1.9} />
-            )}
-            Re-apply threshold
-          </Button>
-          {transitions.length > 0 ? (
+          {canAct ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setReprocessOpen(true)}
+              disabled={reprocessMutation.isPending}
+            >
+              {reprocessMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" strokeWidth={1.9} />
+              )}
+              Re-apply threshold
+            </Button>
+          ) : null}
+          {canAct && transitions.length > 0 ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -329,40 +359,51 @@ export function JobDetailPage() {
             <Share2 className="h-4 w-4" strokeWidth={1.9} />
             Share
           </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => navigate(jobEdit(job._id))}
-          >
-            <Pencil className="h-4 w-4" strokeWidth={1.9} />
-            Edit
-          </Button>
-          <Button size="sm" onClick={() => setUploadOpen(true)}>
-            <Upload className="h-4 w-4" strokeWidth={1.9} />
-            Upload CVs
-          </Button>
+          {canAct ? (
+            <>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => navigate(jobEdit(job._id))}
+              >
+                <Pencil className="h-4 w-4" strokeWidth={1.9} />
+                Edit
+              </Button>
+              <Button size="sm" onClick={() => setUploadOpen(true)}>
+                <Upload className="h-4 w-4" strokeWidth={1.9} />
+                Upload CVs
+              </Button>
+            </>
+          ) : null}
         </div>
       </div>
 
+      {/* LinkedIn: post this job to your feed, view the live post, or unpublish.
+          Connecting the account lives on Settings → Integrations. Publishing is
+          an edit, so it's hidden from the view-only interviewer. */}
+      {canAct ? <JobLinkedInControls job={job} /> : null}
+
       <JobShareDialog jobId={job._id} open={shareOpen} onOpenChange={setShareOpen} />
 
-      <ConfirmDialog
-        open={reprocessOpen}
-        onOpenChange={(o) => !o && setReprocessOpen(false)}
-        title="Re-apply the scoring threshold?"
-        description={
-          <>
-            This re-checks every already-interviewed candidate for this job
-            against the current threshold ({job.rejectionThreshold}) and moves
-            them between shortlisted and rejected based on their existing
-            interview score. Nobody is re-scored, and no emails are sent.
-          </>
-        }
-        confirmLabel="Re-apply"
-        loadingLabel="Re-applying…"
-        loading={reprocessMutation.isPending}
-        onConfirm={() => reprocessMutation.mutate()}
-      />
+      {canAct ? (
+        <ConfirmDialog
+          open={reprocessOpen}
+          onOpenChange={(o) => !o && setReprocessOpen(false)}
+          title="Re-apply the scoring threshold?"
+          description={
+            <>
+              This re-checks every already-interviewed candidate for this job
+              against the current threshold ({job.rejectionThreshold}) and moves
+              them between shortlisted and rejected based on their existing
+              interview score. Nobody is re-scored, and no emails are sent.
+            </>
+          }
+          confirmLabel="Re-apply"
+          loadingLabel="Re-applying…"
+          loading={reprocessMutation.isPending}
+          onConfirm={() => reprocessMutation.mutate()}
+        />
+      ) : null}
 
       {/*
         KPI strip, counted from the job's own board.
@@ -431,34 +472,34 @@ export function JobDetailPage() {
             deliberate drill-in, so that page shows its "back to job" chrome —
             the breadcrumb, the job name in its title, the Back to job button —
             which a manual pick in its own Job filter must NOT trigger. */}
-        <TabButton
-          active={false}
-          onClick={() =>
-            navigate(`${ROUTES.CANDIDATES}?job=${job._id}`, {
-              state: { fromJob: true },
-            })
-          }
-        >
+        <TabButton active={false} onClick={openCandidates}>
           Candidates
         </TabButton>
       </div>
 
       <div key={tab} className="animate-fade-up">
         {tab === "overview" ? (
-          <OverviewTab job={job} kpi={kpi} columns={boardQuery.data?.columns} />
+          <OverviewTab
+            job={job}
+            kpi={kpi}
+            columns={boardQuery.data?.columns}
+            onViewAllCandidates={openCandidates}
+          />
         ) : (
           <JobQuestionsManager job={job} />
         )}
       </div>
 
       {/* Upload dialog — mounted once, opened by the header CTA. */}
-      <UploadCvsDialog
-        open={uploadOpen}
-        onOpenChange={setUploadOpen}
-        jobId={job._id}
-        jobTitle={job.title}
-        onImported={invalidateCandidates}
-      />
+      {canAct ? (
+        <UploadCvsDialog
+          open={uploadOpen}
+          onOpenChange={setUploadOpen}
+          jobId={job._id}
+          jobTitle={job.title}
+          onImported={invalidateCandidates}
+        />
+      ) : null}
     </div>
   );
 }
@@ -469,10 +510,13 @@ function OverviewTab({
   job,
   kpi,
   columns,
+  onViewAllCandidates,
 }: {
   job: Job;
   kpi: JobKpi;
   columns: KanbanColumn[] | undefined;
+  /** Same drill-in the Candidates pseudo-tab performs — see `openCandidates`. */
+  onViewAllCandidates: () => void;
 }) {
   const { data: organization } = useOrganization();
   const requiredSkills = job.eligibility.requiredSkills;
@@ -487,155 +531,229 @@ function OverviewTab({
     enabled: Boolean(job._id),
   });
 
-  return (
-    <div className="grid gap-4 lg:grid-cols-[1.55fr_1fr] lg:items-start">
-      {/* Left column */}
-      <div className="grid gap-4">
-        <SectionCard>
-          <h2 className="mb-3 text-[15px] font-semibold text-ink">
-            Job description
-          </h2>
-          {job.description.trim() ? (
-            <div className="text-[13.5px] leading-relaxed text-ink-2">
-              <Markdown content={job.description} />
-            </div>
-          ) : (
-            <p className="text-[13.5px] text-ink-muted">
-              No description provided yet.
-            </p>
-          )}
+  /*
+   * Which ranked row has the review drawer open. Null = closed; the drawer is
+   * mounted permanently and reads open/closed off this target.
+   *
+   * A `publicSessionId`, NOT a candidate id — and that is why this needs none
+   * of the two-step lookup CandidatesPage and OverviewPage do. Those two start
+   * from a candidate row whose `latestInterviewId` is a raw ObjectId, so they
+   * pay a detail read to translate it. Every row here is by definition a
+   * `scoringStatus: done` interview (that is the leaderboard's own filter), and
+   * the endpoint already returns its `publicSessionId` — the exact key the
+   * drawer wants. So there is nothing to resolve, no loading gap between the
+   * click and the drawer, and no `candidateId` fallback to pass: a row without
+   * an interview cannot appear in this list.
+   */
+  const [drawerSessionId, setDrawerSessionId] = useState<string | null>(null);
 
-          <div className="mt-5">
-            <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle">
-              Required skills
-            </div>
-            {requiredSkills.length > 0 ? (
-              <div className="flex flex-wrap gap-1.5">
-                {requiredSkills.map((skill) => (
-                  <span
-                    key={skill}
-                    className="rounded-full bg-accent px-2.5 py-1 text-[12px] font-semibold text-primary"
-                  >
-                    {skill}
-                  </span>
-                ))}
+  return (
+    <>
+      <div className="grid gap-4 lg:grid-cols-[1.55fr_1fr] lg:items-start">
+        {/* Left column */}
+        <div className="grid gap-4">
+          <SectionCard>
+            <h2 className="mb-3 text-[15px] font-semibold text-ink">
+              Job description
+            </h2>
+            {job.description.trim() ? (
+              <div className="text-[13.5px] leading-relaxed text-ink-2">
+                <Markdown content={job.description} />
               </div>
             ) : (
-              <p className="text-[13px] text-ink-muted">None required.</p>
-            )}
-          </div>
-
-          <ScoreSplit weights={job.scoringWeights} />
-
-          <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <MetaCell label="Threshold">
-              <span className="mono">{job.rejectionThreshold}</span>
-            </MetaCell>
-            <MetaCell label="City">
-              {job.eligibility.city || <Dash />}
-            </MetaCell>
-            <MetaCell label="Min. experience">
-              {job.eligibility.minYearsExperience === null ? (
-                <Dash />
-              ) : (
-                <span className="mono">
-                  {job.eligibility.minYearsExperience} yrs
-                </span>
-              )}
-            </MetaCell>
-            <MetaCell label="Interview attempts">
-              {job.maxAttempts === null ? (
-                <span className="text-ink-muted">
-                  Org default
-                  {organization
-                    ? ` (${organization.settings.maxInterviewAttempts})`
-                    : ""}
-                </span>
-              ) : (
-                <span className="mono">{job.maxAttempts}</span>
-              )}
-            </MetaCell>
-          </div>
-        </SectionCard>
-
-        <ApplicationFormCard job={job} />
-      </div>
-
-      {/* Right column. `sticky` inside the two-column grid keeps the rail
-          pinned as the left column (description) scrolls past — the top offset
-          is the 60px TopBar height + a small breathing gap. Falls back to
-          normal flow on narrow layouts where the columns stack. */}
-      <div className="grid gap-4 lg:sticky lg:top-3 lg:self-start">
-        <FunnelCard kpi={kpi} columns={columns} />
-
-        <SectionCard>
-          <div className="mb-3.5 flex items-center justify-between">
-            <h2 className="text-[15px] font-semibold text-ink">
-              Top ranked candidates
-            </h2>
-          </div>
-          {topQuery.isPending ? (
-            <div className="flex items-center justify-center gap-2 py-10 text-[13px] text-ink-muted">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Loading
-            </div>
-          ) : topQuery.isError ? (
-            <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-line-2 px-6 py-10 text-center">
-              <p className="text-[13.5px] font-semibold text-ink">
-                Could not load ranked candidates
+              <p className="text-[13.5px] text-ink-muted">
+                No description provided yet.
               </p>
+            )}
+
+            <div className="mt-5">
+              <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle">
+                Required skills
+              </div>
+              {requiredSkills.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {requiredSkills.map((skill) => (
+                    <span
+                      key={skill}
+                      className="rounded-full bg-accent px-2.5 py-1 text-[12px] font-semibold text-primary"
+                    >
+                      {skill}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[13px] text-ink-muted">None required.</p>
+              )}
+            </div>
+
+            <ScoreSplit weights={job.scoringWeights} />
+
+            <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <MetaCell label="Threshold">
+                <span className="mono">{job.rejectionThreshold}</span>
+              </MetaCell>
+              <MetaCell label="City">
+                {job.eligibility.city || <Dash />}
+              </MetaCell>
+              <MetaCell label="Min. experience">
+                {job.eligibility.minYearsExperience === null ? (
+                  <Dash />
+                ) : (
+                  <span className="mono">
+                    {job.eligibility.minYearsExperience} yrs
+                  </span>
+                )}
+              </MetaCell>
+              <MetaCell label="Interview attempts">
+                {job.maxAttempts === null ? (
+                  <span className="text-ink-muted">
+                    Org default
+                    {organization
+                      ? ` (${organization.settings.maxInterviewAttempts})`
+                      : ""}
+                  </span>
+                ) : (
+                  <span className="mono">{job.maxAttempts}</span>
+                )}
+              </MetaCell>
+            </div>
+          </SectionCard>
+
+          <ApplicationFormCard job={job} />
+        </div>
+
+        {/* Right column. `sticky` inside the two-column grid keeps the rail
+            pinned as the left column (description) scrolls past — the top offset
+            is the 60px TopBar height + a small breathing gap. Falls back to
+            normal flow on narrow layouts where the columns stack. */}
+        <div className="grid gap-4 lg:sticky lg:top-3 lg:self-start">
+          <FunnelCard kpi={kpi} columns={columns} />
+
+          <SectionCard>
+            <div className="mb-3.5 flex items-center justify-between gap-2">
+              <h2 className="text-[15px] font-semibold text-ink">
+                Top ranked candidates
+              </h2>
+              {/* This card shows the top 5 scorers and nothing else — no
+                  pagination, no filters, and nobody who hasn't been scored yet.
+                  So it always needs a way out to the full list, whatever the
+                  body below is currently rendering (rows, empty, error), which
+                  is why the button sits in the header and not under the list.
+
+                  A text affordance, not a `ghost` Button: ghost's hover is a
+                  `--accent` fill, which is the SAME blue as the rank badges in
+                  the list right below — so hovering painted a block that read
+                  as another badge. Underline-on-hover plus a chevron nudge
+                  instead, matching this card's own "Try again" link and the
+                  funnel card's "View all N stages" above it. */}
               <button
                 type="button"
-                onClick={() => void topQuery.refetch()}
-                className="text-[12.5px] font-medium text-primary hover:underline"
+                onClick={onViewAllCandidates}
+                className="group -mr-1 flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-[12.5px] font-semibold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                Try again
+                <span className="group-hover:underline">View all</span>
+                <ChevronRight
+                  className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5"
+                  strokeWidth={1.8}
+                />
               </button>
             </div>
-          ) : (topQuery.data?.length ?? 0) === 0 ? (
-            <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-line-2 px-6 py-10 text-center">
-              <span className="flex h-11 w-11 items-center justify-center rounded-full bg-accent text-primary">
-                <Users className="h-5 w-5" strokeWidth={1.7} />
-              </span>
-              <p className="text-[13.5px] font-semibold text-ink">
-                No candidates have completed their interview yet
-              </p>
-              <p className="max-w-[340px] text-[12.5px] text-ink-muted">
-                Share the invite link and completed interviews will be ranked
-                here.
-              </p>
-            </div>
-          ) : (
-            <ol className="flex flex-col gap-1.5">
-              {topQuery.data!.map((c, i) => (
-                <li
-                  key={c.sessionId}
-                  className="flex items-center gap-3 rounded-xl border border-line px-3 py-2.5"
+            {topQuery.isPending ? (
+              <div className="flex items-center justify-center gap-2 py-10 text-[13px] text-ink-muted">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading
+              </div>
+            ) : topQuery.isError ? (
+              <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-line-2 px-6 py-10 text-center">
+                <p className="text-[13.5px] font-semibold text-ink">
+                  Could not load ranked candidates
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void topQuery.refetch()}
+                  className="text-[12.5px] font-medium text-primary hover:underline"
                 >
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent text-[12px] font-semibold text-primary">
-                    {i + 1}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[13.5px] font-semibold text-ink">
-                      {c.candidateName || c.email}
-                    </p>
-                    <p className="truncate text-[12px] text-ink-muted">
-                      {formatRecommendation(c.recommendation)}
-                    </p>
-                  </div>
-                  <span className="shrink-0 text-[15px] font-semibold text-ink">
-                    {c.overall}
-                    <span className="text-[11px] font-normal text-ink-muted">
-                      /100
-                    </span>
-                  </span>
-                </li>
-              ))}
-            </ol>
-          )}
-        </SectionCard>
+                  Try again
+                </button>
+              </div>
+            ) : (topQuery.data?.length ?? 0) === 0 ? (
+              <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-line-2 px-6 py-10 text-center">
+                <span className="flex h-11 w-11 items-center justify-center rounded-full bg-accent text-primary">
+                  <Users className="h-5 w-5" strokeWidth={1.7} />
+                </span>
+                <p className="text-[13.5px] font-semibold text-ink">
+                  No candidates have completed their interview yet
+                </p>
+                <p className="max-w-[340px] text-[12.5px] text-ink-muted">
+                  Share the invite link and completed interviews will be ranked
+                  here.
+                </p>
+              </div>
+            ) : (
+              <ol className="flex flex-col gap-1.5">
+                {topQuery.data!.map((c, i) => (
+                  <li key={c.sessionId}>
+                    {/* The whole row is the hit target, same as the candidate
+                        table's row click and Overview's awaiting list — a
+                        reviewer reading a leaderboard is looking for who to open
+                        next, so the name, the verdict and the score should all
+                        lead to the same place. */}
+                    <button
+                      type="button"
+                      onClick={() => setDrawerSessionId(c.sessionId)}
+                      className="flex w-full items-center gap-3 rounded-xl border border-line px-3 py-2.5 text-left transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent text-[12px] font-semibold text-primary">
+                        {i + 1}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[13.5px] font-semibold text-ink">
+                          {c.candidateName || c.email}
+                        </p>
+                        <p className="truncate text-[12px] text-ink-muted">
+                          {formatRecommendation(c.recommendation)}
+                        </p>
+                      </div>
+                      <span className="shrink-0 text-[15px] font-semibold text-ink">
+                        {c.overall}
+                        <span className="text-[11px] font-normal text-ink-muted">
+                          /100
+                        </span>
+                      </span>
+                      <ChevronRight
+                        className="h-4 w-4 shrink-0 text-ink-subtle"
+                        strokeWidth={1.8}
+                      />
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </SectionCard>
+        </div>
       </div>
-    </div>
+
+      {/* The same review drawer the Candidates table opens, so a ranked row and
+          its table row lead to one screen rather than two half-views.
+
+          `sessionId` alone, no `candidateId` fallback: unlike the candidate-row
+          hosts, every row here HAS a scored interview, so the drawer never has
+          to fall back to the interview-less profile view.
+
+          Mounted here rather than in the page shell because the tab row wraps
+          its body in `key={tab}` — switching to Questions unmounts this whole
+          subtree, which closes the drawer. That's the behaviour we want, and it
+          can't strand an open drawer either: the drawer is modal, so the tab
+          underneath isn't clickable while it's up. Mutations inside it (rescore,
+          delete, a status change) refresh this card through
+          `invalidateCandidateData`'s `jobTopCandidates` key. */}
+      <InterviewDetailDrawer
+        sessionId={drawerSessionId}
+        onOpenChange={(open) => {
+          if (!open) setDrawerSessionId(null);
+        }}
+      />
+    </>
   );
 }
 

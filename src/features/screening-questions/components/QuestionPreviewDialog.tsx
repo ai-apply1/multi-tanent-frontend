@@ -23,6 +23,8 @@ import {
   type DifficultyLevel,
   type ScreeningQuestion
 } from "@/features/screening-questions/types"
+import { useAuth } from "@/features/auth/AuthContext"
+import { canManageFunnel } from "@/features/auth/roles"
 import { errorMessage as apiError } from "@/lib/errors"
 
 /** How often to re-check while a clip is still being generated. */
@@ -66,6 +68,11 @@ export function QuestionPreviewDialog({
   onEdit
 }: QuestionPreviewDialogProps) {
   const queryClient = useQueryClient()
+  const { user } = useAuth()
+  // A reader opens this to READ the question and play its clips. Generating
+  // audio and hopping to the edit dialog are both 403s for them, so neither
+  // affordance is rendered.
+  const canAct = canManageFunnel(user?.role)
 
   // Live audio state. Seeded from the prop so the body renders instantly, then
   // polled only while a clip is mid-flight (an idle preview costs nothing).
@@ -185,12 +192,21 @@ export function QuestionPreviewDialog({
                   >
                     {DIFFICULTY_LABELS[live.difficultyLevel]}
                   </span>
-                  <VariantAudioStatus
-                    variant={canonical}
-                    retired={false}
-                    busy={retryingId === canonical._id}
-                    onRetry={() => retryAudio(canonical._id)}
-                  />
+                  {/* Read-only states (ready / generating) are information,
+                      not actions — every role sees them. Only the failed/none
+                      branch is a "Generate audio" button, which 403s for
+                      interviewers. */}
+                  {canAct ||
+                  ["ready", "generating"].includes(
+                    variantAudioState(canonical),
+                  ) ? (
+                    <VariantAudioStatus
+                      variant={canonical}
+                      retired={false}
+                      busy={retryingId === canonical._id}
+                      onRetry={() => retryAudio(canonical._id)}
+                    />
+                  ) : null}
                   {variantAudioState(canonical) === "ready" ? (
                     <VariantAudioPlayer
                       questionId={live._id}
@@ -204,15 +220,17 @@ export function QuestionPreviewDialog({
 
           {/* Synonyms header */}
           <div className="mb-2.5 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleEdit}
-              aria-label="Add synonym"
-              title="Add synonym"
-              className="flex h-5 w-5 items-center justify-center rounded-md bg-accent text-[15px] leading-none text-primary hover:bg-primary hover:text-white"
-            >
-              <Plus className="h-3 w-3" strokeWidth={2.2} />
-            </button>
+            {canAct ? (
+              <button
+                type="button"
+                onClick={handleEdit}
+                aria-label="Add synonym"
+                title="Add synonym"
+                className="flex h-5 w-5 items-center justify-center rounded-md bg-accent text-[15px] leading-none text-primary hover:bg-primary hover:text-white"
+              >
+                <Plus className="h-3 w-3" strokeWidth={2.2} />
+              </button>
+            ) : null}
             <span className="text-[12px] font-bold uppercase tracking-[0.04em] text-ink-subtle">
               Synonyms
             </span>
@@ -236,12 +254,19 @@ export function QuestionPreviewDialog({
                     {variant.text}
                   </span>
                   <div className="flex flex-shrink-0 items-center gap-1.5">
-                    <VariantAudioStatus
-                      variant={variant}
-                      retired={false}
-                      busy={retryingId === variant._id}
-                      onRetry={() => retryAudio(variant._id)}
-                    />
+                    {/* Same rule as the canonical row: chips for everyone,
+                        the generate/retry button only for roles that may. */}
+                    {canAct ||
+                    ["ready", "generating"].includes(
+                      variantAudioState(variant),
+                    ) ? (
+                      <VariantAudioStatus
+                        variant={variant}
+                        retired={false}
+                        busy={retryingId === variant._id}
+                        onRetry={() => retryAudio(variant._id)}
+                      />
+                    ) : null}
                     {variantAudioState(variant) === "ready" ? (
                       <VariantAudioPlayer
                         questionId={live._id}
@@ -254,7 +279,9 @@ export function QuestionPreviewDialog({
             </div>
           ) : (
             <div className="rounded-xl border border-dashed border-line-2 py-7 text-center text-[13px] text-ink-muted">
-              No synonyms yet. Generate some from the edit screen.
+              {canAct
+                ? "No synonyms yet. Generate some from the edit screen."
+                : "No synonyms yet."}
             </div>
           )}
         </div>
@@ -264,9 +291,11 @@ export function QuestionPreviewDialog({
           <Button variant="secondary" size="sm" onClick={() => onOpenChange(false)}>
             Close
           </Button>
-          <Button size="sm" onClick={handleEdit}>
-            Generate synonyms
-          </Button>
+          {canAct ? (
+            <Button size="sm" onClick={handleEdit}>
+              Generate synonyms
+            </Button>
+          ) : null}
         </div>
       </DialogContent>
     </Dialog>

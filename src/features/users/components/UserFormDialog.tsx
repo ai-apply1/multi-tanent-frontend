@@ -64,6 +64,10 @@ const ROLE_OPTIONS: Array<{ value: UserRole; label: string }> = [
     value: "org_admin",
     label: "Org admin, manages the team and org settings",
   },
+  {
+    value: "interviewer",
+    label: "Interviewer, read-only reviewer with salary details hidden",
+  },
 ];
 
 /**

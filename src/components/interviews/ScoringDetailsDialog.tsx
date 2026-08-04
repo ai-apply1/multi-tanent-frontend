@@ -113,8 +113,13 @@ function ScoreBar({
   return (
     <div className="rounded-lg border border-line bg-surface px-3 py-2">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="text-[12px] font-medium text-ink-muted">{label}</span>
-        <span className="mono text-[13px] font-semibold text-ink">
+        {/* `truncate` + `shrink-0` so a narrow column clips the LABEL rather
+            than breaking the number: without them the score and its "/ 10"
+            got pushed onto separate lines and the row read as three. */}
+        <span className="truncate text-[12px] font-medium text-ink-muted">
+          {label}
+        </span>
+        <span className="mono shrink-0 whitespace-nowrap text-[13px] font-semibold text-ink">
           {s1(value)}
           <span className="text-[10px] font-normal text-ink-subtle">
             {" "}
@@ -195,7 +200,7 @@ function FormulaCard({
           />
           {title}
         </span>
-        <span className="mono text-[16px] font-semibold text-ink">
+        <span className="mono shrink-0 whitespace-nowrap text-[16px] font-semibold text-ink">
           {s1(result)}
           <span className="text-[11px] font-normal text-ink-subtle">
             {suffix}
@@ -275,7 +280,12 @@ export function ScoringDetailsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[620px]">
+      {/* Wider than the app's form dialogs on purpose: almost everything in
+          here is a 3-column grid of score tiles, and at the old 620px each
+          column was ~170px — narrow enough that the labels and their hints
+          wrapped rather than sat. 720 keeps prose lines readable while giving
+          each column ~200px. */}
+      <DialogContent className="max-w-[720px]">
         <DialogHeader>
           <DialogTitle className="text-[18px] font-semibold text-ink">
             {displayName}, Scoring
@@ -287,7 +297,7 @@ export function ScoringDetailsDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="max-h-[70vh] space-y-3 overflow-y-auto pr-1">
+        <div className="max-h-[70vh] space-y-3 overflow-y-auto pr-2">
           {/* --- How the overall is built ------------------------------- */}
           <Section title="Composition">
             <div className="space-y-2">
@@ -310,54 +320,64 @@ export function ScoringDetailsDialog({
                     : "Passes when Overall × 10 clears the job's rejection threshold."
                 }
               />
-              <div className="grid gap-2 sm:grid-cols-2">
-                <FormulaCard
-                  icon={Layers}
-                  title="Communication"
-                  result={scores.communication}
-                  formula={
-                    folded ? (
-                      <>
-                        ({w(W_SUBSTANCE)} × Substance ({s1(substance)}) +{" "}
-                        {w(W_FLUENCY)} × Fluency ({s1(fluency?.fluencyScore)}))
-                        × g ({s1(scores.communicationFloor)})
-                      </>
-                    ) : (
-                      <>
-                        Substance mean ({s1(substance ?? scores.communication)})
-                      </>
-                    )
-                  }
-                  note={
-                    folded
-                      ? "Spoken English leads; substance is a low-end floor (g) that crushes fluent-but-empty answers toward 0."
-                      : "Fluency was not folded in, communication is the per-answer substance mean (structure / clarity / concision)."
+              {/* The three raw 0–10 axes, one row, equal columns.
+                  These used to be a 2-col grid nested inside the RIGHT half
+                  of a 2-col grid — so each bar got a quarter of the dialog
+                  (~130px). At that width the label wrapped away from its own
+                  score, every hint ran to four or five lines, and the odd
+                  third card left a hole that stretched the Communication card
+                  beside it into a column of dead space. They are siblings in
+                  the Overall formula, not children of Communication, so they
+                  belong on their own full-width row. */}
+              <div className="grid gap-2 sm:grid-cols-3">
+                <ScoreBar
+                  label="Correctness"
+                  value={scores.correctness}
+                  hint="did they land the expected point"
+                />
+                <ScoreBar
+                  label="Depth"
+                  value={scores.depth}
+                  hint={
+                    typeof scores.depthRaw === "number" &&
+                    scores.depthRaw !== scores.depth
+                      ? `raw ${s1(scores.depthRaw)}, calibrated for question difficulty and role seniority`
+                      : "trade-offs · specifics · judgment"
                   }
                 />
-                <div className="grid grid-cols-2 gap-2">
-                  <ScoreBar
-                    label="Correctness"
-                    value={scores.correctness}
-                    hint="did they land the expected point"
-                  />
-                  <ScoreBar
-                    label="Depth"
-                    value={scores.depth}
-                    hint={
-                      typeof scores.depthRaw === "number" &&
-                      scores.depthRaw !== scores.depth
-                        ? `raw ${s1(scores.depthRaw)}, calibrated for question difficulty and role seniority`
-                        : "trade-offs · specifics · judgment"
-                    }
-                  />
-                  <ScoreBar
-                    label="Substance"
-                    value={substance}
-                    tone="muted"
-                    hint="structure · clarity · concision"
-                  />
-                </div>
+                <ScoreBar
+                  label="Substance"
+                  value={substance}
+                  tone="muted"
+                  hint="structure · clarity · concision"
+                />
               </div>
+              {/* Communication last, and full width: it's the DERIVED fold,
+                  and its formula names Substance — which now sits directly
+                  above it. Full width because the formula box plus the note
+                  are two long sentences; in a half-width column they were
+                  the reason the card ran taller than everything else. */}
+              <FormulaCard
+                icon={Layers}
+                title="Communication"
+                result={scores.communication}
+                formula={
+                  folded ? (
+                    <>
+                      ({w(W_SUBSTANCE)} × Substance ({s1(substance)}) +{" "}
+                      {w(W_FLUENCY)} × Fluency ({s1(fluency?.fluencyScore)})) ×
+                      g ({s1(scores.communicationFloor)})
+                    </>
+                  ) : (
+                    <>Substance mean ({s1(substance ?? scores.communication)})</>
+                  )
+                }
+                note={
+                  folded
+                    ? "Spoken English leads; substance is a low-end floor (g) that crushes fluent-but-empty answers toward 0."
+                    : "Fluency was not folded in, communication is the per-answer substance mean (structure / clarity / concision)."
+                }
+              />
             </div>
           </Section>
 

@@ -49,6 +49,7 @@ import {
   updateNotificationPrefs,
 } from "@/features/users/usersApi";
 import type { NotificationPrefs } from "@/features/users/types";
+import { LinkedInIntegrationCard } from "@/features/integrations/components/LinkedInIntegrationCard";
 import { useAuth } from "@/features/auth/AuthContext";
 import { errorMessage as apiError } from "@/lib/errors";
 import { isHexColor, sameColor } from "@/lib/color";
@@ -1142,6 +1143,17 @@ export function OrgSettingsPage() {
     </div>
   );
 
+  /**
+   * Per-user platform connections (LinkedIn today). Self-scoped, so it has no
+   * Save bar and no org_admin gate — it manages its own connect/disconnect
+   * writes, like the notifications tab.
+   */
+  const integrationsBody = (
+    <div className="grid gap-5">
+      <LinkedInIntegrationCard />
+    </div>
+  );
+
   const platformBody = (
     <div>
       <div className="mb-4 flex items-center gap-2 text-[12.5px] text-ink-muted">
@@ -1210,10 +1222,12 @@ export function OrgSettingsPage() {
     <div className="mx-auto max-w-[1240px] px-6 py-6 lg:px-8 lg:py-8">
       {header}
 
-      {/* The notifications tab is self-scoped and writable by every role, so
-          the read-only notice would be false there — show it only on the
-          org-owned tabs a non-org_admin genuinely can't change. */}
-      {!canWrite && activeTab !== "notifications" ? (
+      {/* The notifications + integrations tabs are self-scoped and writable by
+          every role, so the read-only notice would be false there — show it
+          only on the org-owned tabs a non-org_admin genuinely can't change. */}
+      {!canWrite &&
+      activeTab !== "notifications" &&
+      activeTab !== "integrations" ? (
         <p className="mb-4 rounded-lg border border-line bg-surface-3 px-3 py-2 text-[13px] text-ink-muted">
           You have read-only access to these settings. Ask an org admin in your
           organization to change them.
@@ -1263,6 +1277,7 @@ export function OrgSettingsPage() {
             {activeTab === "domains" ? domainsBody : null}
             {activeTab === "video" ? videoBody : null}
             {activeTab === "defaults" ? defaultsBody : null}
+            {activeTab === "integrations" ? integrationsBody : null}
             {activeTab === "platform" ? platformBody : null}
             {activeTab === "notifications" ? (
               <NotificationPrefsBody

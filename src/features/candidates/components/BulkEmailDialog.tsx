@@ -16,6 +16,7 @@ import {
   previewEmailTemplate,
   type EmailTemplateItem,
 } from "@/features/organization/emailTemplatesApi";
+import { makePreviewInert } from "@/features/organization/emailPreview";
 import { sendCandidateEmail } from "@/features/candidates/candidatesApi";
 import type { BulkEmailPurpose } from "@/features/candidates/types";
 import { errorMessage } from "@/lib/errors";
@@ -178,6 +179,15 @@ export function BulkEmailDialog({
       clearTimeout(id);
     };
   }, [open, selected, subject, body, applyMerge]);
+
+  // What the iframe actually renders: the server's HTML with its links made
+  // inert. Derived rather than stored so `previewHtml` keeps holding exactly
+  // what the server returned, and so a failed preview (empty string) stays
+  // empty and keeps falling through to the error/loading branches below.
+  const previewDoc = useMemo(
+    () => (previewHtml ? makePreviewInert(previewHtml) : ""),
+    [previewHtml],
+  );
 
   // Reset to a fresh compose each time the dialog is reopened. This component
   // stays mounted after close (the dialog content unmounts, not us), so the
@@ -407,7 +417,7 @@ export function BulkEmailDialog({
                     <iframe
                       title="Email preview"
                       sandbox=""
-                      srcDoc={previewHtml}
+                      srcDoc={previewDoc}
                       className="h-[440px] w-full"
                     />
                   </>

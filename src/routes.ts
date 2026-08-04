@@ -42,6 +42,7 @@ export type SettingsTabId =
   | "domains"
   | "video"
   | "defaults"
+  | "integrations"
   | "platform"
   | "notifications";
 
@@ -52,6 +53,10 @@ export const SETTINGS_TABS: ReadonlyArray<{ id: SettingsTabId; label: string }> 
     { id: "domains", label: "Domains" },
     { id: "video", label: "Demo video" },
     { id: "defaults", label: "Interview defaults" },
+    // Social/job-board connections (LinkedIn today; more platforms later). A
+    // per-user connection surface, not org-wide config, so it's writable by
+    // every role like "My notifications".
+    { id: "integrations", label: "Integrations" },
     { id: "platform", label: "Platform" },
     { id: "notifications", label: "My notifications" },
   ];

@@ -42,6 +42,8 @@ import {
   STAGE_AUTO_EMAILS,
   STAGE_ORDER_STEP,
 } from "@/features/pipeline/types";
+import { useAuth } from "@/features/auth/AuthContext";
+import { canManageFunnel } from "@/features/auth/roles";
 import { errorMessage } from "@/lib/errors";
 
 const FALLBACK_COLOR = "#64748B";
@@ -87,6 +89,10 @@ function assignStageOrders(ordered: CandidateStatus[]): CandidateStatus[] {
  */
 export function PipelinePage() {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  // Interviewers read the board's shape; creating, renaming, recolouring,
+  // deleting, reordering and muting a stage's emails are all 403s for them.
+  const canAct = canManageFunnel(user?.role);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<CandidateStatus | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CandidateStatus | null>(
@@ -260,7 +266,10 @@ export function PipelinePage() {
   };
 
   return (
-    <div className="mx-auto max-w-[1100px] px-6 py-6 lg:px-8 lg:py-8">
+    // 1240px is the shell-wide page measure — every destination uses it, so
+    // their left edges line up as you move between them. A page-specific
+    // width re-centres the whole column and the content visibly shifts.
+    <div className="mx-auto max-w-[1240px] px-6 py-6 lg:px-8 lg:py-8">
       {/* Page header */}
       <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
         <div>
@@ -273,18 +282,18 @@ export function PipelinePage() {
             </h1>
           </div>
           <p className="mt-1.5 max-w-[620px] text-[13.5px] text-ink-muted">
-            The candidate board's columns, in order. The built-in stages are
-            fixed that sequence is the funnel the hiring automations actually
-            run but you can rename and recolour any of them, and add your own
-            columns anywhere between them. A column's key is permanent, because
-            the automations reference it.
+            {canAct
+              ? "The candidate board's columns, in order. The built-in stages are fixed that sequence is the funnel the hiring automations actually run but you can rename and recolour any of them, and add your own columns anywhere between them. A column's key is permanent, because the automations reference it."
+              : "The candidate board's columns, in order. The built-in stages are the funnel the hiring automations actually run; the rest were added by your organisation."}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" onClick={openCreate}>
-            <Plus className="h-4 w-4" strokeWidth={2.2} />
-            New status
-          </Button>
+          {canAct ? (
+            <Button size="sm" onClick={openCreate}>
+              <Plus className="h-4 w-4" strokeWidth={2.2} />
+              New status
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -294,7 +303,7 @@ export function PipelinePage() {
       ) : error ? (
         <ErrorState onRetry={() => refetch()} loading={isFetching} />
       ) : ordered.length === 0 ? (
-        <EmptyState onCreate={openCreate} />
+        <EmptyState onCreate={openCreate} canCreate={canAct} />
       ) : (
         <div className="rounded-2xl border border-line bg-surface">
           <div className="flex items-center gap-3 border-b border-line px-5 py-3">
@@ -321,6 +330,7 @@ export function PipelinePage() {
                 <SortableStatusRow
                   key={status._id}
                   status={status}
+                  canAct={canAct}
                   disabled={busy}
                   onEdit={() => openEdit(status)}
                   onDelete={() => handleDelete(status)}
@@ -455,6 +465,8 @@ export function PipelinePage() {
 
 interface StatusRowProps {
   status: CandidateStatus;
+  /** False for an interviewer: the row is read-only, drag included. */
+  canAct: boolean;
   disabled: boolean;
   onEdit: () => void;
   onDelete: () => void;
@@ -489,7 +501,7 @@ function SortableStatusRow(props: StatusRowProps) {
     isDragging,
   } = useSortable({
     id: props.status._id,
-    disabled: props.disabled || pinned,
+    disabled: props.disabled || pinned || !props.canAct,
   });
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -523,6 +535,7 @@ interface StatusRowViewProps extends StatusRowProps {
 
 function StatusRow({
   status,
+  canAct,
   disabled,
   onEdit,
   onDelete,
@@ -567,7 +580,10 @@ function StatusRow({
           ref={dragHandleRef}
           {...dragHandleAttributes}
           {...dragHandleListeners}
-          disabled={disabled}
+          // Kept visible but inert for a reader: the row's content is the
+          // point, and a missing handle would misalign every custom row
+          // against the pinned ones.
+          disabled={disabled || !canAct}
           aria-label={`Reorder ${status.label}`}
           className="inline-flex h-7 w-5 shrink-0 cursor-grab items-center justify-center text-ink-subtle hover:text-ink-muted disabled:cursor-not-allowed disabled:opacity-40"
         >
@@ -632,20 +648,28 @@ function StatusRow({
           <span className="text-[12.5px] font-semibold text-ink-muted">
             Auto emails
           </span>
+          {/* A reader gets the same switch, read-only — NOT `disabled`, which
+              dims it: whether a stage emails candidates is exactly what they
+              are here to see, so the state has to stay fully legible. */}
           <button
             type="button"
             role="switch"
             aria-checked={status.autoEmailsEnabled !== false}
+            aria-readonly={canAct ? undefined : true}
             // Starts with the visible "Auto emails" label so speech-input
             // users can target it by what they see (WCAG 2.5.3).
             aria-label={`Auto emails for ${status.label}`}
-            disabled={togglingAutoEmails || disabled}
-            onClick={onToggleAutoEmails}
+            disabled={canAct && (togglingAutoEmails || disabled)}
+            onClick={canAct ? onToggleAutoEmails : undefined}
             className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
               status.autoEmailsEnabled !== false
                 ? "bg-primary"
                 : "bg-[var(--line-2)]"
-            } ${togglingAutoEmails || disabled ? "cursor-not-allowed opacity-50" : ""}`}
+            } ${!canAct ? "cursor-default" : ""} ${
+              canAct && (togglingAutoEmails || disabled)
+                ? "cursor-not-allowed opacity-50"
+                : ""
+            }`}
           >
             <span
               className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
@@ -657,18 +681,20 @@ function StatusRow({
           </button>
         </div>
       ) : null}
-      <button
-        type="button"
-        onClick={onEdit}
-        className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-semibold text-ink-muted hover:bg-surface-3"
-      >
-        <Pencil className="h-[13px] w-[13px]" strokeWidth={1.9} />
-        Edit
-      </button>
+      {canAct ? (
+        <button
+          type="button"
+          onClick={onEdit}
+          className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-semibold text-ink-muted hover:bg-surface-3"
+        >
+          <Pencil className="h-[13px] w-[13px]" strokeWidth={1.9} />
+          Edit
+        </button>
+      ) : null}
       {/* Protected rows have no delete affordance at all — the server would
           403 it, and offering a button that always fails is worse than
           not offering one. */}
-      {status.isProtected ? null : (
+      {status.isProtected || !canAct ? null : (
         <button
           type="button"
           onClick={onDelete}
@@ -712,18 +738,21 @@ function LoadingSkeleton() {
 
 interface EmptyStateProps {
   onCreate: () => void;
+  canCreate: boolean;
 }
 
-function EmptyState({ onCreate }: EmptyStateProps) {
+function EmptyState({ onCreate, canCreate }: EmptyStateProps) {
   return (
     <div className="flex flex-col items-center gap-3 rounded-2xl border border-line bg-surface px-6 py-14 text-center">
       <p className="text-[13.5px] text-ink-muted">
         No statuses in this organisation's catalog yet.
       </p>
-      <Button size="sm" onClick={onCreate}>
-        <Plus className="h-4 w-4" strokeWidth={2.2} />
-        New status
-      </Button>
+      {canCreate ? (
+        <Button size="sm" onClick={onCreate}>
+          <Plus className="h-4 w-4" strokeWidth={2.2} />
+          New status
+        </Button>
+      ) : null}
     </div>
   );
 }
