@@ -10,6 +10,18 @@ import type {
   UserListResponse,
 } from "@/features/users/types";
 
+/**
+ * The columns `GET /admin/users` can order by, mirroring the backend's
+ * `USER_SORT_FIELDS`.
+ */
+export type UserSortField =
+  | "name"
+  | "userName"
+  | "email"
+  | "role"
+  | "status"
+  | "lastLogin";
+
 /** Members of the caller's own org. Scoped by the JWT — no org id is ever sent. */
 export async function listUsers(
   params: {
@@ -18,6 +30,9 @@ export async function listUsers(
     search?: string;
     role?: UserRole;
     isActive?: boolean;
+    /** Omit for the API's own order (newest first). */
+    sortBy?: UserSortField;
+    sortDir?: "asc" | "desc";
   } = {},
 ) {
   const { data } = await api.get<UserListResponse>("/admin/users", {
@@ -27,6 +42,10 @@ export async function listUsers(
       ...(params.search ? { search: params.search } : {}),
       ...(params.role ? { role: params.role } : {}),
       ...(params.isActive === undefined ? {} : { isActive: params.isActive }),
+      // Both keys or neither — `sortDir` alone orders nothing.
+      ...(params.sortBy
+        ? { sortBy: params.sortBy, sortDir: params.sortDir ?? "asc" }
+        : {}),
     },
   });
   return data;

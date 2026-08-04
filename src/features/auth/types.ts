@@ -1,7 +1,9 @@
 /**
- * Wire values, not display labels — `org_admin` unlocks Team + the org-settings
- * write path. `interviewer` is a view-only reviewer: it can browse candidates
- * but not mutate them, and the backend withholds salary data from it entirely.
+ * Wire values, not display labels — `org_admin` unlocks Team + the
+ * org-settings write path; `interviewer` is a view-only reviewer (the
+ * backend 403s every funnel mutation and hides salary figures), so the UI
+ * hides action affordances for it — see `canManageFunnel` in
+ * `features/auth/roles.ts`.
  */
 export type UserRole = "org_admin" | "hr" | "interviewer"
 

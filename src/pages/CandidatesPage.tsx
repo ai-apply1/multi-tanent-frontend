@@ -11,7 +11,6 @@ import toast from "react-hot-toast";
 import {
   AlertTriangle,
   ArrowLeft,
-  Check,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -43,18 +42,15 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SortHeader } from "@/components/ui/sort-header";
 import { InterviewDetailDrawer } from "@/components/interviews/InterviewDetailDrawer";
-import { useAuth } from "@/features/auth/AuthContext";
 import { BulkEmailDialog } from "@/features/candidates/components/BulkEmailDialog";
+import { ChangeStatusSubMenu } from "@/features/candidates/components/ChangeStatusSubMenu";
 import {
   deleteCandidate,
   exportCandidatesCsv,
@@ -68,10 +64,12 @@ import {
   invalidateCandidateData,
   invalidateCandidateDataAndJobCounts,
 } from "@/features/candidates/candidatesCache";
+import { useAuth } from "@/features/auth/AuthContext";
+import { canManageFunnel } from "@/features/auth/roles";
 import { aiScoreState, type AiScoreState } from "@/features/candidates/aiScore";
-import { manualMoveBlocker } from "@/features/candidates/manualMove";
 import {
   type CandidateListItem,
+  type CandidateSortField,
   type CandidateStatus,
 } from "@/features/candidates/types";
 import { JOB_OPTIONS_QUERY_KEY, listJobOptions } from "@/features/jobs/jobsApi";
@@ -79,6 +77,7 @@ import { useOrgTimezone } from "@/features/organization/useOrgTimezone";
 import { jobDetail } from "@/routes";
 import { formatDate } from "@/lib/date";
 import { errorMessage } from "@/lib/errors";
+import { type SortDir, type SortState } from "@/lib/sort";
 import { cn } from "@/lib/utils";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { ClearFiltersButton } from "@/components/common/ClearFiltersButton";
@@ -100,6 +99,44 @@ const DEFAULT_PAGE_SIZE = 25;
  * fraction of the shared container width, so they line up across all rows.
  */
 const ROW_GRID = "grid-cols-[1.7fr_1.3fr_1.1fr_1.1fr_0.8fr_200px]";
+
+/** Which way each column opens — see `SortHeader.firstDir`. */
+const CANDIDATE_SORT_FIRST_DIR: Record<CandidateSortField, SortDir> = {
+  name: "asc",
+  job: "asc",
+  status: "asc",
+  score: "desc",
+  date: "desc",
+};
+
+const CANDIDATE_SORT_FIELDS = Object.keys(
+  CANDIDATE_SORT_FIRST_DIR,
+) as CandidateSortField[];
+
+/**
+ * Read a sort back out of the URL, or `null` for the API's own order.
+ *
+ * Validated against the field list rather than trusted, because this value is
+ * whatever is in the address bar and it now goes STRAIGHT INTO A REQUEST: the
+ * backend's `sortBy` is an allow-list, so a hand-typed or stale `?sort=` would
+ * 400 the whole list and leave the table showing "Could not load candidates"
+ * over a link that merely names a column this build dropped. Unknown key ⇒
+ * unsorted.
+ */
+function readSortParam(
+  params: URLSearchParams,
+): SortState<CandidateSortField> | null {
+  const by = params.get("sort");
+  if (!by || !CANDIDATE_SORT_FIELDS.includes(by as CandidateSortField)) {
+    return null;
+  }
+  const field = by as CandidateSortField;
+  const dir = params.get("dir");
+  return {
+    by: field,
+    dir: dir === "asc" || dir === "desc" ? dir : CANDIDATE_SORT_FIRST_DIR[field],
+  };
+}
 
 /**
  * Stage badge tint. The org owns the hue (custom columns included), so the
@@ -177,11 +214,11 @@ function initialsOf(name: string): string {
 export function CandidatesPage() {
   const queryClient = useQueryClient();
   const tz = useOrgTimezone();
-  // `interviewer` is a view-only role: it can browse candidates and open the
-  // drawer, but every mutating control (export, bulk actions, per-row invite /
-  // email / status move / delete) is withheld — the backend 403s them anyway.
+  // `interviewer` reads this page but the backend 403s every mutation it can
+  // reach from here (export, invite, email, status change, delete), so those
+  // affordances are hidden rather than left to fail on click.
   const { user } = useAuth();
-  const isInterviewer = user?.role === "interviewer";
+  const canAct = canManageFunnel(user?.role);
   // This page serves two routes: the org-wide `/dashboard/candidates` and
   // `/dashboard/jobs/:jobId/candidates`, which Jobs links to as "View
   // candidates". On the latter the job is the whole point of the URL, so it
@@ -234,6 +271,13 @@ export function CandidatesPage() {
     () => searchParams.get("status") ?? ALL,
   );
   const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
+  // Column sort. URL-backed like the filters above, so a refresh or a shared
+  // link restores the view someone was actually looking at — and, since the
+  // SERVER does the ordering now, it is part of `listParams` too: a click has
+  // to refetch or the table shows the old order under the new arrow.
+  const [sort, setSort] = useState<SortState<CandidateSortField> | null>(() =>
+    readSortParam(searchParams),
+  );
 
   // Leaving the job scope by NAVIGATION. React Router keeps this page mounted
   // when the sidebar's "Candidates" (or a browser Back) lands on the plain
@@ -330,6 +374,10 @@ export function CandidatesPage() {
         put("status", statusFilter, statusFilter === ALL);
         put("page", String(page), page === 1);
         put("size", String(pageSize), pageSize === DEFAULT_PAGE_SIZE);
+        // Both keys or neither — a lone `?dir=asc` is meaningless, and
+        // `readSortParam` would drop it anyway.
+        put("sort", sort?.by ?? "", !sort);
+        put("dir", sort?.dir ?? "", !sort);
         // On the job-scoped route the path owns the job; only the org-wide
         // route carries it as a query param.
         if (routeJobId) next.delete("job");
@@ -350,6 +398,7 @@ export function CandidatesPage() {
     statusFilter,
     page,
     pageSize,
+    sort,
     jobFilter,
     routeJobId,
     cameFromJob,
@@ -425,6 +474,16 @@ export function CandidatesPage() {
     ...(jobFilter !== ALL ? { jobId: jobFilter } : {}),
     ...(statusFilter !== ALL ? { statusKey: statusFilter } : {}),
     ...(debouncedSearch.trim() ? { search: debouncedSearch.trim() } : {}),
+    ...(sort ? { sortBy: sort.by, sortDir: sort.dir } : {}),
+  };
+
+  // Page 1 on every sort change. The page number named a slice of the previous
+  // order — keeping it drops the reviewer into the middle of a list whose top
+  // they have not seen, which is the opposite of what clicking "AI score,
+  // highest first" is asking for.
+  const changeSort = (next: SortState<CandidateSortField>) => {
+    setSort(next);
+    setPage(1);
   };
 
   const { data, isLoading, isError, isFetching, refetch } = useQuery({
@@ -441,7 +500,19 @@ export function CandidatesPage() {
     staleTime: 0,
   });
 
-  const rows = useMemo(() => data?.data ?? [], [data]);
+  /**
+   * The page's rows, already in the order the table renders them.
+   *
+   * The server ordered these (`CANDIDATE_SORT_PLANS`), which is what makes the
+   * Role column trustworthy: sorting by job title used to mean joining against
+   * the loaded job options, and that list is capped at 100, so every candidate
+   * whose job fell outside it sank to the bottom regardless of its title.
+   *
+   * Memoised only to keep its IDENTITY stable across renders — the `?? []`
+   * fallback would otherwise mint a fresh array every time and re-run the two
+   * `useMemo`s downstream that take it as a dependency.
+   */
+  const rows = useMemo(() => data?.data ?? [], [data?.data]);
   /** Rows this page is knowingly showing a soon-to-be-stale status for. */
   const processingCount = useMemo(
     () => rows.filter(isProcessing).length,
@@ -672,9 +743,11 @@ export function CandidatesPage() {
       // drawer's downloads do.
       const status = axios.isAxiosError(err) ? err.response?.status : undefined;
       toast.error(
-        status === 400
-          ? "That export request was rejected. Try clearing the job filter."
-          : "Could not export the CSV.",
+        status === 403
+          ? "Your role can't export candidates."
+          : status === 400
+            ? "That export request was rejected. Try clearing the job filter."
+            : "Could not export the CSV.",
       );
     } finally {
       setExporting(false);
@@ -760,7 +833,7 @@ export function CandidatesPage() {
             />
             Refresh
           </Button>
-          {!isInterviewer ? (
+          {canAct ? (
             <Button
               variant="secondary"
               size="sm"
@@ -864,7 +937,10 @@ export function CandidatesPage() {
           </Select>
         </div>
 
-        {selectedCount > 0 ? (
+        {/* Row selection exists ONLY to feed these two bulk actions, so a
+            role that can do neither never sees the checkboxes and this bar
+            can't be reached — the `canAct` guard is belt-and-braces. */}
+        {canAct && selectedCount > 0 ? (
               <div className="flex flex-col gap-2 border-b border-line bg-[var(--accent-softer)] px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-3 text-[13px]">
                   <span className="font-semibold text-ink">
@@ -879,37 +955,35 @@ export function CandidatesPage() {
                     Clear
                   </button>
                 </div>
-                {!isInterviewer ? (
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() =>
-                        setEmailState({
-                          ids: Array.from(selectedIds),
-                          label: `${selectedCount} candidate${selectedCount === 1 ? "" : "s"}`,
-                          fromSelection: true,
-                        })
-                      }
-                    >
-                      <Mail className="h-4 w-4" strokeWidth={1.7} />
-                      Send email
-                    </Button>
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      disabled={bulkDeleteMutation.isPending}
-                      onClick={() => setBulkDeleteOpen(true)}
-                    >
-                      {bulkDeleteMutation.isPending ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Trash2 className="h-4 w-4" strokeWidth={1.7} />
-                      )}
-                      Delete
-                    </Button>
-                  </div>
-                ) : null}
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() =>
+                      setEmailState({
+                        ids: Array.from(selectedIds),
+                        label: `${selectedCount} candidate${selectedCount === 1 ? "" : "s"}`,
+                        fromSelection: true,
+                      })
+                    }
+                  >
+                    <Mail className="h-4 w-4" strokeWidth={1.7} />
+                    Send email
+                  </Button>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    disabled={bulkDeleteMutation.isPending}
+                    onClick={() => setBulkDeleteOpen(true)}
+                  >
+                    {bulkDeleteMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" strokeWidth={1.7} />
+                    )}
+                    Delete
+                  </Button>
+                </div>
               </div>
             ) : null}
 
@@ -949,19 +1023,53 @@ export function CandidatesPage() {
               )}
             >
               <span className="flex items-center gap-2.5">
-                {!isInterviewer ? (
+                {canAct ? (
                   <Checkbox
                     checked={headerChecked}
                     onCheckedChange={(c) => toggleAll(Boolean(c))}
                     aria-label="Select all on this page"
                   />
                 ) : null}
-                Candidate
+                <SortHeader
+                  label="Candidate"
+                  field="name"
+                  firstDir={CANDIDATE_SORT_FIRST_DIR.name}
+                  sort={sort}
+                  onSortChange={changeSort}
+                />
+
               </span>
-              <span>Role</span>
-              <span>Status</span>
-              <span className="text-center">AI score</span>
-              <span>Date</span>
+              <SortHeader
+                label="Role"
+                field="job"
+                firstDir={CANDIDATE_SORT_FIRST_DIR.job}
+                sort={sort}
+                onSortChange={changeSort}
+              />
+              <SortHeader
+                label="Status"
+                field="status"
+                firstDir={CANDIDATE_SORT_FIRST_DIR.status}
+                sort={sort}
+                onSortChange={changeSort}
+              />
+              {/* Opens highest-first: "who scored best" is the reason anyone
+                  sorts this column, and it should cost one click. */}
+              <SortHeader
+                label="AI score"
+                field="score"
+                firstDir={CANDIDATE_SORT_FIRST_DIR.score}
+                sort={sort}
+                onSortChange={changeSort}
+                align="center"
+              />
+              <SortHeader
+                label="Date"
+                field="date"
+                firstDir={CANDIDATE_SORT_FIRST_DIR.date}
+                sort={sort}
+                onSortChange={changeSort}
+              />
               <span />
             </div>
 
@@ -994,7 +1102,9 @@ export function CandidatesPage() {
                   statusFilter !== ALL ||
                   jobFilter !== ALL
                     ? "Adjust your search or filters to see applicants."
-                    : "Open a job and upload CVs from its Candidates tab to add some."}
+                    : canAct
+                      ? "Open a job and upload CVs from its Candidates tab to add some."
+                      : "Candidates appear here once applications arrive or a recruiter uploads CVs."}
                 </p>
               </div>
             ) : (
@@ -1004,7 +1114,7 @@ export function CandidatesPage() {
                     key={row._id}
                     row={row}
                     tz={tz}
-                    readOnly={isInterviewer}
+                    canAct={canAct}
                     selected={selectedIds.has(row._id)}
                     jobTitle={jobsById.get(row.jobId)?.title ?? null}
                     statuses={statuses}
@@ -1347,7 +1457,7 @@ function isReinvite(row: Pick<CandidateListItem, "latestInterviewId">): boolean 
 function CandidateRow({
   row,
   tz,
-  readOnly,
+  canAct,
   selected,
   jobTitle,
   statuses,
@@ -1363,8 +1473,8 @@ function CandidateRow({
 }: {
   row: CandidateListItem;
   tz: string;
-  /** View-only viewer (interviewer): selection + all mutating row actions hidden. */
-  readOnly?: boolean;
+  /** May this role mutate the funnel? A view-only role gets read items only. */
+  canAct: boolean;
   selected: boolean;
   jobTitle: string | null;
   statuses: CandidateStatus[];
@@ -1379,15 +1489,20 @@ function CandidateRow({
   onDelete: () => void;
 }) {
   const status = row.currentStatusId;
-  // Always offered — the invite endpoint takes any funnel status; it only
-  // refuses on a closed job, a spent attempt cap, or an attempt that's already
-  // been started (a clear message then points to "Reattempt" in the drawer).
-  const canInvite = true;
+  // Offered at every funnel status — the invite endpoint takes any of them and
+  // only refuses on a closed job, a spent attempt cap, or an attempt that's
+  // already been started (a clear message then points to "Reattempt" in the
+  // drawer). The one hard gate is the role: the backend 403s a view-only send.
+  const canInvite = canAct;
   // First-time invite vs. re-sending an existing attempt's link — the same
   // endpoint either way, but the label should say which so the row reads
   // truthfully (an already-invited candidate showing "Send invite" misleads).
   const reinvite = isReinvite(row);
   const scoreState = aiScoreState(row.latestInterviewId);
+  // Every other kebab entry is a mutation, so for a view-only role the menu
+  // holds at most "Open CV" — and nothing at all on a row without one. An
+  // empty menu is worse than no trigger, hence the trigger goes too.
+  const hasRowActions = canAct || Boolean(row.cvKey);
 
   return (
     <div
@@ -1406,7 +1521,7 @@ function CandidateRow({
     >
       {/* Candidate — checkbox + avatar + name/email */}
       <div className="flex min-w-0 items-center gap-2.5">
-        {!readOnly ? (
+        {canAct ? (
           <span
             onClick={(e) => e.stopPropagation()}
             className="flex items-center"
@@ -1501,9 +1616,15 @@ function CandidateRow({
         <AiScoreCell state={scoreState} />
       </div>
 
-      {/* Date */}
-      <span className="text-[12.5px] text-ink-muted">
-        {formatDate(row.createdAt, tz)}
+      {/* Date — when the row LAST MOVED stage (`statusUpdatedAt`: shortlisted,
+          rejected, invited…), not when the candidate applied. `createdAt` is
+          the fallback for the moment a legacy row predating the field would
+          otherwise render the "-" placeholder. */}
+      <span
+        className="text-[12.5px] text-ink-muted"
+        title="Date of the latest status change"
+      >
+        {formatDate(row.statusUpdatedAt || row.createdAt, tz)}
       </span>
 
       {/* Actions, an explicit "View interview" button plus the kebab menu.
@@ -1523,102 +1644,65 @@ function CandidateRow({
           {resolvingInterview ? <Loader2 className="animate-spin" /> : <Eye />}
           View interview
         </Button>
-        {!readOnly || row.cvKey ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label="Row actions"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full text-ink-muted hover:bg-surface-3 hover:text-ink"
-            >
-              {statusPending || resolvingInterview ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <MoreVertical className="h-4 w-4" strokeWidth={1.7} />
-              )}
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-52">
-            {row.cvKey ? (
-              <DropdownMenuItem onSelect={onOpenCv}>
-                <FileText className="h-4 w-4" />
-                Open CV
-              </DropdownMenuItem>
-            ) : null}
-            {!readOnly ? (
-              <>
-            {canInvite ? (
-              <DropdownMenuItem onSelect={onInvite}>
-                {reinvite ? (
-                  <RefreshCw className="h-4 w-4" />
+        {hasRowActions ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label="Row actions"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-ink-muted hover:bg-surface-3 hover:text-ink"
+              >
+                {statusPending || resolvingInterview ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <Send className="h-4 w-4" />
+                  <MoreVertical className="h-4 w-4" strokeWidth={1.7} />
                 )}
-                {reinvite ? "Resend invite" : "Send Interview invite"}
-              </DropdownMenuItem>
-            ) : null}
-            <DropdownMenuItem onSelect={onSendEmail}>
-              <Mail className="h-4 w-4" />
-              Send email
-            </DropdownMenuItem>
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>Change status</DropdownMenuSubTrigger>
-              {/* Capped + scrollable: a long custom pipeline must not tower
-                  past the parent menu — uncapped, Radix shifts it up to fit
-                  the viewport and it reads as a detached floating list. */}
-              <DropdownMenuSubContent className="max-h-72 w-52 overflow-y-auto">
-                <DropdownMenuLabel>Move to</DropdownMenuLabel>
-                {/* A manual move writes the status and nothing else — the
-                    backend sends no email on this path, so say it at the
-                    moment of the decision, not in a doc nobody reads. */}
-                <p className="px-2 pb-1.5 text-[11.5px] leading-snug text-ink-muted">
-                  A move never emails the candidate — use{" "}
-                  <span className="font-medium">Send email</span> to notify
-                  them.
-                </p>
-                {statuses.map((option) => {
-                  const isCurrent = option.key === status?.key;
-                  // Columns that aren't a human's to assert are disabled rather
-                  // than hidden: a missing option reads as a bug, a greyed one
-                  // with a reason teaches the rule. `title` carries the reason
-                  // — Radix keeps disabled items out of the tab order, so this
-                  // is the hover affordance that still fires.
-                  const blocked = manualMoveBlocker(option, row);
-                  return (
-                    <DropdownMenuItem
-                      key={option._id}
-                      disabled={isCurrent || blocked !== null}
-                      title={blocked ?? undefined}
-                      onSelect={() => onChangeStatus(option.key)}
-                    >
-                      <span
-                        className="h-2 w-2 shrink-0 rounded-full"
-                        style={{
-                          backgroundColor:
-                            option.color ?? "var(--ink-muted)",
-                        }}
-                      />
-                      <span className="min-w-0 truncate">{option.label}</span>
-                      {isCurrent ? (
-                        <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-ink-muted" />
-                      ) : null}
-                    </DropdownMenuItem>
-                  );
-                })}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="text-[var(--danger)] focus:bg-[var(--danger-soft)] focus:text-[var(--danger)]"
-              onSelect={onDelete}
-            >
-              <Trash2 className="h-4 w-4" />
-              Delete candidate
-            </DropdownMenuItem>
-              </>
-            ) : null}
-          </DropdownMenuContent>
-        </DropdownMenu>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              {row.cvKey ? (
+                <DropdownMenuItem onSelect={onOpenCv}>
+                  <FileText className="h-4 w-4" />
+                  Open CV
+                </DropdownMenuItem>
+              ) : null}
+              {canInvite ? (
+                <DropdownMenuItem onSelect={onInvite}>
+                  {reinvite ? (
+                    <RefreshCw className="h-4 w-4" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                  {reinvite ? "Resend invite" : "Send Interview invite"}
+                </DropdownMenuItem>
+              ) : null}
+              {canAct ? (
+                <>
+                  <DropdownMenuItem onSelect={onSendEmail}>
+                    <Mail className="h-4 w-4" />
+                    Send email
+                  </DropdownMenuItem>
+                  {/* Capped, scrollable, and identical to the drawer's copy — see
+                      `ChangeStatusSubMenu` for why the list has to defend itself
+                      against a pipeline of any length. */}
+                  <ChangeStatusSubMenu
+                    statuses={statuses}
+                    currentKey={status?.key}
+                    candidate={row}
+                    onSelect={onChangeStatus}
+                  />
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="text-[var(--danger)] focus:bg-[var(--danger-soft)] focus:text-[var(--danger)]"
+                    onSelect={onDelete}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Delete candidate
+                  </DropdownMenuItem>
+                </>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
         ) : null}
       </div>
     </div>

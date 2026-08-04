@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Navigate, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -8,6 +8,7 @@ import {
   Check,
   Info,
   Loader2,
+  ShieldCheck,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useAuth } from "@/features/auth/AuthContext";
+import { canManageFunnel } from "@/features/auth/roles";
 import { ChipInput } from "@/features/jobs/components/ChipInput";
 import {
   ExtraGatesEditor,
@@ -53,7 +56,6 @@ import {
   type WorkMode,
 } from "@/features/jobs/types";
 import { useOrganization } from "@/features/organization/useOrganization";
-import { useAuth } from "@/features/auth/AuthContext";
 import { ROUTES, jobDetail } from "@/routes";
 import { errorMessage } from "@/lib/errors";
 import { blurOnWheel, cn } from "@/lib/utils";
@@ -98,7 +100,9 @@ const ERROR_CLASS = "mt-1.5 text-[12px] text-[var(--danger)]";
 export function JobFormPage() {
   const { jobId } = useParams<{ jobId: string }>();
   const isEdit = Boolean(jobId);
+  const navigate = useNavigate();
   const { user } = useAuth();
+  const canAct = canManageFunnel(user?.role);
 
   const jobQuery = useQuery({
     queryKey: ["job", jobId],
@@ -106,13 +110,45 @@ export function JobFormPage() {
     enabled: isEdit,
   });
 
-  // The view-only interviewer never creates or edits a job. The controls that
-  // route here are hidden for them; this bounces a hand-typed URL too (the
-  // backend 403s the write regardless). Kept below the hooks so their call
-  // order stays stable.
-  if (user?.role === "interviewer") {
+  // Nothing links an interviewer here, but /jobs/new and /jobs/:id/edit are
+  // still reachable by hand — bail before <JobForm> mounts, since every path
+  // through it ends in a create/update the backend 403s. The read above is
+  // harmless (GET job is open to every role) and keeps the hook order fixed.
+  if (!canAct) {
     return (
-      <Navigate to={isEdit && jobId ? jobDetail(jobId) : ROUTES.JOBS} replace />
+      <div className="mx-auto max-w-[1080px] px-6 py-6 lg:px-8 lg:py-8">
+        <div className="mb-5">
+          <div className="flex items-center gap-2.5">
+            <span className="text-primary inline-flex">
+              <Briefcase className="h-[18px] w-[18px]" strokeWidth={1.7} />
+            </span>
+            <h1 className="text-[23px] font-semibold tracking-tight text-ink">
+              {isEdit ? "Edit job" : "Create job"}
+            </h1>
+          </div>
+        </div>
+        <div className="rounded-2xl border border-line bg-surface">
+          <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
+            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-primary">
+              <ShieldCheck className="h-6 w-6" strokeWidth={1.7} />
+            </span>
+            <h3 className="text-[16px] font-semibold text-ink">
+              Read-only access
+            </h3>
+            <p className="max-w-[340px] text-[13.5px] text-ink-muted">
+              Your role doesn&apos;t include editing jobs. Ask someone who
+              manages postings in your organization to make the change.
+            </p>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => navigate(isEdit ? jobDetail(jobId!) : ROUTES.JOBS)}
+            >
+              {isEdit ? "Back to job" : "Back to jobs"}
+            </Button>
+          </div>
+        </div>
+      </div>
     );
   }
 

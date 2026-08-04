@@ -36,7 +36,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { deleteJob, listJobs, setJobStatus } from "@/features/jobs/jobsApi";
+import { SortHeader } from "@/components/ui/sort-header";
+import { useAuth } from "@/features/auth/AuthContext";
+import { canManageFunnel } from "@/features/auth/roles";
+import {
+  deleteJob,
+  listJobs,
+  setJobStatus,
+  type JobSortField,
+} from "@/features/jobs/jobsApi";
 import {
   EMPLOYMENT_TYPE_LABELS,
   JOB_STATUS_LABELS,
@@ -47,10 +55,10 @@ import {
   type JobStatus,
 } from "@/features/jobs/types";
 import { useOrgTimezone } from "@/features/organization/useOrgTimezone";
-import { useAuth } from "@/features/auth/AuthContext";
 import { ROUTES, jobDetail, jobEdit } from "@/routes";
 import { formatDate } from "@/lib/date";
 import { errorMessage } from "@/lib/errors";
+import { type SortState } from "@/lib/sort";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { ClearFiltersButton } from "@/components/common/ClearFiltersButton";
 
@@ -70,22 +78,40 @@ export function JobsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const tz = useOrgTimezone();
-  // `interviewer` is a view-only role: it can browse jobs but never create,
-  // edit, transition or delete one, so every mutating control is withheld
-  // (the backend 403s them too).
   const { user } = useAuth();
-  const isInterviewer = user?.role === "interviewer";
+  // Interviewers read the funnel and never write it — the backend 403s job
+  // create/edit/status/delete, so those affordances are hidden rather than
+  // left to fail on click. The list itself, and Open / View candidates, stay.
+  const canAct = canManageFunnel(user?.role);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<JobStatus | "">("");
   const [deleteTarget, setDeleteTarget] = useState<JobListItem | null>(null);
+  // `null` = the order the API returned (newest first). Part of the query key,
+  // because the SERVER orders the rows — a click has to refetch, or the table
+  // would show the old order under the new arrow.
+  const [sort, setSort] = useState<SortState<JobSortField> | null>(null);
   const debouncedSearch = useDebouncedValue(search);
+
+  // Page 1 on every sort change: "page 3" names a slice of the ORDER, and the
+  // order just changed, so staying put would land you somewhere arbitrary in a
+  // list you haven't seen the top of.
+  const changeSort = (next: SortState<JobSortField>) => {
+    setSort(next);
+    setPage(1);
+  };
 
   const { data, isLoading, isFetching, isError, refetch } = useQuery({
     queryKey: [
       "jobs",
-      { page, limit: pageSize, search: debouncedSearch, status: statusFilter },
+      {
+        page,
+        limit: pageSize,
+        search: debouncedSearch,
+        status: statusFilter,
+        sort,
+      },
     ],
     queryFn: () =>
       listJobs({
@@ -93,6 +119,8 @@ export function JobsPage() {
         limit: pageSize,
         search: debouncedSearch.trim() || undefined,
         status: statusFilter || undefined,
+        sortBy: sort?.by,
+        sortDir: sort?.dir,
       }),
     placeholderData: keepPreviousData,
   });
@@ -167,7 +195,7 @@ export function JobsPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <ClearFiltersButton active={filtersActive} onClear={clearFilters} />
-          {!isInterviewer ? (
+          {canAct ? (
             <Button size="sm" onClick={() => navigate(ROUTES.JOB_NEW)}>
               <Plus className="h-4 w-4" strokeWidth={2.2} />
               Create job
@@ -240,13 +268,54 @@ export function JobsPage() {
           <div
             className={`grid ${COLS} items-center gap-3 border-b border-line bg-surface-3 px-5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-muted`}
           >
-            <span>Title</span>
-            <span>Status</span>
+            <SortHeader
+              label="Title"
+              field="title"
+              sort={sort}
+              onSortChange={changeSort}
+            />
+            <SortHeader
+              label="Status"
+              field="status"
+              sort={sort}
+              onSortChange={changeSort}
+            />
+            {/* Not sortable — see `JobSortField`. */}
             <span>Classification</span>
-            <span className="text-center">Applicants</span>
-            <span className="text-center">Questions</span>
-            <span className="text-center">Threshold</span>
-            <span>Created</span>
+            {/* The three numeric columns lead with their high end: "which job
+                is drawing the most applicants" is the question people open this
+                table with, and it should be one click, not two. */}
+            <SortHeader
+              label="Applicants"
+              field="applicants"
+              firstDir="desc"
+              sort={sort}
+              onSortChange={changeSort}
+              align="center"
+            />
+            <SortHeader
+              label="Questions"
+              field="questions"
+              firstDir="desc"
+              sort={sort}
+              onSortChange={changeSort}
+              align="center"
+            />
+            <SortHeader
+              label="Threshold"
+              field="threshold"
+              firstDir="desc"
+              sort={sort}
+              onSortChange={changeSort}
+              align="center"
+            />
+            <SortHeader
+              label="Created"
+              field="created"
+              firstDir="desc"
+              sort={sort}
+              onSortChange={changeSort}
+            />
             <span />
           </div>
 
@@ -274,11 +343,11 @@ export function JobsPage() {
               <p className="max-w-[340px] text-[13.5px] text-ink-muted">
                 {search || statusFilter
                   ? "Try a different title or clear the status filter."
-                  : isInterviewer
-                    ? "No postings have been created yet."
-                    : "Create your first posting to start collecting applicants."}
+                  : canAct
+                    ? "Create your first posting to start collecting applicants."
+                    : "Postings appear here once someone on your team creates one."}
               </p>
-              {!isInterviewer ? (
+              {canAct ? (
                 <Button size="sm" onClick={() => navigate(ROUTES.JOB_NEW)}>
                   <Plus className="h-4 w-4" strokeWidth={2.2} />
                   Create job
@@ -352,7 +421,7 @@ export function JobsPage() {
                       >
                         Open
                       </DropdownMenuItem>
-                      {!isInterviewer ? (
+                      {canAct ? (
                         <DropdownMenuItem
                           onSelect={() => navigate(jobEdit(row._id))}
                         >
@@ -378,8 +447,7 @@ export function JobsPage() {
                           anything else is a 409. `archived` is terminal,
                           so its list is empty and the separator with it.
                           Withheld entirely from the view-only interviewer. */}
-                      {!isInterviewer &&
-                      STATUS_TRANSITIONS[row.status].length > 0 ? (
+                      {canAct && STATUS_TRANSITIONS[row.status].length > 0 ? (
                         <>
                           <DropdownMenuSeparator />
                           {STATUS_TRANSITIONS[row.status].map((t) => (
@@ -398,7 +466,9 @@ export function JobsPage() {
                           ))}
                         </>
                       ) : null}
-                      {!isInterviewer ? (
+                      {/* Separator goes with the item it introduces, so an
+                          interviewer's menu doesn't end on a rule. */}
+                      {canAct ? (
                         <>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem

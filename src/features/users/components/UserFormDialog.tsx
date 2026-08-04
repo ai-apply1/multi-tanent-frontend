@@ -66,7 +66,7 @@ const ROLE_OPTIONS: Array<{ value: UserRole; label: string }> = [
   },
   {
     value: "interviewer",
-    label: "Interviewer, view-only candidates with salary details hidden",
+    label: "Interviewer, read-only reviewer with salary details hidden",
   },
 ];
 

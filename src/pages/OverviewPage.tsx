@@ -80,8 +80,10 @@ import {
   getCandidate,
   listCandidates,
 } from "@/features/candidates/candidatesApi";
+import { INVITABLE_STATUS_KEY } from "@/features/candidates/types";
 import { InterviewDetailDrawer } from "@/components/interviews/InterviewDetailDrawer";
 import { useAuth } from "@/features/auth/AuthContext";
+import { canManageFunnel } from "@/features/auth/roles";
 import { ROUTES } from "@/routes";
 import { errorMessage } from "@/lib/errors";
 import { cn } from "@/lib/utils";
@@ -169,6 +171,9 @@ function groupOptions(
 export function OverviewPage() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  // Interviewers read the dashboard; adding, editing, deleting and reordering
+  // cards all hit `/admin/overview/stats*`, which 403s them.
+  const canAct = canManageFunnel(user?.role);
 
   // Page-level Job overlay. Folded into the stats query key so switching it
   // refetches every card's count scoped to that job; "all" sends no param. The
@@ -241,11 +246,37 @@ export function OverviewPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 
-  // Awaiting your decision: reuse the shared candidates list endpoint scoped to
-  // the `scored` status. Guarded on `user` so it never fires before sign-in.
+  /*
+   * Awaiting your decision: the shared candidates list endpoint scoped to the
+   * ONE column that is actually a human queue.
+   *
+   * `needs_review`, NOT `scored`. This panel used to read `scored`, and that was
+   * wrong for a structural reason rather than a taste one: `scored` is a
+   * PASS-THROUGH, not a resting place. The backend's `finalizeDecision` moves a
+   * candidate `→ scored` purely so the timeline records the step, then straight
+   * on to `shortlisted` / `final_rejected` in the same function — see
+   * `candidate-status.service.ts`, which says outright that "nobody rests here
+   * on the happy path". So the panel read "All caught up" almost permanently,
+   * and the rows it did show were ones HR had put back themselves via
+   * "Reconsider candidate".
+   *
+   * `needs_review` is the column that IS waiting on a person: applications the
+   * vetting engine could not decide, which only a manual invite or rejection
+   * moves. The interview drawer's own stage hints already call it "Awaiting
+   * your decision to invite".
+   *
+   * `INVITABLE_STATUS_KEY` rather than the literal — the string collides with
+   * `ScoringStatus`'s unrelated `"needs_review"` (a transcript too poor to
+   * score), and the constant is what keeps a find-and-replace from swapping the
+   * two. Guarded on `user` so it never fires before sign-in.
+   *
+   * Query key stays `["awaiting-decision"]` verbatim: `invalidateCandidateData`
+   * matches on that exact string, so renaming it would silently stop the panel
+   * refreshing after a decision.
+   */
   const { data: awaitingData, isLoading: awaitingLoading } = useQuery({
     queryKey: ["awaiting-decision"],
-    queryFn: () => listCandidates({ statusKey: "scored", limit: 5 }),
+    queryFn: () => listCandidates({ statusKey: INVITABLE_STATUS_KEY, limit: 5 }),
     enabled: Boolean(user),
   });
   const awaiting = useMemo(() => awaitingData?.data ?? [], [awaitingData]);
@@ -385,7 +416,8 @@ export function OverviewPage() {
             </h1>
           </div>
           <p className="mt-1.5 max-w-[620px] text-[13.5px] text-ink-muted">
-            What needs you across your pipeline today. Drag cards to reorder.
+            What needs you across your pipeline today.
+            {canAct ? " Drag cards to reorder." : null}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -431,10 +463,12 @@ export function OverviewPage() {
             <FunnelIcon className="h-3.5 w-3.5" />
             View funnel
           </Button>
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
-            <Plus className="h-4 w-4" />
-            Add metric
-          </Button>
+          {canAct ? (
+            <Button size="sm" onClick={() => setCreateOpen(true)}>
+              <Plus className="h-4 w-4" />
+              Add metric
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -459,11 +493,13 @@ export function OverviewPage() {
       ) : hasNoStats && awaiting.length === 0 ? (
         // Nothing to show at all — no metrics AND no one awaiting a decision.
         // Only then does the empty state take over the whole dashboard body.
-        <NoMetricsCard onAdd={() => setCreateOpen(true)} />
+        <NoMetricsCard onAdd={() => setCreateOpen(true)} canAdd={canAct} />
       ) : (
         <>
-          {/* Select / bulk-delete toolbar (only relevant to filter metrics). */}
-          {metricStats.length > 0 ? (
+          {/* Select / bulk-delete toolbar (only relevant to filter metrics).
+              It exists solely to feed the bulk delete, so a reader gets none
+              of it rather than a selection that can't be acted on. */}
+          {canAct && metricStats.length > 0 ? (
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <label className="flex cursor-pointer items-center gap-2 text-[12.5px] text-ink-muted">
                 <Checkbox
@@ -503,7 +539,11 @@ export function OverviewPage() {
             // full-bleed empty state above already handles "nothing at all").
             // Keep the "No metrics yet" prompt in the KPI slot so the funnel +
             // awaiting columns below stay visible instead of being hidden.
-            <NoMetricsCard onAdd={() => setCreateOpen(true)} className="mb-4" />
+            <NoMetricsCard
+              onAdd={() => setCreateOpen(true)}
+              canAdd={canAct}
+              className="mb-4"
+            />
           ) : (
             <DndContext
               sensors={sensors}
@@ -523,6 +563,7 @@ export function OverviewPage() {
                     <SortableStatCard
                       key={stat.id}
                       stat={stat}
+                      canAct={canAct}
                       selected={selectedIds.has(stat.id)}
                       onToggleSelect={() => toggleSelect(stat.id)}
                       onEdit={() => setEditMetricTarget(stat)}
@@ -533,6 +574,7 @@ export function OverviewPage() {
                     <SortableManualCard
                       key={stat.id}
                       stat={stat}
+                      canAct={canAct}
                       onDelete={() => setDeleteTarget(stat)}
                     />
                   ))}
@@ -621,7 +663,7 @@ export function OverviewPage() {
                   <Clock className="h-[18px] w-[18px]" strokeWidth={1.8} />
                 </span>
                 <h2 className="text-[15px] font-semibold">
-                  Awaiting your decision
+                  {canAct ? "Awaiting your decision" : "Awaiting a decision"}
                 </h2>
                 <span className="mono ml-auto rounded-md bg-[var(--warning-soft)] px-2 py-0.5 text-[11.5px] font-semibold text-[var(--warning)]">
                   {awaitingData?.count ?? awaiting.length} open
@@ -629,7 +671,9 @@ export function OverviewPage() {
               </div>
               {awaiting.length === 0 ? (
                 <div className="py-8 text-center text-[13px] text-ink-muted">
-                  All caught up, no interviews waiting.
+                  {/* "no applications", not "no interviews": nobody in this
+                      column has interviewed — they are waiting to be invited. */}
+                  All caught up, no applications to review.
                 </div>
               ) : (
                 <div className="scroll max-h-[360px] overflow-y-auto">
@@ -647,8 +691,11 @@ export function OverviewPage() {
                         <div className="truncate text-[13.5px] font-semibold text-ink">
                           {cand.fullName}
                         </div>
+                        {/* The catalog LABEL first, so an org that renamed the
+                            column sees its own name; the builtin label is only
+                            the fallback. */}
                         <div className="truncate text-[12px] text-ink-muted">
-                          {cand.currentStatusId?.label ?? "Scored"}
+                          {cand.currentStatusId?.label ?? "Needs Review"}
                         </div>
                       </div>
                       <ChevronRight
@@ -660,13 +707,13 @@ export function OverviewPage() {
                 </div>
               )}
               {/* The list is windowed to the first few rows, but the badge counts
-                  every `scored` candidate — so when the total exceeds the window
-                  the rest are off-screen. Link into the Candidates page
-                  pre-filtered to the `scored` status (its `?status=` param seeds
+                  every `needs_review` candidate — so when the total exceeds the
+                  window the rest are off-screen. Link into the Candidates page
+                  pre-filtered to the same column (its `?status=` param seeds
                   `statusFilter`) so those rows stay reachable from the dashboard. */}
               {(awaitingData?.count ?? 0) > awaiting.length ? (
                 <Link
-                  to={`${ROUTES.CANDIDATES}?status=scored`}
+                  to={`${ROUTES.CANDIDATES}?status=${INVITABLE_STATUS_KEY}`}
                   className="flex items-center justify-center gap-1 border-t border-line px-[18px] py-3 text-[12.5px] font-semibold text-primary hover:bg-hover"
                 >
                   View all {awaitingData?.count} awaiting
@@ -730,10 +777,13 @@ export function OverviewPage() {
         }}
       />
 
-      {/* `candidateId` is passed alongside `sessionId` so the drawer opens even
-          when the row has no interview yet — e.g. a candidate manually moved
-          into the `scored` column. Without it the click silently no-op'd,
-          because `interviewSessionId` stays null when `latestInterviewId` is. */}
+      {/* `candidateId` is passed alongside `sessionId` because for this panel the
+          row has no interview — that is the RULE here, not an edge case:
+          `needs_review` candidates are waiting to be invited, so
+          `latestInterviewId` is null and `interviewSessionId` with it. Without
+          the candidate id every click would silently no-op. The drawer handles
+          this pairing on purpose (its `isNeedsReview` branch renders the vetting
+          reasons and the manual-invite action instead of an interview). */}
       <InterviewDetailDrawer
         sessionId={interviewSessionId}
         candidateId={drawerCandidateId}
@@ -754,9 +804,11 @@ export function OverviewPage() {
  */
 function NoMetricsCard({
   onAdd,
+  canAdd,
   className,
 }: {
   onAdd: () => void;
+  canAdd: boolean;
   className?: string;
 }) {
   return (
@@ -767,15 +819,18 @@ function NoMetricsCard({
         </span>
         <h3 className="text-[16px] font-semibold">No metrics yet</h3>
         <p className="max-w-[340px] text-[13.5px] text-ink-muted">
-          Add a live metric, for example the number of applicants at
-          pre-screened, to start building your pipeline funnel.
+          {canAdd
+            ? "Add a live metric, for example the number of applicants at pre-screened, to start building your pipeline funnel."
+            : "Nobody has added a metric to this dashboard yet."}
         </p>
-        <div className="flex flex-wrap items-center justify-center gap-2">
-          <Button size="sm" onClick={onAdd}>
-            <Plus className="h-4 w-4" />
-            Add metric
-          </Button>
-        </div>
+        {canAdd ? (
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <Button size="sm" onClick={onAdd}>
+              <Plus className="h-4 w-4" />
+              Add metric
+            </Button>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -867,6 +922,7 @@ function OverviewSkeleton() {
 /** Sortable wrapper: feeds dnd-kit's refs/listeners into the visual StatCard. */
 function SortableStatCard(props: {
   stat: OverviewStat;
+  canAct: boolean;
   selected: boolean;
   onToggleSelect: () => void;
   onEdit: () => void;
@@ -879,12 +935,14 @@ function SortableStatCard(props: {
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: props.stat.id });
+  } = useSortable({ id: props.stat.id, disabled: !props.canAct });
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
     willChange: "transform",
-    touchAction: "none",
+    // Only claim the touch gestures when dragging is actually possible —
+    // touch-action:none on a read-only card would swallow page scroll.
+    ...(props.canAct ? { touchAction: "none" } : {}),
   };
   return (
     <StatCard
@@ -893,13 +951,17 @@ function SortableStatCard(props: {
       style={style}
       isDragging={isDragging}
       dragHandleListeners={listeners}
-      dragHandleAttributes={attributes}
+      // dnd-kit keeps returning attributes when disabled; spreading them on a
+      // read-only card would announce a phantom "sortable" button to AT.
+      dragHandleAttributes={props.canAct ? attributes : undefined}
     />
   );
 }
 
 interface StatCardProps {
   stat: OverviewStat;
+  /** False for an interviewer: the card is read-only, drag included. */
+  canAct: boolean;
   selected: boolean;
   onToggleSelect: () => void;
   onEdit: () => void;
@@ -921,6 +983,7 @@ interface StatCardProps {
  */
 function StatCard({
   stat,
+  canAct,
   selected,
   onToggleSelect,
   onEdit,
@@ -940,7 +1003,8 @@ function StatCard({
       {...dragHandleAttributes}
       {...dragHandleListeners}
       className={cn(
-        "group relative cursor-grab select-none rounded-2xl border border-line bg-surface p-4 transition-shadow active:cursor-grabbing",
+        "group relative select-none rounded-2xl border border-line bg-surface p-4 transition-shadow",
+        canAct ? "cursor-grab active:cursor-grabbing" : "cursor-default",
         // Draw the selected highlight as an INSET ring. An offset ring (a halo
         // outside the card) gets sliced by the grid's `overflow-hidden`, which
         // clipped its top/bottom edges and left only curved side arcs — the
@@ -951,12 +1015,14 @@ function StatCard({
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-1.5">
-          <span
-            className="select-none text-[13px] leading-none text-ink-subtle"
-            aria-hidden="true"
-          >
-            ⠿
-          </span>
+          {canAct ? (
+            <span
+              className="select-none text-[13px] leading-none text-ink-subtle"
+              aria-hidden="true"
+            >
+              ⠿
+            </span>
+          ) : null}
           <span
             className="truncate text-[12.5px] font-medium text-ink-muted"
             title={stat.title}
@@ -968,58 +1034,71 @@ function StatCard({
             controls occupy the SAME slot so the header layout can't shift
             when the pointer enters/leaves. Two absolute layers cross-fade
             via opacity instead of `hidden`, which was the jitter cause. */}
-        <div className="relative h-5 w-[74px] shrink-0">
+        <div
+          className={cn(
+            "relative h-5 shrink-0",
+            // A reader's slot only ever holds the filter glyph, so it doesn't
+            // need to reserve the width of the controls that never appear.
+            canAct ? "w-[74px]" : "w-5",
+          )}
+        >
           {/* Default: small filter glyph. */}
           <span
             className={cn(
               "absolute inset-y-0 right-0 flex items-center text-ink-subtle transition-opacity",
-              selected ? "opacity-0" : "opacity-100 group-hover:opacity-0",
+              !canAct
+                ? "opacity-100"
+                : selected
+                  ? "opacity-0"
+                  : "opacity-100 group-hover:opacity-0",
             )}
             aria-hidden="true"
           >
             <Filter className="h-3.5 w-3.5" strokeWidth={1.7} />
           </span>
           {/* Hover / selected: checkbox + edit + delete. */}
-          <div
-            className={cn(
-              "absolute inset-y-0 right-0 flex items-center gap-0.5 transition-opacity",
-              selected
-                ? "opacity-100"
-                : "opacity-0 group-hover:opacity-100 focus-within:opacity-100",
-            )}
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            <Checkbox
-              checked={selected}
-              onCheckedChange={() => onToggleSelect()}
-              aria-label={`Select ${stat.title}`}
-              className="mr-1"
-            />
-            <button
-              type="button"
-              className="rounded-md p-1 text-ink-subtle hover:bg-hover hover:text-ink"
-              aria-label={`Edit ${stat.title}`}
-              title="Edit metric"
-              onClick={(e) => {
-                e.stopPropagation();
-                onEdit();
-              }}
+          {canAct ? (
+            <div
+              className={cn(
+                "absolute inset-y-0 right-0 flex items-center gap-0.5 transition-opacity",
+                selected
+                  ? "opacity-100"
+                  : "opacity-0 group-hover:opacity-100 focus-within:opacity-100",
+              )}
+              onPointerDown={(e) => e.stopPropagation()}
             >
-              <Pencil className="h-3.5 w-3.5" strokeWidth={1.8} />
-            </button>
-            <button
-              type="button"
-              className="rounded-md p-1 text-ink-subtle hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
-              aria-label={`Delete ${stat.title}`}
-              title="Delete metric"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete();
-              }}
-            >
-              <Trash2 className="h-3.5 w-3.5" strokeWidth={1.8} />
-            </button>
-          </div>
+              <Checkbox
+                checked={selected}
+                onCheckedChange={() => onToggleSelect()}
+                aria-label={`Select ${stat.title}`}
+                className="mr-1"
+              />
+              <button
+                type="button"
+                className="rounded-md p-1 text-ink-subtle hover:bg-hover hover:text-ink"
+                aria-label={`Edit ${stat.title}`}
+                title="Edit metric"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEdit();
+                }}
+              >
+                <Pencil className="h-3.5 w-3.5" strokeWidth={1.8} />
+              </button>
+              <button
+                type="button"
+                className="rounded-md p-1 text-ink-subtle hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
+                aria-label={`Delete ${stat.title}`}
+                title="Delete metric"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete();
+                }}
+              >
+                <Trash2 className="h-3.5 w-3.5" strokeWidth={1.8} />
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -1083,6 +1162,7 @@ function StatCard({
 /** Sortable wrapper: feeds dnd-kit's refs/listeners into the visual ManualCard. */
 function SortableManualCard(props: {
   stat: OverviewStat;
+  canAct: boolean;
   onDelete: () => void;
 }) {
   const {
@@ -1092,12 +1172,13 @@ function SortableManualCard(props: {
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: props.stat.id });
+  } = useSortable({ id: props.stat.id, disabled: !props.canAct });
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
     willChange: "transform",
-    touchAction: "none",
+    // See SortableStatCard: no touch-action claim on a read-only card.
+    ...(props.canAct ? { touchAction: "none" } : {}),
   };
   return (
     <ManualCard
@@ -1106,13 +1187,15 @@ function SortableManualCard(props: {
       style={style}
       isDragging={isDragging}
       dragHandleListeners={listeners}
-      dragHandleAttributes={attributes}
+      dragHandleAttributes={props.canAct ? attributes : undefined}
     />
   );
 }
 
 interface ManualCardProps {
   stat: OverviewStat;
+  /** False for an interviewer: the card is read-only, drag included. */
+  canAct: boolean;
   onDelete: () => void;
   // Drag-and-drop wiring from useSortable; when omitted the card is static.
   sortableRef?: (node: HTMLElement | null) => void;
@@ -1131,6 +1214,7 @@ interface ManualCardProps {
  */
 function ManualCard({
   stat,
+  canAct,
   onDelete,
   sortableRef,
   style,
@@ -1145,18 +1229,21 @@ function ManualCard({
       {...dragHandleAttributes}
       {...dragHandleListeners}
       className={cn(
-        "group relative cursor-grab select-none rounded-2xl border border-line bg-surface p-4 transition-shadow active:cursor-grabbing",
+        "group relative select-none rounded-2xl border border-line bg-surface p-4 transition-shadow",
+        canAct ? "cursor-grab active:cursor-grabbing" : "cursor-default",
         isDragging && "z-10 opacity-70 shadow-lg",
       )}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-1.5">
-          <span
-            className="select-none text-[13px] leading-none text-ink-subtle"
-            aria-hidden="true"
-          >
-            ⠿
-          </span>
+          {canAct ? (
+            <span
+              className="select-none text-[13px] leading-none text-ink-subtle"
+              aria-hidden="true"
+            >
+              ⠿
+            </span>
+          ) : null}
           <span
             className="truncate text-[12.5px] font-medium text-ink-muted"
             title={stat.title}
@@ -1168,28 +1255,33 @@ function ManualCard({
             manual-card header can't nudge on hover either. */}
         <div className="relative h-5 w-6 shrink-0">
           <span
-            className="absolute inset-y-0 right-0 flex items-center text-ink-subtle transition-opacity group-hover:opacity-0"
+            className={cn(
+              "absolute inset-y-0 right-0 flex items-center text-ink-subtle transition-opacity",
+              canAct && "group-hover:opacity-0",
+            )}
             aria-hidden="true"
           >
             <SquarePlus className="h-3.5 w-3.5" strokeWidth={1.7} />
           </span>
-          <div
-            className="absolute inset-y-0 right-0 flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100"
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            <button
-              type="button"
-              className="rounded-md p-1 text-ink-subtle hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
-              aria-label={`Delete ${stat.title}`}
-              title="Delete card"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete();
-              }}
+          {canAct ? (
+            <div
+              className="absolute inset-y-0 right-0 flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100"
+              onPointerDown={(e) => e.stopPropagation()}
             >
-              <Trash2 className="h-3.5 w-3.5" strokeWidth={1.8} />
-            </button>
-          </div>
+              <button
+                type="button"
+                className="rounded-md p-1 text-ink-subtle hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
+                aria-label={`Delete ${stat.title}`}
+                title="Delete card"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete();
+                }}
+              >
+                <Trash2 className="h-3.5 w-3.5" strokeWidth={1.8} />
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
 

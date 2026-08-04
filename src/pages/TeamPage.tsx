@@ -37,15 +37,22 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SortHeader } from "@/components/ui/sort-header";
 import { UserFormDialog } from "@/features/users/components/UserFormDialog";
 import { ResetPasswordDialog } from "@/features/users/components/ResetPasswordDialog";
-import { deleteUser, listUsers, updateUser } from "@/features/users/usersApi";
+import {
+  deleteUser,
+  listUsers,
+  updateUser,
+  type UserSortField,
+} from "@/features/users/usersApi";
 import { USER_ROLE_LABELS, type OrgUser } from "@/features/users/types";
 import { useAuth } from "@/features/auth/AuthContext";
 import { useOrgTimezone } from "@/features/organization/useOrgTimezone";
 import type { UserRole } from "@/features/auth/types";
 import { formatDateTime } from "@/lib/date";
 import { errorMessage as apiError } from "@/lib/errors";
+import { type SortState } from "@/lib/sort";
 import { titleCase } from "@/lib/text";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { ClearFiltersButton } from "@/components/common/ClearFiltersButton";
@@ -71,10 +78,20 @@ export function TeamPage() {
   const [activationTarget, setActivationTarget] = useState<OrgUser | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<OrgUser | null>(null);
   const [resetTarget, setResetTarget] = useState<OrgUser | null>(null);
+  // `null` = the order the API returned (newest first). Part of the query key,
+  // because the SERVER orders the rows — a click refetches.
+  const [sort, setSort] = useState<SortState<UserSortField> | null>(null);
 
   const isOrgAdmin = user?.role === "org_admin";
   const debouncedSearch = useDebouncedValue(search);
   const tz = useOrgTimezone();
+
+  // Page 1 on every sort change — the page number named a slice of the old
+  // order, and that order no longer exists.
+  const changeSort = (next: SortState<UserSortField>) => {
+    setSort(next);
+    setPage(1);
+  };
 
   const { data, isLoading, isFetching, isError, refetch } = useQuery({
     queryKey: [
@@ -85,6 +102,7 @@ export function TeamPage() {
         search: debouncedSearch,
         role: roleFilter,
         status: statusFilter,
+        sort,
       },
     ],
     queryFn: () =>
@@ -94,6 +112,8 @@ export function TeamPage() {
         search: debouncedSearch.trim() || undefined,
         role: roleFilter || undefined,
         isActive: statusFilter === "" ? undefined : statusFilter === "active",
+        sortBy: sort?.by,
+        sortDir: sort?.dir,
       }),
     // The nav hides Team from `hr`, but a hand-typed URL still mounts this
     // page — don't fire a request the backend will 403.
@@ -143,7 +163,7 @@ export function TeamPage() {
             </h1>
           </div>
           <p className="mt-1.5 max-w-[620px] text-[13.5px] text-ink-muted">
-            Recruiters and admins with access to this workspace.
+            Recruiters, interviewers and admins with access to this workspace.
           </p>
         </div>
         <div className="rounded-2xl border border-line bg-surface">
@@ -201,7 +221,7 @@ export function TeamPage() {
             </h1>
           </div>
           <p className="mt-1.5 max-w-[620px] text-[13.5px] text-ink-muted">
-            Recruiters and admins with access to this workspace.
+            Recruiters, interviewers and admins with access to this workspace.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -302,12 +322,45 @@ export function TeamPage() {
           <div
             className={`grid ${COLS} items-center gap-3 border-b border-line bg-surface-3 px-5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-muted`}
           >
-            <span>Name</span>
-            <span>Username</span>
-            <span>Email</span>
-            <span>Role</span>
-            <span>Status</span>
-            <span>Last login</span>
+            <SortHeader
+              label="Name"
+              field="name"
+              sort={sort}
+              onSortChange={changeSort}
+            />
+            <SortHeader
+              label="Username"
+              field="userName"
+              sort={sort}
+              onSortChange={changeSort}
+            />
+            <SortHeader
+              label="Email"
+              field="email"
+              sort={sort}
+              onSortChange={changeSort}
+            />
+            <SortHeader
+              label="Role"
+              field="role"
+              sort={sort}
+              onSortChange={changeSort}
+            />
+            {/* Descending first, so one click answers "who still has a seat?" */}
+            <SortHeader
+              label="Status"
+              field="status"
+              firstDir="desc"
+              sort={sort}
+              onSortChange={changeSort}
+            />
+            <SortHeader
+              label="Last login"
+              field="lastLogin"
+              firstDir="desc"
+              sort={sort}
+              onSortChange={changeSort}
+            />
             <span />
           </div>
 

@@ -35,7 +35,6 @@ import {
   ShieldCheck,
   Sparkles,
   Star,
-  Tag,
   Trash2,
   User,
   X,
@@ -46,6 +45,7 @@ import { useAuth } from "@/features/auth/AuthContext";
 import { MaskedAmount, MaskedNumbers } from "@/components/ui/masked-amount";
 import { ScoringDetailsDialog } from "@/components/interviews/ScoringDetailsDialog";
 import { BulkEmailDialog } from "@/features/candidates/components/BulkEmailDialog";
+import { ChangeStatusSubMenu } from "@/features/candidates/components/ChangeStatusSubMenu";
 import {
   HlsPlayer,
   type VideoPlayerHandle,
@@ -69,10 +69,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -84,6 +80,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { canManageFunnel } from "@/features/auth/roles";
 import {
   deleteInterview,
   getInterview,
@@ -106,7 +103,6 @@ import {
   invalidateCandidateDataAndJobCounts,
 } from "@/features/candidates/candidatesCache";
 import { toDisplayScore } from "@/features/candidates/aiScore";
-import { manualMoveBlocker } from "@/features/candidates/manualMove";
 import { useOrgTimezone } from "@/features/organization/useOrgTimezone";
 import {
   INITIAL_REJECT_STATUS_KEY,
@@ -631,7 +627,7 @@ function PipelineCard({
   recommendation,
   onStatusChange,
   pending,
-  readOnly,
+  canAct,
 }: {
   candidate: CandidateDetail | null | undefined;
   /** The org's column catalog, in any order — this card sorts it. */
@@ -644,9 +640,10 @@ function PipelineCard({
   recommendation: Recommendation | null;
   onStatusChange: (statusKey: string) => void;
   pending: boolean;
-  /** A view-only viewer (interviewer): the pipeline is shown, but every
-   *  status-changing decision button is withheld. */
-  readOnly?: boolean;
+  /** The stepper and the AI verdict stay visible to everyone; only the
+   *  decision buttons are gated, since the backend 403s an interviewer's
+   *  status change. */
+  canAct: boolean;
 }) {
   const currentStatus = candidate?.currentStatusId ?? null;
   const statusKey = currentStatus?.key;
@@ -769,10 +766,12 @@ function PipelineCard({
               <strong className="font-bold">
                 {recommendation === "no" ? "No Hire" : "Hire"}
               </strong>
-              . Your confirmation is required, nothing advances automatically.
+              {canAct
+                ? ". Your confirmation is required, nothing advances automatically."
+                : ". Nothing advances automatically."}
             </p>
           </div>
-          {!readOnly ? (
+          {canAct ? (
             <div className="grid grid-cols-2 gap-2">
               <Button
                 variant="secondary"
@@ -804,13 +803,14 @@ function PipelineCard({
             strokeWidth={1.7}
           />
           <p className="text-[12px] leading-snug text-ink-muted">
-            Waiting on the AI score. Reject and Shortlist unlock once it lands,
-            so a decision is never made without it.
+            {canAct
+              ? "Waiting on the AI score. Reject and Shortlist unlock once it lands, so a decision is never made without it."
+              : "Waiting on the AI score. The verdict appears here once it lands."}
           </p>
         </div>
       ) : null}
 
-      {isShortlisted && !readOnly ? (
+      {isShortlisted && canAct ? (
         <div className="mt-1.5 grid gap-2">
           <Button
             size="sm"
@@ -846,7 +846,7 @@ function PipelineCard({
         </div>
       ) : null}
 
-      {isRejected && !readOnly ? (
+      {isRejected && canAct ? (
         <div className="mt-1.5">
           <Button
             variant="secondary"
@@ -1254,11 +1254,14 @@ function NeedsReviewCard({
   loading,
   error,
   reconsidered,
+  canAct,
 }: {
   checks: VettingCheck[];
   loading: boolean;
   error: boolean;
   reconsidered: boolean;
+  /** Deciding (Invite/Reject) is org_admin/hr-only — the copy must not point a reviewer at header buttons they don't have. */
+  canAct: boolean;
 }) {
   return (
     <div className="rounded-2xl border border-line bg-surface p-[18px]">
@@ -1292,10 +1295,14 @@ function NeedsReviewCard({
               ? "The CV pre-screen rejected this candidate, and they were " +
                 "moved back here to be reconsidered. This is the original " +
                 "checklist — the red item(s) are what caused that rejection."
-              : "The CV pre-screen could not auto-decide, so this candidate " +
-                "is parked for your call. The amber item(s) are what could " +
-                "not be verified automatically — check them, then Invite or " +
-                "Reject from the header."}
+              : canAct
+                ? "The CV pre-screen could not auto-decide, so this candidate " +
+                  "is parked for your call. The amber item(s) are what could " +
+                  "not be verified automatically — check them, then Invite or " +
+                  "Reject from the header."
+                : "The CV pre-screen could not auto-decide, so this candidate " +
+                  "is parked for a recruiter's call. The amber item(s) are " +
+                  "what could not be verified automatically."}
           </p>
           <div className="grid gap-2.5">
             {checks.map((check, i) => (
@@ -1306,8 +1313,8 @@ function NeedsReviewCard({
       ) : (
         <p className="text-[13px] text-ink-muted">
           No pre-screen checklist was recorded for this candidate. The CV may
-          still be processing, or they were moved here by hand — decide with
-          Invite or Reject in the header.
+          still be processing, or they were moved here by hand
+          {canAct ? " — decide with Invite or Reject in the header." : "."}
         </p>
       )}
     </div>
@@ -1361,6 +1368,11 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
 
   const queryClient = useQueryClient();
   const orgTimezone = useOrgTimezone();
+  // An interviewer reads this drawer and nothing more — the backend 403s every
+  // mutation it offers (invite, email, status change, rescore, reattempt,
+  // delete). Transcoding is the one exception and stays available to everyone.
+  // `user` is already resolved above (drives `isInterviewer` for salary too).
+  const canAct = canManageFunnel(user?.role);
 
   /*
    * `staleTime: 0` on every query in this drawer — it overrides the global 30s
@@ -1750,6 +1762,12 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
       : null;
   const answeredCount = questions.filter((q) => !q.skipped).length;
 
+  // The Actions menu is mutations plus one read-only entry (scoring
+  // details). For an interviewer everything else is hidden, so the menu can
+  // end up with nothing in it — drop the trigger too rather than open an
+  // empty popover.
+  const showActionsMenu = canAct || Boolean(data?.scores);
+
   // Pipeline stage component is disabled for now — the reject / shortlist /
   // hire stepper at the bottom of the drawer is hidden. It's kept fully wired
   // (component + handlers + queries) so it can be switched back on by flipping
@@ -1908,160 +1926,123 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                * also shows what the AI recommended. Nothing is lost from here —
                * every status change stays reachable from the Actions menu.
                */}
-              {/* The Actions menu is every candidate/interview mutation the
-                  drawer offers (invite, email, status move, delete). A
-                  view-only interviewer gets none of them. */}
-              {!isInterviewer ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="secondary" size="sm" aria-label="Actions">
-                    <MoreHorizontal className="h-3.5 w-3.5" strokeWidth={1.9} />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56">
-                  {/* Resend invite — re-sends the link for the CURRENT attempt,
-                      valid only while it's still pending (invited, not started).
-                      Once the attempt has been started/submitted the backend
-                      refuses with a message pointing at "Reattempt interview"
-                      below, which opens a new attempt. */}
-                  <DropdownMenuItem
-                    disabled={
-                      !candidateId || !canSendCandidateInvite || invitingCand
-                    }
-                    onSelect={handleSendCandidateInvite}
-                    title={'Re-sends the link while the invite is still pending. Once started, use "Reattempt interview"'}
-                  >
-                    <Send className="h-3.5 w-3.5" strokeWidth={1.7} />
-                    Resend invite
-                  </DropdownMenuItem>
-                  {candidateId ? (
-                    <DropdownMenuItem onSelect={() => setEmailOpen(true)}>
-                      <Mail className="h-3.5 w-3.5" strokeWidth={1.7} />
-                      Send email
-                    </DropdownMenuItem>
-                  ) : null}
-                  {/* Change the candidate's pipeline stage — the same move the
-                      candidates table offers, so a reviewer can decide without
-                      closing the drawer. */}
-                  {candidateId && statuses.length > 0 ? (
-                    <DropdownMenuSub>
-                      <DropdownMenuSubTrigger>
-                        <Tag className="h-3.5 w-3.5" strokeWidth={1.7} />
-                        Change status
-                      </DropdownMenuSubTrigger>
-                      {/* Capped + scrollable so a long custom pipeline doesn't
-                          tower past the parent menu. */}
-                      <DropdownMenuSubContent className="max-h-72 w-52 overflow-y-auto">
-                        <DropdownMenuLabel>Move to</DropdownMenuLabel>
-                        {/* Same note as the candidates table's menu: a manual
-                            move writes the status only, no email goes out. */}
-                        <p className="px-2 pb-1.5 text-[11.5px] leading-snug text-ink-muted">
-                          A move never emails the candidate — use{" "}
-                          <span className="font-medium">Send email</span> to
-                          notify them.
-                        </p>
-                        {statuses.map((option) => {
-                          const isCurrent =
-                            option.key === candidate?.currentStatusId?.key;
-                          // Columns that aren't a human's to assert are greyed
-                          // out with the reason on hover, matching the
-                          // candidates table. `candidate` is null only while the
-                          // detail is in flight, and this menu is gated on
-                          // `candidateId` — treat the gap as unblocked and let
-                          // the server have the final word.
-                          const blocked = candidate
-                            ? manualMoveBlocker(option, candidate)
-                            : null;
-                          return (
-                            <DropdownMenuItem
-                              key={option._id}
-                              disabled={
-                                isCurrent || statusPending || blocked !== null
-                              }
-                              title={blocked ?? undefined}
-                              onSelect={() =>
-                                void handleStatusChange(option.key)
-                              }
-                            >
-                              <span
-                                className="h-2 w-2 shrink-0 rounded-full"
-                                style={{
-                                  backgroundColor:
-                                    option.color ?? "var(--ink-muted)",
-                                }}
-                              />
-                              <span className="min-w-0 truncate">
-                                {option.label}
-                              </span>
-                              {isCurrent ? (
-                                <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-ink-muted" />
-                              ) : null}
-                            </DropdownMenuItem>
-                          );
-                        })}
-                      </DropdownMenuSubContent>
-                    </DropdownMenuSub>
-                  ) : null}
-                  {data?.scores ? (
-                    <DropdownMenuItem
-                      onSelect={() => setScoringDetailsOpen(true)}
-                    >
-                      <Calculator className="h-3.5 w-3.5" strokeWidth={1.7} />
-                      View scoring details
-                    </DropdownMenuItem>
-                  ) : null}
-                  {data?.status === "submitted" ? (
-                    <DropdownMenuItem
-                      disabled={rescoring || scoringRunning}
-                      onSelect={handleRescore}
-                    >
-                      <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.7} />
-                      {scoringRunning
-                        ? scoringStatus === "queued"
-                          ? "Queued…"
-                          : "Scoring…"
-                        : "Rescore interview"}
-                    </DropdownMenuItem>
-                  ) : null}
-                  {hlsStatus === "failed" ? (
-                    <DropdownMenuItem
-                      disabled={retranscoding}
-                      onSelect={handleRetranscode}
-                    >
-                      <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.7} />
-                      Retry streaming conversion
-                    </DropdownMenuItem>
-                  ) : null}
-                  {data ? (
-                    <DropdownMenuItem
-                      disabled={reinviting}
-                      onSelect={handleReinvite}
-                      title="Create a NEW attempt (previous attempts are kept) and email a fresh link"
-                    >
-                      <MailPlus className="h-3.5 w-3.5" strokeWidth={1.7} />
-                      Reattempt interview
-                    </DropdownMenuItem>
-                  ) : null}
-                  {data ? (
-                    <DropdownMenuItem
-                      className="text-[color:var(--danger)] focus:text-[color:var(--danger)]"
-                      onSelect={() => setConfirmDeleteInterview(true)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" strokeWidth={1.7} />
-                      Delete interview
-                    </DropdownMenuItem>
-                  ) : null}
-                  {candidateId ? (
-                    <DropdownMenuItem
-                      className="text-[color:var(--danger)] focus:text-[color:var(--danger)]"
-                      onSelect={() => setConfirmDeleteCandidate(true)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" strokeWidth={1.7} />
-                      Delete candidate
-                    </DropdownMenuItem>
-                  ) : null}
-                </DropdownMenuContent>
-              </DropdownMenu>
+              {showActionsMenu ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="secondary" size="sm" aria-label="Actions">
+                      <MoreHorizontal
+                        className="h-3.5 w-3.5"
+                        strokeWidth={1.9}
+                      />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    {/* Resend invite — re-sends the link for the CURRENT attempt,
+                        valid only while it's still pending (invited, not started).
+                        Once the attempt has been started/submitted the backend
+                        refuses with a message pointing at "Reattempt interview"
+                        below, which opens a new attempt. */}
+                    {canAct ? (
+                      <DropdownMenuItem
+                        disabled={
+                          !candidateId || !canSendCandidateInvite || invitingCand
+                        }
+                        onSelect={handleSendCandidateInvite}
+                        title={'Re-sends the link while the invite is still pending. Once started, use "Reattempt interview"'}
+                      >
+                        <Send className="h-3.5 w-3.5" strokeWidth={1.7} />
+                        Resend invite
+                      </DropdownMenuItem>
+                    ) : null}
+                    {canAct && candidateId ? (
+                      <DropdownMenuItem onSelect={() => setEmailOpen(true)}>
+                        <Mail className="h-3.5 w-3.5" strokeWidth={1.7} />
+                        Send email
+                      </DropdownMenuItem>
+                    ) : null}
+                    {/* Change the candidate's pipeline stage — the same move the
+                        candidates table offers, so a reviewer can decide without
+                        closing the drawer. */}
+                    {canAct && candidateId && statuses.length > 0 ? (
+                      // `candidate` is null only while the detail request is in
+                      // flight, and this menu is gated on `candidateId` — the
+                      // shared component treats that gap as unblocked and lets
+                      // the server have the final word.
+                      <ChangeStatusSubMenu
+                        statuses={statuses}
+                        currentKey={candidate?.currentStatusId?.key}
+                        candidate={candidate}
+                        pending={statusPending}
+                        onSelect={(statusKey) =>
+                          void handleStatusChange(statusKey)
+                        }
+                      />
+                    ) : null}
+                    {data?.scores ? (
+                      <DropdownMenuItem
+                        onSelect={() => setScoringDetailsOpen(true)}
+                      >
+                        <Calculator className="h-3.5 w-3.5" strokeWidth={1.7} />
+                        View scoring details
+                      </DropdownMenuItem>
+                    ) : null}
+                    {canAct && data?.status === "submitted" ? (
+                      <DropdownMenuItem
+                        disabled={rescoring || scoringRunning}
+                        onSelect={handleRescore}
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.7} />
+                        {scoringRunning
+                          ? scoringStatus === "queued"
+                            ? "Queued…"
+                            : "Scoring…"
+                          : "Rescore interview"}
+                      </DropdownMenuItem>
+                    ) : null}
+                    {/* Role-gated after all: the transcode worker DELETES the
+                        raw S3 generations on success and re-queueing resets
+                        the failure diagnostics, so the backend now 403s
+                        interviewers. They still get the raw-parts fallback
+                        players. */}
+                    {canAct && hlsStatus === "failed" ? (
+                      <DropdownMenuItem
+                        disabled={retranscoding}
+                        onSelect={handleRetranscode}
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.7} />
+                        Retry streaming conversion
+                      </DropdownMenuItem>
+                    ) : null}
+                    {canAct && data ? (
+                      <DropdownMenuItem
+                        disabled={reinviting}
+                        onSelect={handleReinvite}
+                        title="Create a NEW attempt (previous attempts are kept) and email a fresh link"
+                      >
+                        <MailPlus className="h-3.5 w-3.5" strokeWidth={1.7} />
+                        Reattempt interview
+                      </DropdownMenuItem>
+                    ) : null}
+                    {canAct && data ? (
+                      <DropdownMenuItem
+                        className="text-[color:var(--danger)] focus:text-[color:var(--danger)]"
+                        onSelect={() => setConfirmDeleteInterview(true)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" strokeWidth={1.7} />
+                        Delete interview
+                      </DropdownMenuItem>
+                    ) : null}
+                    {canAct && candidateId ? (
+                      <DropdownMenuItem
+                        className="text-[color:var(--danger)] focus:text-[color:var(--danger)]"
+                        onSelect={() => setConfirmDeleteCandidate(true)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" strokeWidth={1.7} />
+                        Delete candidate
+                      </DropdownMenuItem>
+                    ) : null}
+                  </DropdownMenuContent>
+                </DropdownMenu>
               ) : null}
             </div>
           </div>
@@ -2106,6 +2087,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                     loading={vettingActivitiesQuery.isLoading}
                     error={vettingActivitiesQuery.isError}
                     reconsidered={needsReviewReconsidered}
+                    canAct={canAct}
                   />
                 ) : (
                   <div className="flex items-center gap-3 rounded-2xl border border-dashed border-line bg-surface px-5 py-4 text-[13px] text-ink-muted">
@@ -2174,7 +2156,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                         title="No AI evaluation yet"
                         sub="The candidate hasn't recorded their interview. Their AI score, video and evaluation will appear here once it's scored."
                         action={
-                          candidateId && !isInterviewer ? (
+                          canAct && candidateId ? (
                             <ResendInviteButton
                               canSend={canSendCandidateInvite}
                               pending={invitingCand}
@@ -2201,6 +2183,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                           candidateName={data.candidateName}
                           retranscoding={retranscoding}
                           onRetranscode={handleRetranscode}
+                          canRetranscode={canAct}
                           hlsReady={hlsReady}
                           onJump={jumpToRecording}
                         />
@@ -2289,38 +2272,43 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                                     {scoringError ? `: ${scoringError}` : "."}
                                   </span>
                                 </div>
-                                <Button
-                                  variant="secondary"
-                                  size="sm"
-                                  onClick={handleRescore}
-                                  disabled={rescoring}
-                                >
-                                  {rescoring ? (
-                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                  ) : (
-                                    <RefreshCw className="h-3.5 w-3.5" />
-                                  )}
-                                  Retry scoring
-                                </Button>
+                                {canAct ? (
+                                  <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={handleRescore}
+                                    disabled={rescoring}
+                                  >
+                                    {rescoring ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <RefreshCw className="h-3.5 w-3.5" />
+                                    )}
+                                    Retry scoring
+                                  </Button>
+                                ) : null}
                               </div>
                             ) : (
                               <div className="space-y-3">
                                 <p>
-                                  No scoring has run for this interview yet. Run
-                                  the AI scoring pipeline to grade it.
+                                  {canAct
+                                    ? "No scoring has run for this interview yet. Run the AI scoring pipeline to grade it."
+                                    : "No scoring has run for this interview yet."}
                                 </p>
-                                <Button
-                                  size="sm"
-                                  onClick={handleRescore}
-                                  disabled={rescoring}
-                                >
-                                  {rescoring ? (
-                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                  ) : (
-                                    <RefreshCw className="h-3.5 w-3.5" />
-                                  )}
-                                  Run scoring
-                                </Button>
+                                {canAct ? (
+                                  <Button
+                                    size="sm"
+                                    onClick={handleRescore}
+                                    disabled={rescoring}
+                                  >
+                                    {rescoring ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <RefreshCw className="h-3.5 w-3.5" />
+                                    )}
+                                    Run scoring
+                                  </Button>
+                                ) : null}
                               </div>
                             )}
                           </div>
@@ -2366,7 +2354,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                       }
                       onStatusChange={handleStatusChange}
                       pending={statusPending}
-                      readOnly={isInterviewer}
+                      canAct={canAct}
                     />
                   </div>
                 ) : null}
@@ -2684,6 +2672,7 @@ function ResponsesTab({
   candidateName,
   retranscoding,
   onRetranscode,
+  canRetranscode,
   hlsReady,
   onJump,
 }: {
@@ -2702,6 +2691,8 @@ function ResponsesTab({
   candidateName: string;
   retranscoding: boolean;
   onRetranscode: () => void;
+  /** Transcode is org_admin/hr-only (destructive server-side) — hides the retry button. */
+  canRetranscode: boolean;
   hlsReady: boolean;
   onJump: (sec: number) => void;
 }) {
@@ -2747,19 +2738,21 @@ function ResponsesTab({
                 Couldn&apos;t prepare the streaming version of this recording
                 {hlsError ? `: ${hlsError}` : "."}
               </p>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={onRetranscode}
-                disabled={retranscoding}
-              >
-                {retranscoding ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-3.5 w-3.5" />
-                )}
-                Retry streaming conversion
-              </Button>
+              {canRetranscode ? (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={onRetranscode}
+                  disabled={retranscoding}
+                >
+                  {retranscoding ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  )}
+                  Retry streaming conversion
+                </Button>
+              ) : null}
               <RawRecordingParts
                 urls={rawUrls}
                 durationSec={durationSec}

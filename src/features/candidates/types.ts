@@ -551,6 +551,15 @@ export interface BulkConfirmResult {
  * `statusKey` (e.g. a column deleted since the filter was set) resolves to an
  * EMPTY PAGE, not an error, so a stale filter simply reads as "no results".
  */
+/**
+ * The columns `GET /admin/candidates` can order by, mirroring the backend's
+ * `CANDIDATE_SORT_FIELDS`. Three of them (job, status, score) live on another
+ * document, which is exactly why the ordering is the server's — the client has
+ * one page of rows and no way to compare them against the ones it hasn't
+ * loaded.
+ */
+export type CandidateSortField = "name" | "job" | "status" | "score" | "date"
+
 export interface ListCandidatesParams {
   jobId?: string
   statusKey?: string
@@ -558,6 +567,9 @@ export interface ListCandidatesParams {
   search?: string
   page?: number
   limit?: number
+  /** Omit for the API's own order (newest first). */
+  sortBy?: CandidateSortField
+  sortDir?: "asc" | "desc"
 }
 
 export interface InviteResult {

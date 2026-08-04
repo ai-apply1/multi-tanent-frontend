@@ -25,6 +25,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useAuth } from "@/features/auth/AuthContext";
+import { canManageFunnel } from "@/features/auth/roles";
 import { JobQuestionsManager } from "@/features/jobs/components/JobQuestionsManager";
 import { JobShareDialog } from "@/features/jobs/components/JobShareDialog";
 import { JobSwitcher } from "@/features/jobs/components/JobSwitcher";
@@ -40,7 +42,6 @@ import {
   type JobStatus,
 } from "@/features/jobs/types";
 import { useOrganization } from "@/features/organization/useOrganization";
-import { useAuth } from "@/features/auth/AuthContext";
 import { UploadCvsDialog } from "@/features/candidates/components/UploadCvsDialog";
 import {
   getCandidateKanban,
@@ -78,11 +79,13 @@ export function JobDetailPage() {
   const { jobId } = useParams<{ jobId: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  // `interviewer` is a view-only role: it can read this page but not edit the
-  // job, move its status, re-run the threshold, upload CVs or post to LinkedIn.
-  // Every mutating control is withheld (the backend 403s them too).
   const { user } = useAuth();
-  const isInterviewer = user?.role === "interviewer";
+  // Interviewers read this page and never write it — the backend 403s the job
+  // edit / status / threshold-reprocess / CV-import / LinkedIn calls, so those
+  // buttons are hidden rather than left to fail on click. Share stays: the link
+  // itself and copying it are reads (the send-invites half is hidden inside the
+  // dialog).
+  const canAct = canManageFunnel(user?.role);
   const [tab, setTab] = useState<TabId>("overview");
   const [uploadOpen, setUploadOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -282,7 +285,7 @@ export function JobDetailPage() {
           ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
-          {!isInterviewer ? (
+          {canAct ? (
             <Button
               variant="secondary"
               size="sm"
@@ -297,7 +300,7 @@ export function JobDetailPage() {
               Re-apply threshold
             </Button>
           ) : null}
-          {!isInterviewer && transitions.length > 0 ? (
+          {canAct && transitions.length > 0 ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -332,7 +335,7 @@ export function JobDetailPage() {
             <Share2 className="h-4 w-4" strokeWidth={1.9} />
             Share
           </Button>
-          {!isInterviewer ? (
+          {canAct ? (
             <>
               <Button
                 variant="secondary"
@@ -354,27 +357,29 @@ export function JobDetailPage() {
       {/* LinkedIn: post this job to your feed, view the live post, or unpublish.
           Connecting the account lives on Settings → Integrations. Publishing is
           an edit, so it's hidden from the view-only interviewer. */}
-      {!isInterviewer ? <JobLinkedInControls job={job} /> : null}
+      {canAct ? <JobLinkedInControls job={job} /> : null}
 
       <JobShareDialog jobId={job._id} open={shareOpen} onOpenChange={setShareOpen} />
 
-      <ConfirmDialog
-        open={reprocessOpen}
-        onOpenChange={(o) => !o && setReprocessOpen(false)}
-        title="Re-apply the scoring threshold?"
-        description={
-          <>
-            This re-checks every already-interviewed candidate for this job
-            against the current threshold ({job.rejectionThreshold}) and moves
-            them between shortlisted and rejected based on their existing
-            interview score. Nobody is re-scored, and no emails are sent.
-          </>
-        }
-        confirmLabel="Re-apply"
-        loadingLabel="Re-applying…"
-        loading={reprocessMutation.isPending}
-        onConfirm={() => reprocessMutation.mutate()}
-      />
+      {canAct ? (
+        <ConfirmDialog
+          open={reprocessOpen}
+          onOpenChange={(o) => !o && setReprocessOpen(false)}
+          title="Re-apply the scoring threshold?"
+          description={
+            <>
+              This re-checks every already-interviewed candidate for this job
+              against the current threshold ({job.rejectionThreshold}) and moves
+              them between shortlisted and rejected based on their existing
+              interview score. Nobody is re-scored, and no emails are sent.
+            </>
+          }
+          confirmLabel="Re-apply"
+          loadingLabel="Re-applying…"
+          loading={reprocessMutation.isPending}
+          onConfirm={() => reprocessMutation.mutate()}
+        />
+      ) : null}
 
       {/*
         KPI strip, counted from the job's own board.
@@ -459,18 +464,20 @@ export function JobDetailPage() {
         {tab === "overview" ? (
           <OverviewTab job={job} kpi={kpi} columns={boardQuery.data?.columns} />
         ) : (
-          <JobQuestionsManager job={job} readOnly={isInterviewer} />
+          <JobQuestionsManager job={job} />
         )}
       </div>
 
       {/* Upload dialog — mounted once, opened by the header CTA. */}
-      <UploadCvsDialog
-        open={uploadOpen}
-        onOpenChange={setUploadOpen}
-        jobId={job._id}
-        jobTitle={job.title}
-        onImported={invalidateCandidates}
-      />
+      {canAct ? (
+        <UploadCvsDialog
+          open={uploadOpen}
+          onOpenChange={setUploadOpen}
+          jobId={job._id}
+          jobTitle={job.title}
+          onImported={invalidateCandidates}
+        />
+      ) : null}
     </div>
   );
 }
