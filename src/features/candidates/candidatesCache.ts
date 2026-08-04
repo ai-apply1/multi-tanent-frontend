@@ -23,6 +23,12 @@ export function invalidateCandidateData(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ["candidateKanban"] })
   queryClient.invalidateQueries({ queryKey: ["awaiting-decision"] })
   queryClient.invalidateQueries({ queryKey: ["overviewStats"] })
+  // The job overview's "Top ranked candidates" leaderboard. It ranks by the
+  // interview's `scores.overall`, so a rescore re-orders it and a delete drops
+  // a row — and its rows OPEN THE DRAWER, so those mutations are launched from
+  // the card itself. Without this the deleted candidate stayed sitting at #1
+  // behind the closing drawer.
+  queryClient.invalidateQueries({ queryKey: ["jobTopCandidates"] })
   // The drawer's Activity timeline — every mutation above also appends an
   // audit row, so the feed must refetch with the rest or the admin's own
   // action won't appear until reopen.
