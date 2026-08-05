@@ -17,7 +17,9 @@ import {
   CheckCircle2,
   ClipboardCheck,
   ClipboardList,
+  ChevronDown,
   Clock,
+  Download,
   ExternalLink,
   EyeOff,
   FileText,
@@ -94,6 +96,7 @@ import {
   deleteCandidate,
   getCandidate,
   getCandidateActivities,
+  getCandidateAnswerFileUrl,
   listCandidateStatuses,
   sendCandidateInvite,
   updateCandidateStatus,
@@ -1170,13 +1173,23 @@ function ExtraGatesCard(props: ExtraGatesCardProps) {
  */
 function ApplicationAnswersCard({
   answers,
+  candidateId,
 }: {
   answers: CandidateAnswer[] | undefined;
+  /** Needed only to mint download links for `file` answers. */
+  candidateId: string | null;
 }) {
   if (!answers || answers.length === 0) return null;
 
   const display = (answer: CandidateAnswer): React.ReactNode => {
     if (answer.type === "checkbox") return answer.value === true ? "Yes" : "No";
+    if (answer.type === "file") {
+      return candidateId ? (
+        <AnswerFileLink candidateId={candidateId} fieldId={answer.fieldId} />
+      ) : (
+        "Uploaded file"
+      );
+    }
     if (Array.isArray(answer.value)) return answer.value.join(", ");
     if (answer.type === "url" && typeof answer.value === "string") {
       return (
@@ -1226,6 +1239,43 @@ function ApplicationAnswersCard({
         ))}
       </dl>
     </div>
+  );
+}
+
+/**
+ * Download affordance for one `file` answer. The presigned URL is minted ON
+ * CLICK, never at render: it expires in minutes, and a drawer can sit open
+ * far longer than that — a link minted eagerly would be dead by the time
+ * anyone used it.
+ */
+function AnswerFileLink({
+  candidateId,
+  fieldId,
+}: {
+  candidateId: string;
+  fieldId: string;
+}) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={() => {
+        setBusy(true);
+        getCandidateAnswerFileUrl(candidateId, fieldId)
+          .then(({ downloadUrl }) => {
+            window.open(downloadUrl, "_blank", "noopener");
+          })
+          .catch((err) =>
+            toast.error(errorMessage(err, "Could not open the file.")),
+          )
+          .finally(() => setBusy(false));
+      }}
+      className="inline-flex w-fit items-center gap-1.5 text-primary underline-offset-2 hover:underline disabled:opacity-60"
+    >
+      <Download className="h-3.5 w-3.5" strokeWidth={2} />
+      {busy ? "Opening…" : "Download file"}
+    </button>
   );
 }
 
@@ -1297,6 +1347,43 @@ function InitialRejectionCard({
  * died before vetting) has no checklist, and asserting a park that never
  * happened would send HR hunting for reasons that don't exist.
  */
+/**
+ * The auto-invite's pre-screen checklist, collapsed by default: for an
+ * invited/interviewed candidate it is confirmation rather than a decision
+ * aid, but hiding it entirely broke the check editor's promise that every
+ * verdict (including a pass, with its CV quote) is auditable in the drawer.
+ */
+function PassedChecksCard({ checks }: { checks: VettingCheck[] }) {
+  const allPassed = checks.every((c) => c.status === "pass");
+  return (
+    <details className="group rounded-2xl border border-line bg-surface">
+      <summary className="flex cursor-pointer list-none items-center gap-2 p-[18px] [&::-webkit-details-marker]:hidden">
+        <span
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-[color:var(--success)]"
+          style={{ background: "var(--success-soft)" }}
+        >
+          <ShieldCheck className="h-3.5 w-3.5" strokeWidth={2} />
+        </span>
+        <span className="text-[14px] font-bold">Pre-screen checks</span>
+        <span className="text-[12.5px] text-ink-muted">
+          {allPassed
+            ? `all ${checks.length} passed`
+            : `${checks.filter((c) => c.status === "pass").length} of ${checks.length} passed`}
+        </span>
+        <ChevronDown
+          className="ml-auto h-4 w-4 shrink-0 text-ink-subtle transition-transform group-open:rotate-180"
+          strokeWidth={2}
+        />
+      </summary>
+      <div className="grid gap-2 px-[18px] pb-[18px]">
+        {checks.map((check, i) => (
+          <VettingCheckRow key={`${i}-${check.text}`} check={check} />
+        ))}
+      </div>
+    </details>
+  );
+}
+
 function NeedsReviewCard({
   checks,
   loading,
@@ -1342,15 +1429,17 @@ function NeedsReviewCard({
             {reconsidered
               ? "The CV pre-screen rejected this candidate, and they were " +
                 "moved back here to be reconsidered. This is the original " +
-                "checklist — the red item(s) are what caused that rejection."
+                "checklist; the red item(s) are what caused that rejection."
               : canAct
-                ? "The CV pre-screen could not auto-decide, so this candidate " +
-                  "is parked for your call. The amber item(s) are what could " +
-                  "not be verified automatically — check them, then Invite or " +
+                ? "The CV pre-screen left this candidate for your call. The " +
+                  "amber item(s) need your judgment: something that could not " +
+                  "be verified automatically, or a miss this job routes to " +
+                  "review instead of rejecting. Check them, then Invite or " +
                   "Reject from the header."
-                : "The CV pre-screen could not auto-decide, so this candidate " +
-                  "is parked for a recruiter's call. The amber item(s) are " +
-                  "what could not be verified automatically."}
+                : "The CV pre-screen left this candidate for a recruiter's " +
+                  "call. The amber item(s) need a human's judgment: something " +
+                  "that could not be verified automatically, or a miss this " +
+                  "job routes to review instead of rejecting."}
           </p>
           <div className="grid gap-2.5">
             {checks.map((check, i) => (
@@ -1557,10 +1646,11 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
     // could silently fall off page 1 and the card would claim nothing was
     // ever recorded.
     queryFn: () => getCandidateActivities(candidateId!, { limit: 100 }),
-    enabled:
-      Boolean(candidateId) &&
-      (isInitialRejected || isNeedsReview) &&
-      !activeSessionId,
+    // Every state reads this feed now: rejection and park cards for the two
+    // pre-decision states, and the passed-checklist card for candidates the
+    // engine auto-invited — the check editor promises "audit every verdict
+    // in the candidate drawer", which must include the verdicts that passed.
+    enabled: Boolean(candidateId),
     // See the staleTime note on the interview query above. A re-vet rewrites
     // these checks, so a cached read would keep showing the old reasons.
     staleTime: 0,
@@ -1593,6 +1683,23 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   const needsReviewChecks = needsReviewRow
     ? extractVettingChecks(needsReviewRow.meta, "unknown")
     : initialRejectionChecks;
+  // The auto-invite's checklist rides the status_changed row INTO `invited`,
+  // same as a rejection rides its own transition. Rendered collapsed for
+  // invited/interviewed candidates: it is confirmation, not a decision aid.
+  // The newest invited row that CARRIES a checklist, not the newest invited
+  // row full stop: a manual re-invite (or an HR invite from needs_review)
+  // writes its own transition with no checks, and matching that one would
+  // silently drop the card for exactly the candidates it exists for.
+  const invitedChecksRow = vettingActivitiesQuery.data?.data.find(
+    (a) =>
+      a.type === "status_changed" &&
+      a.toStatus?.key === "invited" &&
+      extractVettingChecks(a.meta).length > 0,
+  );
+  const passedChecks =
+    !isInitialRejected && !isNeedsReview
+      ? extractVettingChecks(invitedChecksRow?.meta)
+      : [];
 
   // Local mutation flags
   const [retranscoding, setRetranscoding] = useState(false);
@@ -2151,7 +2258,10 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                     just the parsed-CV profile and a note. */}
                 <ProfileCard profile={profile} />
                 <ExtraGatesCard {...extraGatesProps} />
-                <ApplicationAnswersCard answers={candidate?.answers} />
+                <ApplicationAnswersCard
+                  answers={candidate?.answers}
+                  candidateId={candidateId}
+                />
 
                 {isInitialRejected ? (
                   // Rejected at the CV pre-screen, no interview will ever exist,
@@ -2173,13 +2283,18 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                     canAct={canAct}
                   />
                 ) : (
-                  <div className="flex items-center gap-3 rounded-2xl border border-dashed border-line bg-surface px-5 py-4 text-[13px] text-ink-muted">
-                    <MicOff className="h-5 w-5 shrink-0 text-ink-subtle" />
-                    <p>
-                      No interview yet. Once this candidate completes one, the
-                      score, video and evaluation appear here.
-                    </p>
-                  </div>
+                  <>
+                    {passedChecks.length > 0 ? (
+                      <PassedChecksCard checks={passedChecks} />
+                    ) : null}
+                    <div className="flex items-center gap-3 rounded-2xl border border-dashed border-line bg-surface px-5 py-4 text-[13px] text-ink-muted">
+                      <MicOff className="h-5 w-5 shrink-0 text-ink-subtle" />
+                      <p>
+                        No interview yet. Once this candidate completes one,
+                        the score, video and evaluation appear here.
+                      </p>
+                    </div>
+                  </>
                 )}
               </div>
             ) : is404 ? (
@@ -2217,7 +2332,15 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                 ) : null}
                 {candidate?.answers?.length ? (
                   <div className="mb-4">
-                    <ApplicationAnswersCard answers={candidate.answers} />
+                    <ApplicationAnswersCard
+                      answers={candidate.answers}
+                      candidateId={candidateId}
+                    />
+                  </div>
+                ) : null}
+                {passedChecks.length > 0 ? (
+                  <div className="mb-4">
+                    <PassedChecksCard checks={passedChecks} />
                   </div>
                 ) : null}
 

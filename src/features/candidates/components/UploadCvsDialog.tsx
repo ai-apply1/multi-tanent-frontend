@@ -62,6 +62,7 @@ import {
 import { extractCvsFromZip, isZipFile } from "@/features/candidates/unzipCvs"
 import {
   JOB_OPTIONS_QUERY_KEY,
+  getJob,
   listJobOptions,
 } from "@/features/jobs/jobsApi"
 import { errorMessage } from "@/lib/errors"
@@ -76,8 +77,6 @@ import { cn } from "@/lib/utils"
 const CONTENT_TYPE_BY_EXTENSION: Record<string, AllowedCvContentType> = {
   pdf: "application/pdf",
 }
-
-const ACCEPT_ATTR = ".pdf,.zip"
 
 function contentTypeFor(file: File): AllowedCvContentType | null {
   if ((ALLOWED_CV_CONTENT_TYPES as readonly string[]).includes(file.type)) {
@@ -223,6 +222,24 @@ export function UploadCvsDialog({
     staleTime: 60_000,
   })
 
+  /**
+   * The TARGET job's own config. Keyed on `selectedJobId`, not the `jobId`
+   * prop, because the dialog lets the admin re-point the import at a
+   * different job mid-flow and the rules must follow it: the city column
+   * blocks a row exactly when the job gates on location.
+   */
+  const targetJobQuery = useQuery({
+    queryKey: ["job", selectedJobId],
+    queryFn: () => getJob(selectedJobId),
+    enabled: open && Boolean(selectedJobId),
+  })
+  const targetJob = targetJobQuery.data
+  // Until the job loads, assume the city IS required: briefly over-asking
+  // beats letting rows through that the server then skips.
+  const cityRequired = targetJob
+    ? targetJob.workMode !== "remote" && Boolean(targetJob.eligibility.city)
+    : true
+
   const jobOptions = useMemo(() => {
     const all = jobsQuery.data ?? []
     const openJobs = all.filter((j) => j.status === "open")
@@ -344,7 +361,10 @@ export function UploadCvsDialog({
    */
   const phoneError = (row: UploadRow): string | null => {
     const number = row.phoneNumber.trim()
-    if (!number) return "Phone is required. The CV didn't have one."
+    // Optional now (the public form's phone policy is per job, and HR types
+    // what they have): a blank stores null, but a HALF-typed number still
+    // blocks — wrong beats missing.
+    if (!number) return null
     if (!/^\d+$/.test(number))
       return "Digits only — the country code goes in the dropdown."
     if (!row.phoneIso) return "Pick a country code."
@@ -358,12 +378,15 @@ export function UploadCvsDialog({
   }
 
   /**
-   * City is required because the job's city gate compares against it. A CV
-   * that doesn't say where someone lives can't be gated, so the import
-   * stops here rather than guessing.
+   * City blocks the row exactly when the target job's city gate will read
+   * it — a gated candidate with no city could never be gated, so the
+   * import stops here rather than guessing. Jobs without a location gate
+   * store null, same as the public form.
    */
   const cityError = (row: UploadRow): string | null =>
-    row.city.trim() ? null : "City is required. Pick one from the list."
+    !cityRequired || row.city.trim()
+      ? null
+      : "City is required for this job. Pick one from the list."
 
   const rowIncomplete = (row: UploadRow): boolean =>
     Boolean(
@@ -489,8 +512,11 @@ export function UploadCvsDialog({
           email: row.email.trim(),
           // The halves rejoin here and nowhere else: the stored value is a
           // single E.164-shaped string, same as the apply portal writes.
-          phone: combinePhone(row.phoneIso, row.phoneNumber.trim()),
-          city: row.city.trim(),
+          // Blank phone/city are OMITTED (store as null), not sent empty.
+          ...(row.phoneNumber.trim()
+            ? { phone: combinePhone(row.phoneIso, row.phoneNumber.trim()) }
+            : {}),
+          ...(row.city.trim() ? { city: row.city.trim() } : {}),
           cvKey: row.cvKey as string,
         }))
       ),
@@ -553,7 +579,7 @@ export function UploadCvsDialog({
                   Add up to {MAX_CV_UPLOAD_FILES} CVs. Drop a{" "}
                   <strong>ZIP</strong> or pick files. Each becomes a candidate at{" "}
                   <em>Applied</em>, and the CV is parsed and pre-screened automatically.
-                  PDF only.
+                  {" PDF only."}
                 </>
               )}
             </DialogDescription>
@@ -664,7 +690,7 @@ export function UploadCvsDialog({
                       ref={fileInputRef}
                       type="file"
                       multiple
-                      accept={ACCEPT_ATTR}
+                      accept=".pdf,.zip"
                       className="hidden"
                       onChange={(e) => {
                         void addFiles(e.target.files)

@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/select"
 import {
   mintDraftId,
+  type DraftError,
   type FormFieldDraft,
 } from "@/features/jobs/components/ApplicationFormEditor"
 import {
@@ -135,14 +136,16 @@ const valueShapeFor = (
 export const validateCustomRules = (
   rules: RuleDraft[],
   fields: FormFieldDraft[],
-): string[] => {
-  const errors: string[] = []
+): DraftError[] => {
+  const errors: DraftError[] = []
   const fieldById = new Map(fields.map((f) => [f.id, f]))
 
   rules.forEach((rule, ruleIndex) => {
+    const push = (message: string) =>
+      errors.push({ cardId: rule.id, message })
     const name = rule.label.trim() || `Requirement ${ruleIndex + 1}`
     if (!rule.label.trim()) {
-      errors.push(
+      push(
         `Requirement ${ruleIndex + 1} needs a name, e.g. "Must have own laptop".`,
       )
     }
@@ -152,49 +155,49 @@ export const validateCustomRules = (
     const seenFieldIds = new Set<string>()
     rule.conditions.forEach((condition) => {
       if (!condition.fieldId) {
-        errors.push(`"${name}" has a condition with no form field picked.`)
+        push(`"${name}" has a condition with no form field picked.`)
         return
       }
       const field = fieldById.get(condition.fieldId)
       if (!field) {
-        errors.push(
+        push(
           `"${name}" checks a form field that is no longer on the application form. Remove that condition.`,
         )
         return
       }
       if (seenFieldIds.has(condition.fieldId)) {
-        errors.push(
+        push(
           `"${name}" checks ${field.label.trim() || "the same field"} twice. Combine those into one condition; for a number range, use "is between".`,
         )
         return
       }
       seenFieldIds.add(condition.fieldId)
       if (!condition.op) {
-        errors.push(`"${name}" has a condition with no check picked.`)
+        push(`"${name}" has a condition with no check picked.`)
         return
       }
       const shape = valueShapeFor(field.type, condition.op)
       const fieldName = field.label.trim() || "that field"
       if (shape === "number" && !Number.isFinite(Number(condition.value.trim() || NaN))) {
-        errors.push(`"${name}" needs a number for ${fieldName}.`)
+        push(`"${name}" needs a number for ${fieldName}.`)
       }
       if (shape === "pair") {
         const lo = Number(condition.value.trim() || NaN)
         const hi = Number(condition.value2.trim() || NaN)
         if (!Number.isFinite(lo) || !Number.isFinite(hi)) {
-          errors.push(`"${name}" needs both ends of the range for ${fieldName}.`)
+          push(`"${name}" needs both ends of the range for ${fieldName}.`)
         } else if (lo > hi) {
-          errors.push(`"${name}" has a range that starts above where it ends for ${fieldName}.`)
+          push(`"${name}" has a range that starts above where it ends for ${fieldName}.`)
         }
       }
       if (shape === "option" && field.type !== "checkbox" && !condition.value) {
-        errors.push(`"${name}" needs an option picked for ${fieldName}.`)
+        push(`"${name}" needs an option picked for ${fieldName}.`)
       }
       if (shape === "boolean" && condition.value !== "true" && condition.value !== "false") {
-        errors.push(`"${name}" needs checked or unchecked picked for ${fieldName}.`)
+        push(`"${name}" needs checked or unchecked picked for ${fieldName}.`)
       }
       if (shape === "optionList" && condition.values.length === 0) {
-        errors.push(`"${name}" needs at least one option picked for ${fieldName}.`)
+        push(`"${name}" needs at least one option picked for ${fieldName}.`)
       }
     })
   })
@@ -243,11 +246,21 @@ export function CustomRulesEditor({
   rules,
   onChange,
   fields,
+  onGoToFormStep,
+  errorCardIds,
 }: {
   rules: RuleDraft[]
   onChange: (next: RuleDraft[]) => void
   /** Current form-field drafts, for the field/operator/value pickers. */
   fields: FormFieldDraft[]
+  /**
+   * Jump the wizard to the Application form step. Rendered next to the add
+   * button as the "screen the CV instead" fork: a user who wants a CV gate
+   * is otherwise steered into creating a candidate-visible question here.
+   */
+  onGoToFormStep?: () => void
+  /** Cards the step's validator flagged: outlined in the danger colour. */
+  errorCardIds?: Set<string>
 }) {
   const addressable = ruleAddressableFields(fields)
   const fieldById = new Map(fields.map((f) => [f.id, f]))
@@ -273,22 +286,22 @@ export function CustomRulesEditor({
       ),
     )
 
-  if (addressable.length === 0) {
-    return (
-      <p className="rounded-lg border border-dashed border-[var(--field-border)] px-3.5 py-3 text-[13px] text-ink-muted">
-        Requirements check answers from your application form. Add a number,
-        dropdown, multiple choice or checkbox field on the Application form
-        step first, then set requirements on it here.
-      </p>
-    )
-  }
-
+  // Existing rules ALWAYS render, even when no addressable field is left:
+  // deleting a field can orphan a rule, and the step's validation error
+  // tells the user to remove it — which they can only do if its card is on
+  // screen. (An earlier version returned the dashed note INSTEAD of the
+  // list here, which hid the orphaned card and made the error undismissable.)
+  // Only the add button is gated on having something to gate on.
   return (
     <div className="grid gap-3">
       {rules.map((rule, ruleIndex) => (
         <div
           key={rule.id}
-          className="rounded-xl border border-[var(--field-border)] bg-surface-muted p-3.5"
+          id={`card-${rule.id}`}
+          className={cn(
+            "rounded-xl border border-[var(--field-border)] bg-surface-muted p-3.5",
+            errorCardIds?.has(rule.id) && "border-[var(--danger)]",
+          )}
         >
           <div className="mb-3 flex items-center gap-2">
             <input
@@ -368,9 +381,19 @@ export function CustomRulesEditor({
                           selected item's children here, and the type tag
                           ("Number") truncated to "Num…" in the fixed-width
                           trigger. The tag stays in the open list, where the
-                          type is actually being chosen between. */}
+                          type is actually being chosen between. A fieldId
+                          whose field was DELETED renders as an explicit
+                          "Deleted field" (Radix suppresses the placeholder
+                          when a value is set, so without this the trigger is
+                          just blank and nothing marks the broken condition). */}
                       <SelectValue placeholder="Pick a form field…">
-                        {field ? field.label.trim() || "Untitled field" : null}
+                        {field ? (
+                          field.label.trim() || "Untitled field"
+                        ) : condition.fieldId ? (
+                          <span className="font-semibold text-[var(--danger)]">
+                            Deleted field
+                          </span>
+                        ) : null}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
@@ -434,22 +457,43 @@ export function CustomRulesEditor({
                     />
                   ) : null}
 
-                  {rule.conditions.length > 1 ? (
+                  {/* Also shown for a single ORPHANED condition (its field
+                      was deleted): the validator tells the user to remove
+                      it, so an affordance must exist. Deleting the last
+                      condition resets it to an empty one rather than
+                      leaving a condition-less rule. */}
+                  {rule.conditions.length > 1 ||
+                  (condition.fieldId && !field) ? (
                     <button
                       type="button"
                       aria-label="Remove this condition"
                       title="Remove this condition"
                       onClick={() =>
                         patchRule(rule.id, {
-                          conditions: rule.conditions.filter(
-                            (_, i) => i !== index,
-                          ),
+                          conditions:
+                            rule.conditions.length > 1
+                              ? rule.conditions.filter((_, i) => i !== index)
+                              : [emptyCondition()],
                         })
                       }
                       className="ml-auto inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-hover hover:text-[var(--danger)]"
                     >
                       <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
                     </button>
+                  ) : null}
+
+                  {/* A rule over an optional question floods the review
+                      queue with skippers (a missing answer is always
+                      "unknown", never a reject), so say it here where the
+                      rule is being built. w-full wraps it onto its own
+                      line inside the flex row. */}
+                  {field && !field.required ? (
+                    <p className="w-full text-[11.5px] text-ink-muted">
+                      &quot;{field.label.trim() || "Untitled field"}&quot; is
+                      optional on the application form. Candidates who skip
+                      it always go to your review queue for this
+                      requirement. Consider making the field required.
+                    </p>
                   ) : null}
                 </div>
               )
@@ -459,24 +503,34 @@ export function CustomRulesEditor({
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2.5">
             {/* Also capped by the number of addressable fields: each condition
                 claims one field, so once every field is checked a new
-                condition could only open an empty picker. */}
-            {rule.conditions.length < MAX_CONDITIONS &&
-            rule.conditions.length < addressable.length ? (
-              <button
-                type="button"
-                onClick={() =>
-                  patchRule(rule.id, {
-                    conditions: [...rule.conditions, emptyCondition()],
-                  })
-                }
-                className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[12.5px] font-semibold text-primary transition-colors hover:bg-accent"
-              >
-                <Plus className="h-3.5 w-3.5" strokeWidth={2.2} />
-                And also…
-              </button>
-            ) : (
-              <span />
-            )}
+                condition could only open an empty picker. Disabled with the
+                reason rather than hidden: a control that silently vanishes
+                right after being used reads as a bug. */}
+            <button
+              type="button"
+              disabled={
+                rule.conditions.length >= MAX_CONDITIONS ||
+                rule.conditions.length >= addressable.length
+              }
+              title={
+                rule.conditions.length >= MAX_CONDITIONS
+                  ? `A requirement can have up to ${MAX_CONDITIONS} conditions.`
+                  : addressable.length === 0
+                    ? "No form field a requirement can check exists any more. Add one on the Application form step, or delete this requirement."
+                    : rule.conditions.length >= addressable.length
+                      ? "Every field a requirement can check already has a condition here."
+                      : undefined
+              }
+              onClick={() =>
+                patchRule(rule.id, {
+                  conditions: [...rule.conditions, emptyCondition()],
+                })
+              }
+              className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[12.5px] font-semibold text-primary transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              <Plus className="h-3.5 w-3.5" strokeWidth={2.2} />
+              And also…
+            </button>
             <label className="flex items-center gap-2 text-[12.5px] font-semibold text-ink">
               If not met:
               <Select
@@ -487,7 +541,7 @@ export function CustomRulesEditor({
               >
                 <SelectTrigger
                   aria-label="What happens when this requirement is not met"
-                  className={`${SELECT_TRIGGER_CLASS} h-9 w-[210px]`}
+                  className={`${SELECT_TRIGGER_CLASS} h-9 w-[230px]`}
                 >
                   <SelectValue />
                 </SelectTrigger>
@@ -501,16 +555,52 @@ export function CustomRulesEditor({
         </div>
       ))}
 
-      {rules.length < MAX_RULES ? (
-        <button
-          type="button"
-          onClick={() => onChange([...rules, emptyRule()])}
-          className="flex w-fit items-center gap-1.5 rounded-lg border border-dashed border-[var(--field-border)] px-3 py-2 text-[13px] font-semibold text-ink-2 transition-colors hover:border-primary hover:bg-accent hover:text-primary"
-        >
-          <Plus className="h-4 w-4" strokeWidth={2.2} />
-          Add a requirement
-        </button>
-      ) : null}
+      {addressable.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-[var(--field-border)] px-3.5 py-3">
+          <p className="text-[13px] text-ink-muted">
+            Requirements check answers from your application form. Add a
+            number, dropdown, multi-select or checkbox field on the
+            Application form step first, then set requirements on it here. To
+            screen on the CV itself without asking the candidate anything,
+            add an Eligibility check there instead.
+          </p>
+          {onGoToFormStep ? (
+            <button
+              type="button"
+              onClick={onGoToFormStep}
+              className="mt-2 text-[12.5px] font-semibold text-primary hover:underline"
+            >
+              Go to the Application form step
+            </button>
+          ) : null}
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            disabled={rules.length >= MAX_RULES}
+            title={
+              rules.length >= MAX_RULES
+                ? `A job can have up to ${MAX_RULES} requirements.`
+                : undefined
+            }
+            onClick={() => onChange([...rules, emptyRule()])}
+            className="flex w-fit items-center gap-1.5 rounded-lg border border-dashed border-[var(--field-border)] px-3 py-2 text-[13px] font-semibold text-ink-2 transition-colors hover:border-primary hover:bg-accent hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-[var(--field-border)] disabled:hover:bg-transparent disabled:hover:text-ink-2"
+          >
+            <Plus className="h-4 w-4" strokeWidth={2.2} />
+            Add a requirement
+          </button>
+          {onGoToFormStep ? (
+            <button
+              type="button"
+              onClick={onGoToFormStep}
+              className="text-[12.5px] font-semibold text-primary hover:underline"
+            >
+              Screen the CV instead, no question asked
+            </button>
+          ) : null}
+        </div>
+      )}
 
       {rules.length > 0 ? (
         <p className="text-[12px] text-ink-muted">

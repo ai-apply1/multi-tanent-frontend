@@ -57,8 +57,6 @@ export interface JobEligibility {
    * auto-reject. Never an auto-pass: willingness is an unverifiable claim.
    */
   considerRelocators: boolean
-  minYearsExperience: number | null
-  requiredSkills: string[]
   /** Requirements over the custom form answers. Empty = collect-only form. */
   customRules: JobCustomRule[]
   /** Accepted-list eligibility checks, CV-read or form-asked. */
@@ -100,6 +98,34 @@ export type ApplicationFieldType =
   | "checkbox"
   | "date"
   | "url"
+  | "file"
+
+/**
+ * Accepted format GROUPS for a `file` field. Client copy of the backend's
+ * `ApplicationFileType`; the mime expansion lives server-side and in the
+ * portal — the dashboard only picks groups.
+ */
+export type ApplicationFileType = "pdf" | "word" | "image"
+
+export const FILE_TYPE_LABELS: Record<ApplicationFileType, string> = {
+  pdf: "PDF",
+  word: "Word (doc, docx)",
+  image: "Images (jpg, png, webp)",
+}
+
+/** Whether the apply form asks for a phone number (per job). */
+export type ApplicationPhonePolicy = "required" | "optional" | "off"
+
+/**
+ * Per-job knobs on the FIXED apply-form fields. Name/email stay hardcoded
+ * (identity + the delivery channel), the CV is required and PDF-only
+ * everywhere (product decision), city derives from the city gate, and the
+ * relocation question additionally follows the "consider relocators"
+ * checkbox — off means a mismatch hard-rejects, so asking would be theater.
+ */
+export interface JobApplicationFormConfig {
+  phone: ApplicationPhonePolicy
+}
 
 /**
  * One custom field on the job's public application form.
@@ -124,6 +150,8 @@ export interface JobFormField {
    * the threshold. A field collects; rules judge.
    */
   options: string[]
+  /** `file` fields only: accepted format groups (empty elsewhere). */
+  fileTypes?: ApplicationFileType[]
 }
 
 /**
@@ -177,7 +205,16 @@ export interface JobCustomRule {
 export type CustomCheckSource = "cv" | "form"
 
 /**
- * One accepted-list eligibility check: any ONE accepted value clears it.
+ * A check's shape: `list` = membership in `acceptedValues` (either source);
+ * `criterion` = the AI judges the CV against one HR-written sentence
+ * (cv-source only, backend-enforced).
+ */
+export type CustomCheckKind = "list" | "criterion"
+
+/**
+ * One eligibility check. List kind: any ONE accepted value clears it.
+ * Criterion kind: the `criterion` sentence is judged against the CV under
+ * the same yes/no/unclear contract, so an unsure call parks for review.
  * Lives in `eligibility.customChecks` server-side; a form-sourced check also
  * synthesizes a question onto the apply form under this same `id`, which is
  * why check ids and form-field ids share one namespace (backend-enforced).
@@ -185,7 +222,11 @@ export type CustomCheckSource = "cv" | "form"
 export interface JobCustomCheck {
   id: string
   label: string
+  kind: CustomCheckKind
+  /** List kind only; empty on a criterion check. */
   acceptedValues: string[]
+  /** Criterion kind only; empty on a list check. */
+  criterion?: string
   source: CustomCheckSource
   onFail: CustomRuleOnFail
 }
@@ -211,10 +252,12 @@ export const FIELD_TYPE_LABELS: Record<ApplicationFieldType, string> = {
   textarea: "Paragraph",
   number: "Number",
   select: "Dropdown",
-  multiselect: "Multiple choice",
+  // "Multi-select", not "Multiple choice": the latter reads as pick-one.
+  multiselect: "Multi-select",
   checkbox: "Checkbox",
   date: "Date",
   url: "Link",
+  file: "File upload",
 }
 
 /** Editor copy: what each operator reads as, in a requirement sentence. */
@@ -270,6 +313,8 @@ export interface JobBase {
   interviewDurationMinutes: number | null
   /** Custom application-form fields, in display order. */
   formFields: JobFormField[]
+  /** Per-job knobs on the fixed apply-form fields. */
+  applicationForm?: JobApplicationFormConfig
   /**
    * LinkedIn share state. Optional because the list route projects it away —
    * only `GET /admin/jobs/:id` (the detail) carries it.
@@ -335,8 +380,6 @@ export interface Job extends JobBase {
 export interface JobEligibilityPayload {
   city?: string
   considerRelocators?: boolean
-  minYearsExperience?: number
-  requiredSkills?: string[]
   /**
    * REPLACE semantics with the rest of the block. Every condition must
    * reference a field present in the job's (possibly simultaneously updated)
@@ -358,6 +401,7 @@ export interface JobFormFieldPayload {
   help?: string
   required?: boolean
   options?: string[]
+  fileTypes?: ApplicationFileType[]
 }
 
 /**
@@ -389,6 +433,10 @@ export interface CreateJobPayload {
    * list. Always send it, or deleting the last field would silently no-op.
    */
   formFields?: JobFormFieldPayload[]
+  /** REPLACE semantics, like its siblings. Always sent by the wizard. */
+  applicationForm?: {
+    phone: ApplicationPhonePolicy
+  }
   /** `technical + communication` must equal 100 (422 otherwise). */
   scoringWeights?: JobScoringWeights
   rejectionThreshold?: number
@@ -471,9 +519,6 @@ export const SENIORITY_LABELS: Record<SeniorityLevel, string> = {
  * so if you change one, change both. This copy exists only to SHOW the admin
  * what picking a level commits them to; nothing here is sent to the API, and
  * the band is never stored on the job (it's derived from `seniorityLevel`).
- *
- * Not to be confused with `eligibility.minYearsExperience`, which is a hard
- * auto-reject gate the admin sets by hand.
  */
 export const SENIORITY_EXPERIENCE: Record<
   SeniorityLevel,

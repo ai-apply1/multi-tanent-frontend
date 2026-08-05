@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDown,
   ChevronRight,
+  ExternalLink,
   FileText,
   Loader2,
   Pencil,
@@ -36,7 +37,7 @@ import { JobQuestionsManager } from "@/features/jobs/components/JobQuestionsMana
 import { JobShareDialog } from "@/features/jobs/components/JobShareDialog";
 import { JobSwitcher } from "@/features/jobs/components/JobSwitcher";
 import { JobLinkedInControls } from "@/features/jobs/components/JobLinkedInControls";
-import { getJob, setJobStatus } from "@/features/jobs/jobsApi";
+import { getJob, getJobShareLink, setJobStatus } from "@/features/jobs/jobsApi";
 import {
   EMPLOYMENT_TYPE_LABELS,
   FIELD_TYPE_LABELS,
@@ -110,6 +111,16 @@ export function JobDetailPage() {
     queryFn: () => getJob(jobId!),
     enabled: Boolean(jobId),
   });
+
+  // The public apply URL, for the header's "View live posting" self-check.
+  // Same cache key the share dialog uses, so neither fetches twice.
+  const shareLinkQuery = useQuery({
+    queryKey: ["jobShareLink", jobId],
+    queryFn: () => getJobShareLink(jobId!),
+    enabled: Boolean(jobId),
+  });
+  const livePostingUrl =
+    shareLinkQuery.data?.status === "open" ? shareLinkQuery.data.url : null;
 
   const statusMutation = useMutation({
     mutationFn: (status: JobStatus) => setJobStatus(jobId!, status),
@@ -351,6 +362,26 @@ export function JobDetailPage() {
               </DropdownMenuContent>
             </DropdownMenu>
           ) : null}
+          {/* The one-click self-check: open the form candidates actually
+              see. Disabled (with the reason) until the job is open, since a
+              non-open job's apply URL dead-ends on the portal's gate. */}
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={!livePostingUrl}
+            title={
+              livePostingUrl
+                ? undefined
+                : "Goes live once this job is open."
+            }
+            onClick={() =>
+              livePostingUrl &&
+              window.open(livePostingUrl, "_blank", "noopener")
+            }
+          >
+            <ExternalLink className="h-4 w-4" strokeWidth={1.9} />
+            View live posting
+          </Button>
           <Button
             variant="secondary"
             size="sm"
@@ -519,7 +550,6 @@ function OverviewTab({
   onViewAllCandidates: () => void;
 }) {
   const { data: organization } = useOrganization();
-  const requiredSkills = job.eligibility.requiredSkills;
 
   // The job's leaderboard: candidates who COMPLETED and were scored, ranked by
   // overall score. Ranked server-side (the score lives on the interview, and
@@ -566,43 +596,14 @@ function OverviewTab({
               </p>
             )}
 
-            <div className="mt-5">
-              <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle">
-                Required skills
-              </div>
-              {requiredSkills.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5">
-                  {requiredSkills.map((skill) => (
-                    <span
-                      key={skill}
-                      className="rounded-full bg-accent px-2.5 py-1 text-[12px] font-semibold text-primary"
-                    >
-                      {skill}
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-[13px] text-ink-muted">None required.</p>
-              )}
-            </div>
-
             <ScoreSplit weights={job.scoringWeights} />
 
-            <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3">
               <MetaCell label="Threshold">
                 <span className="mono">{job.rejectionThreshold}</span>
               </MetaCell>
               <MetaCell label="City">
                 {job.eligibility.city || <Dash />}
-              </MetaCell>
-              <MetaCell label="Min. experience">
-                {job.eligibility.minYearsExperience === null ? (
-                  <Dash />
-                ) : (
-                  <span className="mono">
-                    {job.eligibility.minYearsExperience} yrs
-                  </span>
-                )}
               </MetaCell>
               <MetaCell label="Interview attempts">
                 {job.maxAttempts === null ? (
@@ -819,8 +820,17 @@ function ApplicationFormCard({ job }: { job: Job }) {
 
       <GroupLabel>Form questions</GroupLabel>
       <p className="mb-2 text-[12.5px] text-ink-muted">
-        Every application asks for name, email, phone, city and a PDF CV
-        {cityGateOn ? ", plus whether the candidate would relocate" : ""}.
+        Every application asks for name and email
+        {job.applicationForm?.phone === "off"
+          ? ""
+          : job.applicationForm?.phone === "optional"
+            ? ", an optional phone"
+            : ", a phone"}
+        {cityGateOn ? ", the candidate's city" : ""}
+        {" and a PDF CV"}
+        {cityGateOn && job.eligibility.considerRelocators
+          ? ", plus whether they would relocate"
+          : ""}.
       </p>
       {formFields.length > 0 ? (
         <ul className="grid gap-1.5 sm:grid-cols-2">
@@ -865,7 +875,12 @@ function ApplicationFormCard({ job }: { job: Job }) {
                     {check.label}
                   </span>
                   <span className="inline-flex items-center gap-1 text-[11.5px] text-ink-subtle">
-                    {check.source === "cv" ? (
+                    {check.kind === "criterion" ? (
+                      <>
+                        <FileText className="h-3 w-3" strokeWidth={2} />
+                        AI judges the CV
+                      </>
+                    ) : check.source === "cv" ? (
                       <>
                         <FileText className="h-3 w-3" strokeWidth={2} />
                         Read from the CV
@@ -883,16 +898,22 @@ function ApplicationFormCard({ job }: { job: Job }) {
                       : "Misses go to review"}
                   </span>
                 </div>
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  {check.acceptedValues.map((value) => (
-                    <span
-                      key={value}
-                      className="rounded-full bg-accent px-2.5 py-0.5 text-[11.5px] font-semibold text-primary"
-                    >
-                      {value}
-                    </span>
-                  ))}
-                </div>
+                {check.kind === "criterion" ? (
+                  <p className="mt-1.5 text-[12.5px] italic text-ink-muted">
+                    “{check.criterion}”
+                  </p>
+                ) : (
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {check.acceptedValues.map((value) => (
+                      <span
+                        key={value}
+                        className="rounded-full bg-accent px-2.5 py-0.5 text-[11.5px] font-semibold text-primary"
+                      >
+                        {value}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </li>
             ))}
           </ul>

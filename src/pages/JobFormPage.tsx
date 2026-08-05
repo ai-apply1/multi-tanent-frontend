@@ -28,7 +28,6 @@ import {
 } from "@/components/ui/tooltip";
 import { useAuth } from "@/features/auth/AuthContext";
 import { canManageFunnel } from "@/features/auth/roles";
-import { ChipInput } from "@/features/jobs/components/ChipInput";
 import {
   ApplicationFormEditor,
   checksFromJob,
@@ -38,8 +37,10 @@ import {
   validateCustomChecks,
   validateFormFields,
   type CheckDraft,
+  type DraftError,
   type FormFieldDraft,
 } from "@/features/jobs/components/ApplicationFormEditor";
+import { ApplyFormPreview } from "@/features/jobs/components/ApplyFormPreview";
 import {
   CustomRulesEditor,
   rulesFromJob,
@@ -60,6 +61,7 @@ import {
   SENIORITY_LABELS,
   WORK_MODE_LABELS,
   seniorityExperienceLabel,
+  type ApplicationPhonePolicy,
   type CreateJobPayload,
   type EmploymentType,
   type Job,
@@ -89,7 +91,7 @@ const SENIORITY_LEVELS = Object.keys(SENIORITY_LABELS) as SeniorityLevel[];
 const STEPS: Array<[string, string]> = [
   ["Basics", "Role title & description"],
   ["Classification", "Type, mode & seniority"],
-  ["Application form", "What candidates fill in"],
+  ["Application form", "Questions & eligibility checks"],
   // Eligibility directly follows the form on purpose: its Custom
   // requirements section screens the answers configured one step back,
   // so the two read as one thought. Scoring closes the wizard.
@@ -112,6 +114,41 @@ const FIELD_CLASS =
 const LABEL_CLASS = "text-[13px] font-semibold text-ink mb-1.5 block";
 const HELP_CLASS = "mt-1.5 text-[12px] text-ink-muted";
 const ERROR_CLASS = "mt-1.5 text-[12px] text-[var(--danger)]";
+
+/**
+ * The step-level validation list, each row a button that scrolls the
+ * offending card into view (and, via `onJump`, opens/highlights it).
+ * Every card the validators reference carries `id="card-<draftId>"`.
+ */
+function ValidationErrorList({
+  errors,
+  onJump,
+}: {
+  errors: DraftError[];
+  onJump?: (cardId: string) => void;
+}) {
+  if (errors.length === 0) return null;
+  return (
+    <ul className="mt-3 grid gap-1">
+      {errors.map((error) => (
+        <li key={`${error.cardId}-${error.message}`}>
+          <button
+            type="button"
+            onClick={() => {
+              onJump?.(error.cardId);
+              document
+                .getElementById(`card-${error.cardId}`)
+                ?.scrollIntoView({ behavior: "smooth", block: "center" });
+            }}
+            className="text-left text-[12px] text-[var(--danger)] hover:underline"
+          >
+            {error.message}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 export function JobFormPage() {
   const { jobId } = useParams<{ jobId: string }>();
@@ -271,21 +308,16 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
   const [considerRelocators, setConsiderRelocators] = useState(
     job?.eligibility.considerRelocators ?? true,
   );
-  const [minYearsExperience, setMinYearsExperience] = useState(
-    job?.eligibility.minYearsExperience == null
-      ? ""
-      : String(job.eligibility.minYearsExperience),
-  );
-  const [requiredSkills, setRequiredSkills] = useState<string[]>(
-    job?.eligibility.requiredSkills ?? [],
-  );
-
   // ── Application form + the requirements over its answers. Two configs on
   // two steps, edited against each other: the requirements editor reads the
   // CURRENT field drafts, so renaming or deleting a field is reflected there
   // immediately rather than at save time.
   const [formFields, setFormFields] = useState<FormFieldDraft[]>(() =>
     draftsFromJob(job?.formFields),
+  );
+  // The one fixed-field knob (see JobApplicationFormConfig): phone policy.
+  const [phonePolicy, setPhonePolicy] = useState<ApplicationPhonePolicy>(
+    job?.applicationForm?.phone ?? "required",
   );
   const [customRules, setCustomRules] = useState<RuleDraft[]>(() =>
     rulesFromJob(job?.eligibility.customRules),
@@ -339,12 +371,6 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
       ? "Enter a whole number of minutes between 2 and 120, or leave it empty."
       : "";
 
-  const parsedMinYears = parseOptionalNumber(minYearsExperience);
-  const minYearsError =
-    minYearsExperience.trim() &&
-    (parsedMinYears === undefined || parsedMinYears < 0)
-      ? "Enter 0 or more, or leave it empty."
-      : "";
 
   // Per-step validity — Continue is disabled when the current step has
   // outstanding errors. Validity only, NOT touched-ness: the errors above gate
@@ -378,7 +404,7 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
       // Everything edited on the Application form step gates THAT step:
       // the fields and HR's eligibility checks.
       formFieldErrors.length === 0 && customCheckErrors.length === 0,
-      !minYearsError && customRuleErrors.length === 0,
+      customRuleErrors.length === 0,
       !rejectionError && !maxAttemptsError && !durationError,
     ],
     [
@@ -390,7 +416,6 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
       rejectionError,
       maxAttemptsError,
       durationError,
-      minYearsError,
       customRuleErrors,
       customCheckErrors,
     ],
@@ -406,12 +431,6 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
     // Sent unconditionally, like the two lists below: eligibility is
     // REPLACE-semantics, so omitting it would reset the server to the default.
     eligibility.considerRelocators = considerRelocators;
-    if (parsedMinYears !== undefined) {
-      eligibility.minYearsExperience = parsedMinYears;
-    }
-    if (requiredSkills.length > 0) {
-      eligibility.requiredSkills = requiredSkills;
-    }
     // Always sent, same REPLACE contract: omitting it would resurrect
     // whatever rules the server already stores after HR deleted them here.
     eligibility.customRules = serializeCustomRules(customRules, formFields);
@@ -435,6 +454,7 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
     // Same REPLACE contract as eligibility: always sent, always complete, so
     // deleting the last custom field actually clears it server-side.
     formFields: serializeFormFields(formFields),
+    applicationForm: { phone: phonePolicy },
     scoringWeights: {
       correctness: correctnessWeight,
       depth: depthWeight,
@@ -477,6 +497,7 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
     setStep(next);
     setMaxStep((prev) => Math.max(prev, next));
   };
+
 
   // Which steps the stepper allows jumping to right now.
   //  • Edit mode: any step — everything already has a saved value.
@@ -576,7 +597,11 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
         {/* Stepper */}
         <div className="mb-6 flex items-center gap-0">
           {STEPS.map(([t, sub], i) => {
-            const done = i < step;
+            // A passed step only shows its green check when it actually
+            // VALIDATES: the cross-step jump links can leave a step behind
+            // with errors outstanding, and a tick over a broken step would
+            // claim a check nobody passed.
+            const done = i < step && stepValid[i];
             const cur = i === step;
             // Edit mode unlocks every step; create mode only the reached ones.
             const reachable = isEdit || i <= maxStep;
@@ -682,7 +707,20 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
               customChecks={customChecks}
               setCustomChecks={setCustomChecks}
               customCheckErrors={customCheckErrors}
-              asksRelocation={workMode !== "remote" && city.trim().length > 0}
+              asksCity={workMode !== "remote" && city.trim().length > 0}
+              cityGatePossible={workMode !== "remote"}
+              // The relocation question additionally follows the
+              // "consider relocators" checkbox: off = mismatches hard-reject
+              // whatever they answer, so the question is not asked at all.
+              asksRelocation={
+                workMode !== "remote" &&
+                city.trim().length > 0 &&
+                considerRelocators
+              }
+              phonePolicy={phonePolicy}
+              setPhonePolicy={setPhonePolicy}
+              customRules={customRules}
+              onGoToEligibility={() => goToStep(3)}
             />
           ) : null}
 
@@ -713,15 +751,12 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
               workMode={workMode}
               considerRelocators={considerRelocators}
               setConsiderRelocators={setConsiderRelocators}
-              minYearsExperience={minYearsExperience}
-              setMinYearsExperience={setMinYearsExperience}
-              minYearsError={minYearsError}
-              requiredSkills={requiredSkills}
-              setRequiredSkills={setRequiredSkills}
               formFields={formFields}
+              customChecks={customChecks}
               customRules={customRules}
               setCustomRules={setCustomRules}
               customRuleErrors={customRuleErrors}
+              onGoToFormStep={() => goToStep(2)}
             />
           ) : null}
         </div>
@@ -1064,39 +1099,122 @@ function ApplicationFormStep({
   customChecks,
   setCustomChecks,
   customCheckErrors,
+  asksCity,
+  cityGatePossible,
   asksRelocation,
+  phonePolicy,
+  setPhonePolicy,
+  customRules,
+  onGoToEligibility,
 }: {
   formFields: FormFieldDraft[];
   setFormFields: (v: FormFieldDraft[]) => void;
-  formFieldErrors: string[];
+  formFieldErrors: DraftError[];
   customChecks: CheckDraft[];
   setCustomChecks: (v: CheckDraft[]) => void;
-  customCheckErrors: string[];
+  customCheckErrors: DraftError[];
+  asksCity: boolean;
+  /** Not remote: a city gate could be set, so the preview shows a ghost row. */
+  cityGatePossible: boolean;
   asksRelocation: boolean;
+  phonePolicy: ApplicationPhonePolicy;
+  setPhonePolicy: (v: ApplicationPhonePolicy) => void;
+  /** Read-only here: lets field cards say which requirements screen them. */
+  customRules: RuleDraft[];
+  onGoToEligibility: () => void;
 }) {
   const errors = [...formFieldErrors, ...customCheckErrors];
+  const errorCardIds = new Set(errors.map((e) => e.cardId));
+  // The accordion cursor lives here, not in the editor, so a clicked
+  // validation error can open the collapsed card it points at.
+  const [openFieldId, setOpenFieldId] = useState<string | null>(null);
+  // fieldId -> the labels of the Eligibility-step requirements that check
+  // it, so a field card can state its answer's consequence (or lack of one).
+  const ruleLabelsByFieldId = new Map<string, string[]>();
+  for (const rule of customRules) {
+    for (const condition of rule.conditions) {
+      if (!condition.fieldId) continue;
+      const labels = ruleLabelsByFieldId.get(condition.fieldId) ?? [];
+      labels.push(rule.label);
+      ruleLabelsByFieldId.set(condition.fieldId, labels);
+    }
+  }
   return (
     <div>
       <StepHead
         title="Application form"
         subtitle="What candidates fill in on your careers page. Add your own questions or eligibility checks; screening on your questions' answers is set up on the Eligibility step."
       />
-      <ApplicationFormEditor
-        fields={formFields}
-        onChange={setFormFields}
-        checks={customChecks}
-        onChecksChange={setCustomChecks}
-        asksRelocation={asksRelocation}
+      {/* One column: the compact preview list first (where the old static
+          "Always asked" section sat), then the fixed-field knobs, then the
+          editor. Every change re-renders the preview from the same state,
+          so what will publish is never a surprise. */}
+      <div className="grid gap-3">
+        <ApplyFormPreview
+          fields={formFields}
+          checks={customChecks}
+          asksRelocation={asksRelocation}
+          asksCity={asksCity}
+          cityGatePossible={cityGatePossible}
+          phonePolicy={phonePolicy}
+        />
+
+        {/* The one fixed-field knob. Name and email stay hardcoded
+            (identity + the delivery channel), the CV is PDF-only everywhere,
+            and city/relocation follow the Eligibility step. */}
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2.5 rounded-xl border border-[var(--field-border)] bg-surface px-3.5 py-3">
+          <label className="flex items-center gap-2 text-[12.5px] font-semibold text-ink">
+            Phone number:
+            <Select
+              value={phonePolicy}
+              onValueChange={(v) => setPhonePolicy(v as ApplicationPhonePolicy)}
+            >
+              <SelectTrigger
+                aria-label="Phone number policy"
+                className="h-9 w-[150px] rounded-lg border-[var(--field-border)] bg-surface px-3 text-[13px]"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="required">Required</SelectItem>
+                <SelectItem value="optional">Optional</SelectItem>
+                <SelectItem value="off">Not asked</SelectItem>
+              </SelectContent>
+            </Select>
+          </label>
+          <span className="text-[11.5px] text-ink-muted">
+            The city question follows the{" "}
+            <button
+              type="button"
+              onClick={onGoToEligibility}
+              className="font-semibold text-primary hover:underline"
+            >
+              Eligibility step
+            </button>
+            's City setting, and "Would you relocate?" additionally follows
+            its "consider candidates willing to relocate" checkbox.
+          </span>
+        </div>
+
+        <ApplicationFormEditor
+          fields={formFields}
+          onChange={setFormFields}
+          checks={customChecks}
+          onChecksChange={setCustomChecks}
+          ruleLabelsByFieldId={ruleLabelsByFieldId}
+          onGoToEligibility={onGoToEligibility}
+          openFieldId={openFieldId}
+          onOpenFieldChange={setOpenFieldId}
+          errorCardIds={errorCardIds}
+        />
+      </div>
+      <ValidationErrorList
+        errors={errors}
+        onJump={(cardId) => {
+          // Only field cards are an accordion; check cards are always open.
+          if (formFields.some((f) => f.id === cardId)) setOpenFieldId(cardId);
+        }}
       />
-      {errors.length > 0 ? (
-        <ul className="mt-3 grid gap-1">
-          {errors.map((message) => (
-            <li key={message} className={ERROR_CLASS}>
-              {message}
-            </li>
-          ))}
-        </ul>
-      ) : null}
     </div>
   );
 }
@@ -1413,7 +1531,7 @@ function WeightSplitBar({
           {
             label: "Depth",
             value: depth,
-            hint: "Have they lived it — trade-offs, real-world specifics, judgment?",
+            hint: "Have they lived it? Trade-offs, real-world specifics, judgment.",
           },
           {
             label: "Communication",
@@ -1495,7 +1613,7 @@ function ScoringStep({
             <strong className="font-semibold text-ink">
               Communication is weighted 0%.
             </strong>{" "}
-            Spoken clarity won&apos;t affect the score — but answers are still
+            Spoken clarity won&apos;t affect the score, but answers are still
             graded from a speech-to-text transcript, so a candidate who is hard
             to understand will produce a poorer transcript and a less reliable
             correctness score. It is still shown to reviewers, just not counted.
@@ -1603,30 +1721,25 @@ function EligibilityStep({
   workMode,
   considerRelocators,
   setConsiderRelocators,
-  minYearsExperience,
-  setMinYearsExperience,
-  minYearsError,
-  requiredSkills,
-  setRequiredSkills,
   formFields,
+  customChecks,
   customRules,
   setCustomRules,
   customRuleErrors,
+  onGoToFormStep,
 }: {
   city: string;
   setCity: (v: string) => void;
   workMode: string;
   considerRelocators: boolean;
   setConsiderRelocators: (v: boolean) => void;
-  minYearsExperience: string;
-  setMinYearsExperience: (v: string) => void;
-  minYearsError: string;
-  requiredSkills: string[];
-  setRequiredSkills: (v: string[]) => void;
   formFields: FormFieldDraft[];
+  /** Read-only here: summarized in the list, edited on the form step. */
+  customChecks: CheckDraft[];
   customRules: RuleDraft[];
   setCustomRules: (v: RuleDraft[]) => void;
-  customRuleErrors: string[];
+  customRuleErrors: DraftError[];
+  onGoToFormStep: () => void;
 }) {
   // City is picked from a fixed list (shared with /apply so a job's required
   // city and an applicant's stored city are drawn from one vocabulary), with
@@ -1663,8 +1776,18 @@ function EligibilityStep({
     setCity(selected === ANY_CITY_VALUE ? "" : selected);
   };
 
+  // The built-in city gate renders as a card in the same list as the custom
+  // requirement cards below, so its controls copy CustomRulesEditor's
+  // local h-10 idiom rather than the page-wide h-11 FIELD_CLASS: an
+  // off-height control inside an identical card reads as a glitch.
+  const cardFieldCls =
+    "h-10 w-full rounded-lg border border-[var(--field-border)] bg-surface px-3 text-[14px] text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)]";
   const cityTriggerCls =
-    "h-11 rounded-lg border-[var(--field-border)] bg-surface px-3.5 text-[14px]";
+    "h-10 rounded-lg border-[var(--field-border)] bg-surface px-3 text-[13.5px]";
+  const builtInCardCls =
+    "rounded-xl border border-[var(--field-border)] bg-surface-muted p-3.5";
+  const builtInTagCls =
+    "shrink-0 rounded-full bg-accent px-2.5 py-1 text-[11px] font-semibold text-primary";
 
   /*
    * A remote role has no office to come to, so where a candidate lives cannot
@@ -1684,38 +1807,51 @@ function EligibilityStep({
         title="Eligibility & vetting"
         subtitle="The gates the CV pre-screen runs before anyone is invited to interview."
       />
-      <div className="grid gap-4">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <label htmlFor="job-city" className={LABEL_CLASS}>
-              City
+      <p className="mb-3 text-[12px] text-ink-muted">
+        Every gate for this job is listed here: the built-in city card, your
+        eligibility checks (edited on the Application form step), and the
+        requirements you add at the end, which check the answers from your
+        own questions. For each requirement you pick whether a miss rejects
+        the candidate or sends them to your review queue.
+      </p>
+      <div className="grid gap-3">
+        <div className={builtInCardCls}>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <label
+              htmlFor="job-city"
+              className="text-[14px] font-semibold text-ink"
+            >
+              Required city
             </label>
-            {isRemote ? (
-              <p className="rounded-lg border border-dashed border-[var(--field-border)] px-3.5 py-3 text-[13px] text-ink-muted">
-                Not used for remote roles. Nobody is filtered on where they
-                live.
-              </p>
-            ) : (
-              <>
-                <Select value={citySelectValue} onValueChange={handleCityChange}>
-                  <SelectTrigger id="job-city" className={cityTriggerCls}>
-                    <SelectValue placeholder="Any city" />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-72">
-                    <SelectItem value={ANY_CITY_VALUE}>
-                      Any city (no requirement)
+            <span className={builtInTagCls}>Built in</span>
+          </div>
+          {isRemote ? (
+            <p className="rounded-lg border border-dashed border-[var(--field-border)] px-3.5 py-3 text-[13px] text-ink-muted">
+              Not used for remote roles. Nobody is filtered on where they
+              live.
+            </p>
+          ) : (
+            <>
+              <Select value={citySelectValue} onValueChange={handleCityChange}>
+                <SelectTrigger id="job-city" className={cityTriggerCls}>
+                  <SelectValue placeholder="Any city" />
+                </SelectTrigger>
+                <SelectContent className="max-h-72">
+                  <SelectItem value={ANY_CITY_VALUE}>
+                    Any city (no requirement)
+                  </SelectItem>
+                  {PAKISTAN_CITIES.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {c}
                     </SelectItem>
-                    {PAKISTAN_CITIES.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {c}
-                      </SelectItem>
-                    ))}
-                    <SelectItem value={OTHER_CITY_VALUE}>
-                      Other (not listed)
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-                {isOther ? (
+                  ))}
+                  <SelectItem value={OTHER_CITY_VALUE}>
+                    Other (not listed)
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              {isOther ? (
+                <>
                   <input
                     ref={otherCityRef}
                     type="text"
@@ -1724,113 +1860,115 @@ function EligibilityStep({
                     onChange={(e) => setCity(e.target.value)}
                     placeholder="Enter the required city"
                     aria-label="Enter the required city"
-                    className={`${FIELD_CLASS} mt-2`}
+                    className={`${cardFieldCls} mt-2`}
                   />
-                ) : null}
-                <p className={HELP_CLASS}>
-                  A hard gate, pick “Any city” for no city requirement.
-                </p>
-                {/* Only meaningful once there IS a city to be in the wrong one
-                    of. Hidden rather than disabled on "Any city", because a
-                    live control that governs a gate nobody set is noise. */}
-                {city.trim() ? (
-                  <div className="mt-3">
-                    <label
-                      htmlFor="job-consider-relocators"
-                      className="flex cursor-pointer items-center gap-2 text-[13px] font-semibold text-ink"
-                    >
-                      <input
-                        id="job-consider-relocators"
-                        type="checkbox"
-                        checked={considerRelocators}
-                        onChange={(e) =>
-                          setConsiderRelocators(e.target.checked)
-                        }
-                        className="h-3.5 w-3.5 rounded border-[var(--field-border)] accent-[var(--primary)]"
-                      />
-                      Also consider candidates willing to relocate
-                    </label>
+                  {!city.trim() ? (
                     <p className={HELP_CLASS}>
-                      Someone in another city who says they would move goes to
-                      your review queue instead of being rejected. They are
-                      never auto-invited. Turn this off if the role needs
-                      someone already living there.
+                      Empty means any city. Type the required city to set the
+                      gate.
                     </p>
-                  </div>
-                ) : null}
-              </>
-            )}
-          </div>
-          <div>
-            <label htmlFor="job-min-years" className={LABEL_CLASS}>
-              Minimum years of experience
-            </label>
-            <input
-              id="job-min-years"
-              type="number"
-              min={0}
-              value={minYearsExperience}
-              aria-invalid={Boolean(minYearsError)}
-              onWheel={blurOnWheel}
-              onChange={(e) => setMinYearsExperience(e.target.value)}
-              placeholder="No minimum"
-              className={FIELD_CLASS}
-            />
-            {minYearsError ? (
-              <p className={ERROR_CLASS}>{minYearsError}</p>
-            ) : (
+                  ) : null}
+                </>
+              ) : null}
               <p className={HELP_CLASS}>
-                A hard gate, counted from the CV&apos;s work history.
+                {city.trim()
+                  ? "If not met, the candidate is rejected automatically, unless you allow relocators below."
+                  : "No city requirement is set. Pick a city to gate on where candidates live."}
               </p>
-            )}
-          </div>
+              {/* Only meaningful once there IS a city to be in the wrong one
+                  of. Hidden rather than disabled on "Any city", because a
+                  live control that governs a gate nobody set is noise. */}
+              {city.trim() ? (
+                <div className="mt-3">
+                  <label
+                    htmlFor="job-consider-relocators"
+                    className="flex cursor-pointer items-center gap-2 text-[13px] font-semibold text-ink"
+                  >
+                    <input
+                      id="job-consider-relocators"
+                      type="checkbox"
+                      checked={considerRelocators}
+                      onChange={(e) =>
+                        setConsiderRelocators(e.target.checked)
+                      }
+                      className="h-3.5 w-3.5 rounded border-[var(--field-border)] accent-[var(--primary)]"
+                    />
+                    Also consider candidates willing to relocate
+                  </label>
+                  <p className={HELP_CLASS}>
+                    Someone in another city who says they would move goes to
+                    your review queue instead of being rejected. They are
+                    never auto-invited. Turn this off if the role needs
+                    someone already living there.
+                  </p>
+                </div>
+              ) : null}
+            </>
+          )}
         </div>
 
-        <div>
-          <label htmlFor="job-skills" className={LABEL_CLASS}>
-            Required skills
-          </label>
-          <ChipInput
-            id="job-skills"
-            values={requiredSkills}
-            onChange={setRequiredSkills}
-            placeholder="Type a skill and press Enter"
-          />
-          <p className={HELP_CLASS}>
-            A hard gate: the AI checks the CV for every skill listed. Any
-            spelling counts (Node = NodeJS = Node.js). A skill it finds no
-            evidence of rejects the candidate; an unsure call goes to review
-            instead.
-          </p>
-        </div>
+        {/* The job's eligibility checks, read-only: they EDIT on the
+            Application form step (HR thinks of a check as part of building
+            the application), but they are gates, so hiding them here made
+            "every gate is listed here" a lie and fed the two-step
+            confusion. Each card links back to where it edits. */}
+        {customChecks.map((check) => {
+          const modeLabel = !check.modeChosen
+            ? "Mode not chosen yet"
+            : check.kind === "criterion"
+              ? "AI judges the CV"
+              : check.source === "form"
+                ? "Asked on the application form"
+                : "Read from the CV";
+          return (
+            <div key={check.id} className={builtInCardCls}>
+              <div className="flex flex-wrap items-center gap-2.5">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-accent text-primary">
+                  <ShieldCheck className="h-3.5 w-3.5" strokeWidth={1.9} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[14px] font-semibold text-ink">
+                    {check.label.trim() || "Untitled check"}
+                  </span>
+                  <span className="block text-[11.5px] text-ink-subtle">
+                    {modeLabel}
+                    {check.modeChosen
+                      ? check.onFail === "reject"
+                        ? ". If not met: rejects automatically."
+                        : ". If not met: goes to your review queue."
+                      : ""}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={onGoToFormStep}
+                  className="shrink-0 text-[12.5px] font-semibold text-primary hover:underline"
+                >
+                  Edit on the Application form step
+                </button>
+              </div>
+            </div>
+          );
+        })}
 
-        {/* The hardcoded salary + university built-in checks that once sat
-            here are gone: an "Eligibility check" (Application form step)
-            covers the university-style accepted list, and a number field
-            plus a Custom requirement below covers a salary ceiling. */}
-        <div className="border-t border-[var(--field-border)] pt-4">
-          <label className={LABEL_CLASS}>Custom requirements</label>
-          <p className="mb-3 text-[12px] text-ink-muted">
-            Your own pass/fail checks on the answers from the Application form
-            step. A candidate who misses one is rejected or sent to your
-            review queue, whichever you pick per requirement.
-          </p>
-          <CustomRulesEditor
-            rules={customRules}
-            onChange={setCustomRules}
-            fields={formFields}
-          />
-          {customRuleErrors.length > 0 ? (
-            <ul className="mt-3 grid gap-1">
-              {customRuleErrors.map((message) => (
-                <li key={message} className={ERROR_CLASS}>
-                  {message}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
+        {/* The salary + university + required-skills + minimum-years
+            built-ins that once sat here are gone: an "Eligibility check"
+            (Application form step) covers the university-style accepted list
+            AND, via its AI-judged criterion mode, a must-have skill or an
+            experience bar; a number field plus a requirement below covers a
+            salary ceiling or self-reported years. City stays built in
+            because nothing generic can replace it: the city gate is what
+            asks the city question, runs the relocation flow and the CV
+            country cross-check. */}
+        <CustomRulesEditor
+          rules={customRules}
+          onChange={setCustomRules}
+          fields={formFields}
+          onGoToFormStep={onGoToFormStep}
+          errorCardIds={new Set(customRuleErrors.map((e) => e.cardId))}
+        />
       </div>
+      <ValidationErrorList errors={customRuleErrors} />
     </div>
   );
 }

@@ -194,10 +194,10 @@ export interface CandidateBase {
   jobId: string
   fullName: string
   email: string
-  /** Required at every write path — never empty on a row created since. */
-  phone: string
-  /** Required at every write path. Stored lowercased; re-case for display. */
-  city: string
+  /** Null when the job's form did not collect one (per-job phone policy). */
+  phone: string | null
+  /** Null when the job asks no city (no location gate). Stored lowercased. */
+  city: string | null
   /** S3 key, never a URL. `null` ⇒ no CV on file ⇒ the Open-CV action is hidden. */
   cvKey: string | null
   /** Computed from the parsed CV's work history; `null` until the parse lands. */
@@ -291,6 +291,8 @@ export interface CandidateAnswer {
     | "checkbox"
     | "date"
     | "url"
+    | "file"
+  /** For a `file` answer the string is the document's S3 key. */
   value: string | number | boolean | string[]
 }
 
@@ -406,10 +408,10 @@ export interface KanbanCard {
   _id: string
   fullName: string
   email: string
-  /** Required at every write path — never empty on a row created since. */
-  phone: string
-  /** Required at every write path. Stored lowercased; re-case for display. */
-  city: string
+  /** Null when the job's form did not collect one (per-job phone policy). */
+  phone: string | null
+  /** Null when the job asks no city (no location gate). Stored lowercased. */
+  city: string | null
   yearsOfExperience: number | null
   attemptCount: number
   latestInterviewId: string | null
@@ -449,10 +451,12 @@ export interface KanbanBoard {
 // ── bulk CV import ────────────────────────────────────────────────────
 
 /**
- * The only CV mime type the funnel accepts — PDF only, matching the
- * backend's ALLOWED_CV_CONTENT_TYPES (Word support was dropped
- * platform-wide). Enforced by the presign DTO (`@IsIn`), so filtering
- * client-side is a courtesy, not the gate.
+ * The only CV mime type the funnel accepts — PDF only, everywhere, matching
+ * the backend's ALLOWED_CV_CONTENT_TYPES (a per-job Word opt-in existed for
+ * one day and was removed on request). Enforced by the presign DTO
+ * (`@IsIn`), so filtering client-side is a courtesy, not the gate. The
+ * EXTRA-document file fields keep their own per-field formats; this governs
+ * the CV alone.
  */
 export const ALLOWED_CV_CONTENT_TYPES = ["application/pdf"] as const
 
@@ -480,10 +484,13 @@ export interface PresignedCvUpload {
 export interface BulkConfirmRow {
   fullName: string
   email: string
-  /** Required server-side (`@IsNotEmpty`) — an empty string is a 400. */
-  phone: string
-  /** Required server-side: the job's city gate compares against it. */
-  city: string
+  /** Optional: a blank stores null (the phone policy is candidate-facing). */
+  phone?: string
+  /**
+   * Required exactly when the target job GATES on a city (the server skips
+   * the row as `missing_city` otherwise); omitted stores null.
+   */
+  city?: string
   cvKey: string
 }
 

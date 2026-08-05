@@ -142,6 +142,22 @@ export async function getCandidateCvUrl(candidateId: string) {
 }
 
 /**
+ * Presigned GET for one FILE-field answer (the extra documents the job's
+ * application form collected). Same contract as the CV download above:
+ * short-lived, attachment-forced for anything that is not a PDF.
+ */
+export async function getCandidateAnswerFileUrl(
+  candidateId: string,
+  fieldId: string
+) {
+  const { data } = await api.get<{ downloadUrl: string; expiresIn: number }>(
+    `/admin/candidates/${candidateId}/answer-file-url`,
+    { params: { fieldId } }
+  )
+  return data
+}
+
+/**
  * Mint a short-lived, inline CV view URL. Returns a RELATIVE path
  * (`/cv/<id>/<name>?t=<token>`) that `fetchCandidateCvBlobUrl` resolves against
  * the backend API origin — the same host every other call uses — so the backend
