@@ -381,7 +381,14 @@ export interface CandidateActivity {
   /** Interview attempt the event belongs to; null = pre-attempt lifecycle. */
   attemptNumber: number | null
   actorType: CandidateActivityActor
-  /** Frozen at write time (an email for users), so renames/deletes don't blank history. */
+  /**
+   * The acting user's id when `actorType === "user"`, else null. Present so a
+   * row can be marked as the VIEWER's own ("You"); `actorName` cannot do that
+   * job, being a non-unique display string, so matching on it would label a
+   * namesake's remark as yours.
+   */
+  actorId: string | null
+  /** Frozen at write time, so renames/deletes don't blank history. */
   actorName: string | null
   note: string | null
   meta: Record<string, unknown> | null

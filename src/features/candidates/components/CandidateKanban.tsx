@@ -16,10 +16,15 @@ import {
 } from "@dnd-kit/core"
 import { Loader2 } from "lucide-react"
 import {
+  addCandidateRemark,
   getCandidateKanban,
   updateCandidateStatus,
 } from "@/features/candidates/candidatesApi"
-import { invalidateCandidateData } from "@/features/candidates/candidatesCache"
+import {
+  invalidateCandidateData,
+  remarksQueryKey,
+} from "@/features/candidates/candidatesCache"
+import { RemarkDialog } from "@/features/candidates/components/RemarkDialog"
 import { manualMoveBlocker } from "@/features/candidates/manualMove"
 import { useAuth } from "@/features/auth/AuthContext"
 import { canManageFunnel } from "@/features/auth/roles"
@@ -83,8 +88,13 @@ export function CandidateKanban({ jobId, onOpenCandidate }: Props) {
    * "Showing 25 of N" footers stay truthful mid-drag.
    */
   const moveMutation = useMutation({
-    mutationFn: (vars: { candidateId: string; statusKey: string; fromKey: string }) =>
-      updateCandidateStatus(vars.candidateId, { statusKey: vars.statusKey }),
+    mutationFn: (vars: {
+      candidateId: string
+      statusKey: string
+      fromKey: string
+      /** For the follow-up remark offer below — never sent to the server. */
+      name: string
+    }) => updateCandidateStatus(vars.candidateId, { statusKey: vars.statusKey }),
     onMutate: async (vars) => {
       await queryClient.cancelQueries({ queryKey: kanbanQueryKey(jobId) })
       const previous = queryClient.getQueryData<KanbanBoard>(kanbanQueryKey(jobId))
@@ -116,6 +126,42 @@ export function CandidateKanban({ jobId, onOpenCandidate }: Props) {
       })
       return { previous }
     },
+    onSuccess: (_res, vars) => {
+      /*
+       * The drag deliberately does NOT open the remark dialog the status MENU
+       * opens.
+       *
+       * A drag is a spatial, often-repeated gesture — you reorganise a board,
+       * you don't deliberate over each card — and a modal landing under the
+       * cursor at the end of every drop would make the board unusable for the
+       * one thing it is better than the table at. So the move commits
+       * instantly and the remark is OFFERED instead: same feature, same
+       * moment, no toll on the gesture.
+       *
+       * The offer lives on the toast because that is already where the
+       * outcome is reported, so it costs no new surface and no new decision
+       * point. Missing it is harmless — the Remarks tab is always there.
+       */
+      const label =
+        data?.columns.find((c) => c.key === vars.statusKey)?.label ?? "the new stage"
+      toast((t) => (
+        <span className="flex items-center gap-3">
+          <span>
+            Moved to <span className="font-semibold">{label}</span>
+          </span>
+          <button
+            type="button"
+            className="shrink-0 rounded-md border border-border px-2 py-1 text-[12px] font-semibold text-ink hover:bg-surface-3"
+            onClick={() => {
+              toast.dismiss(t.id)
+              setRemarkTarget({ id: vars.candidateId, name: vars.name })
+            }}
+          >
+            Add remark
+          </button>
+        </span>
+      ))
+    },
     onError: (err, _vars, context) => {
       if (context?.previous) {
         queryClient.setQueryData(kanbanQueryKey(jobId), context.previous)
@@ -127,6 +173,29 @@ export function CandidateKanban({ jobId, onOpenCandidate }: Props) {
       // candidate-derived rows through different keys — fan out to every one.
       invalidateCandidateData(queryClient)
     },
+  })
+
+  /** Standalone-remark target, set from the post-move toast above. */
+  const [remarkTarget, setRemarkTarget] = useState<{
+    id: string
+    name: string
+  } | null>(null)
+
+  const remarkMutation = useMutation({
+    mutationFn: (vars: { candidateId: string; note: string }) =>
+      addCandidateRemark(vars.candidateId, vars.note),
+    onSuccess: (_res, vars) => {
+      toast.success("Remark saved.")
+      setRemarkTarget(null)
+      // Targeted, unlike a status move: a remark changes nothing about the
+      // board, the lists or the KPI panels, so the full candidate fan-out
+      // would refetch a page of surfaces for a row none of them render.
+      queryClient.invalidateQueries({ queryKey: remarksQueryKey(vars.candidateId) })
+      queryClient.invalidateQueries({
+        queryKey: ["candidateActivities", vars.candidateId],
+      })
+    },
+    onError: (err) => toast.error(errorMessage(err, "Could not save your remark.")),
   })
 
   const handleDragStart = (event: DragStartEvent) => {
@@ -156,6 +225,7 @@ export function CandidateKanban({ jobId, onOpenCandidate }: Props) {
       candidateId: meta.card._id,
       statusKey: toKey,
       fromKey: meta.fromKey,
+      name: meta.card.fullName || "this candidate",
     })
   }
 
@@ -235,6 +305,23 @@ export function CandidateKanban({ jobId, onOpenCandidate }: Props) {
       <DragOverlay>
         {draggingCard ? <CardBody card={draggingCard} dragging /> : null}
       </DragOverlay>
+
+      {/* Opened from the post-move toast. The move is already committed, so
+          this writes a STANDALONE remark rather than a transition note — the
+          same row the drawer's composer writes. */}
+      <RemarkDialog
+        open={Boolean(remarkTarget)}
+        onOpenChange={(open) => {
+          if (!open) setRemarkTarget(null)
+        }}
+        mode={remarkTarget ? { kind: "remark" } : null}
+        candidateName={remarkTarget?.name}
+        pending={remarkMutation.isPending}
+        onSubmit={(note) => {
+          if (remarkTarget)
+            remarkMutation.mutate({ candidateId: remarkTarget.id, note })
+        }}
+      />
     </DndContext>
   )
 }

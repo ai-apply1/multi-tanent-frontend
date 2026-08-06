@@ -35,6 +35,40 @@ export function formatDate(value?: string | null, timeZone?: string): string {
   return date.toLocaleDateString(undefined, options);
 }
 
+/**
+ * Elapsed time — "just now", "12m ago", "3h ago", "yesterday", "Mar 4".
+ *
+ * For CONVERSATIONAL surfaces (the candidate remarks thread), where "how
+ * long ago" is what you actually want to know and a full timestamp on every
+ * row is noise you have to subtract dates in your head to read. Always pair
+ * it with the exact `formatDateTime` in a `title`, so precision is one hover
+ * away and never lost.
+ *
+ * Falls back to an absolute date past a week: "23d ago" is arithmetic, not
+ * information, and by then the calendar date is the more useful anchor.
+ * A future timestamp (clock skew between the server and this browser) reads
+ * as "just now" rather than a nonsensical negative.
+ */
+export function formatRelativeTime(
+  value?: string | null,
+  timeZone?: string
+): string {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+
+  const seconds = Math.round((Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days}d ago`;
+  return formatDate(value, timeZone);
+}
+
 /** Date + time — "Mar 04, 2026, 09:15 AM". For audit-ish columns. */
 export function formatDateTime(value?: string | null, timeZone?: string): string {
   if (!value) return "-";
