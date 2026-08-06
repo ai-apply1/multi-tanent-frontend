@@ -26,6 +26,7 @@ export async function listScreeningQuestions(
         ...(params.difficultyLevel
           ? { difficultyLevel: params.difficultyLevel }
           : {}),
+        ...(params.language ? { language: params.language } : {}),
         ...(params.categoryId ? { categoryId: params.categoryId } : {}),
         ...(params.tags?.length ? { tags: params.tags } : {})
       },

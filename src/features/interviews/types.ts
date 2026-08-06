@@ -5,6 +5,8 @@
  * anything absent here is genuinely not on the wire.
  */
 
+import type { InterviewLanguage } from "@/features/jobs/types"
+
 /** Candidate-facing lifecycle of one attempt. */
 export type InterviewStatus = "pending" | "in_progress" | "submitted" | "expired"
 
@@ -319,6 +321,18 @@ export interface AdminInterviewQuestionItem {
   weightPct: number
   transcript: string
   skipped: boolean
+  /**
+   * What language the transcriber judged the ANSWER to actually be in — a raw
+   * detector output, not the `InterviewLanguage` union, so never index a label
+   * map with it. Null when detection didn't run or wasn't confident.
+   */
+  detectedLanguage?: string | null
+  /**
+   * The candidate answered this one primarily in a language other than the
+   * interview's, and the score below is already penalized for it. Surface it
+   * next to the transcript, or a low score reads as a wrong answer.
+   */
+  languageMismatch?: boolean
   /** Headline per-question blend, 0–10; null until scored. */
   score: number | null
   feedback: string
@@ -395,6 +409,12 @@ export interface AdminInterviewDetail {
   status: InterviewStatus
   attemptNumber: number
   isLatestAttempt: boolean
+  /**
+   * The language this attempt was conducted in, frozen from the job at invite
+   * time. Optional because attempts that predate the feature carry nothing;
+   * treat a missing value as `en`.
+   */
+  language?: InterviewLanguage
   scoringStatus: ScoringStatus
   /** Short failure message when scoring `failed` / `needs_review`; else ''. */
   scoringError: string

@@ -16,6 +16,10 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  INTERVIEW_LANGUAGE_LABELS,
+  type InterviewLanguage,
+} from "@/features/jobs/types"
 import { listScreeningQuestions } from "@/features/screening-questions/screeningQuestionsApi"
 import {
   allAudioReady,
@@ -71,6 +75,11 @@ interface AddJobQuestionsDialogProps {
   onOpenChange: (open: boolean) => void
   /** Already-attached bank ids — the same question twice is a 422. */
   attachedIds: string[]
+  /**
+   * The job's interview language. Bank rows in any OTHER language are shown
+   * but not selectable — one interview is never mixed-language.
+   */
+  jobLanguage: InterviewLanguage
   /** Appends the picks to the job's list, in the order they were selected. */
   onAdd: (questions: ScreeningQuestion[]) => void
   saving: boolean
@@ -80,7 +89,9 @@ interface AddJobQuestionsDialogProps {
  * Pick questions from the org's bank to append to a job's interview script.
  * Already-attached rows are shown as disabled rather than hidden — the absence
  * of a question you expected reads as "already on this job" instead of a
- * broken filter.
+ * broken filter. Questions in another LANGUAGE are shown the same way, for the
+ * same reason: a bank filtered silently down to one language looks empty or
+ * broken, where a greyed row with a reason on it explains itself.
  *
  * Rows show the bank's FIRST wording. A candidate may be asked any of the
  * question's variants — picking one here picks all of them.
@@ -89,6 +100,7 @@ export function AddJobQuestionsDialog({
   open,
   onOpenChange,
   attachedIds,
+  jobLanguage,
   onAdd,
   saving,
 }: AddJobQuestionsDialogProps) {
@@ -141,6 +153,10 @@ export function AddJobQuestionsDialog({
     // here the same way already-attached rows are blocked; the row also shows
     // why (see the render).
     if (!allAudioReady(question)) return
+    // Third gate, alongside already-attached and no-audio: the job is
+    // conducted in ONE language, so a question written in another can't be
+    // asked in it. The row shows why (see the render).
+    if (question.language !== jobLanguage) return
     setSelected((prev) =>
       prev.some((q) => q._id === question._id)
         ? prev.filter((q) => q._id !== question._id)
@@ -217,8 +233,10 @@ export function AddJobQuestionsDialog({
         </div>
 
         <p className="px-6 pt-1 text-[11.5px] text-ink-muted">
-          Questions whose voice audio isn't generated yet can't be added —
-          generate it from the question bank first.
+          This interview is held in{" "}
+          {INTERVIEW_LANGUAGE_LABELS[jobLanguage] ?? jobLanguage}. Only
+          questions in that language, with their voice audio already generated
+          in the bank, can be added.
         </p>
 
         <div className="grid max-h-[420px] min-h-0 flex-1 gap-2 overflow-auto px-6 py-2">
@@ -242,12 +260,14 @@ export function AddJobQuestionsDialog({
             rows.map((question) => {
               const isAttached = attached.has(question._id)
               const isSelected = selectedSet.has(question._id)
-              // Gate on audio only for rows not already attached — an attached
-              // question keeps its own greyed treatment regardless.
+              // Gate on language/audio only for rows not already attached — an
+              // attached question keeps its own greyed treatment regardless.
+              const wrongLanguage =
+                !isAttached && question.language !== jobLanguage
               const noAudio = !isAttached && !allAudioReady(question)
               const generating =
                 noAudio && generatingVariants(question).length > 0
-              const disabled = isAttached || noAudio
+              const disabled = isAttached || wrongLanguage || noAudio
               const chip = DIFFICULTY_CHIP[question.difficultyLevel]
               return (
                 <label
@@ -293,6 +313,17 @@ export function AddJobQuestionsDialog({
                       {isAttached ? (
                         <span className="text-[11.5px] text-ink-subtle">
                           · already attached
+                        </span>
+                      ) : wrongLanguage ? (
+                        // Ahead of the audio note: a question in the wrong
+                        // language is unusable here whatever its audio says,
+                        // so pointing at the clip would send HR to fix the
+                        // wrong thing.
+                        <span className="text-[11.5px] font-medium text-[var(--warning)]">
+                          · wrong language
+                          {question.language
+                            ? ` (${INTERVIEW_LANGUAGE_LABELS[question.language]})`
+                            : ""}
                         </span>
                       ) : noAudio ? (
                         <span className="text-[11.5px] font-medium text-[var(--warning)]">

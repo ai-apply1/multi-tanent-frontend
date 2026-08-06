@@ -15,6 +15,10 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { ErrorBoundary } from "@/components/common/ErrorBoundary"
 import { CategoryPicker } from "@/features/question-categories/components/CategoryPicker"
+import {
+  INTERVIEW_LANGUAGE_LABELS,
+  type InterviewLanguage
+} from "@/features/jobs/types"
 import { TagsInput } from "@/features/screening-questions/components/TagsInput"
 import { VariantAudioStatus } from "@/features/screening-questions/components/VariantAudioStatus"
 import {
@@ -41,6 +45,19 @@ import { errorMessage as apiError } from "@/lib/errors"
 
 /** How often to re-check while a clip is still being generated. */
 const AUDIO_POLL_MS = 2000
+
+const INTERVIEW_LANGUAGES = Object.keys(
+  INTERVIEW_LANGUAGE_LABELS
+) as InterviewLanguage[]
+
+/**
+ * What a NEW question is filed under until the author says otherwise. Unlike
+ * `difficultyLevel` — which is deliberately left blank so the operator has to
+ * choose — a language default is safe: the wording they are about to type is
+ * overwhelmingly English, and the field is impossible to leave unset anyway
+ * (a segmented control has no empty state).
+ */
+const DEFAULT_LANGUAGE: InterviewLanguage = "en"
 
 interface QuestionFormDialogProps {
   open: boolean
@@ -94,6 +111,9 @@ export function QuestionFormDialog({
   // choose for the user (and the schema default only applies to writes the
   // DTO never lets through).
   const [difficulty, setDifficulty] = useState<DifficultyLevel | "">("")
+  // The language every wording here is written in. It decides which JOBS can
+  // attach this question, so it is a property of the question, not a hint.
+  const [language, setLanguage] = useState<InterviewLanguage>(DEFAULT_LANGUAGE)
   const [categoryId, setCategoryId] = useState<string | null>(null)
   const [tags, setTags] = useState<string[]>([])
   /** How many drafts to ask for. Fewer may come back — see the suggest call. */
@@ -130,6 +150,9 @@ export function QuestionFormDialog({
         : [{ text: "", retired: false }]
     )
     setDifficulty(question?.difficultyLevel ?? "")
+    // `?? DEFAULT_LANGUAGE` also covers a legacy row saved before the field
+    // existed, which the backend reports as `en` anyway.
+    setLanguage(question?.language ?? DEFAULT_LANGUAGE)
     setCategoryId(question?.categoryId ?? null)
     setTags(question?.tags ?? [])
     setSuggestCount(DEFAULT_SUGGEST_COUNT)
@@ -155,6 +178,7 @@ export function QuestionFormDialog({
             retired: v.retired
           })),
           difficultyLevel: difficulty,
+          language,
           categoryId: categoryId ?? null,
           tags,
         })
@@ -164,6 +188,7 @@ export function QuestionFormDialog({
         // all live, and the UI doesn't offer the toggle before first save.
         variants: drafts.map((v) => v.text.trim()),
         difficultyLevel: difficulty,
+        language,
         ...(categoryId ? { categoryId } : {}),
         tags,
       })
@@ -264,6 +289,10 @@ export function QuestionFormDialog({
       suggestQuestionVariants({
         sourceText: variants[0]?.text.trim() ?? "",
         ...(difficulty ? { difficultyLevel: difficulty } : {}),
+        // Sent so synonyms come back in the question's OWN language rather
+        // than whatever the model infers from the source text — which for a
+        // one-line prompt is often just English.
+        language,
         count: askFor
       }),
     onSuccess: (fresh) => {
@@ -628,6 +657,40 @@ export function QuestionFormDialog({
                   })}
                 </div>
               </div>
+            </div>
+
+            {/* Language — its own full-width row rather than a third column
+                above: four options don't fit in a 580px dialog's third of a
+                row, and this gates which JOBS can attach the question, so it
+                shouldn't be the most cramped control on the form. */}
+            <div>
+              <label className="mb-1.5 block text-[13px] font-semibold text-ink">
+                Language{" "}
+                <span className="font-normal text-ink-subtle">· required</span>
+              </label>
+              <div className="flex gap-2">
+                {INTERVIEW_LANGUAGES.map((l) => {
+                  const active = language === l
+                  return (
+                    <button
+                      key={l}
+                      type="button"
+                      onClick={() => setLanguage(l)}
+                      className={`flex-1 rounded-lg border py-2.5 text-[13px] font-semibold transition-colors ${
+                        active
+                          ? "border-primary bg-accent text-primary"
+                          : "border-line-2 bg-surface text-ink-2 hover:bg-surface-3"
+                      }`}
+                    >
+                      {INTERVIEW_LANGUAGE_LABELS[l]}
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="mt-1.5 text-[12px] text-ink-muted">
+                Write every wording in this language — a job can only attach
+                questions that match its own interview language.
+              </p>
             </div>
 
             {/* Tags */}

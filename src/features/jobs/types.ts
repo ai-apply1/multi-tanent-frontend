@@ -26,6 +26,20 @@ export type SeniorityLevel =
 
 export type DifficultyLevel = "easy" | "medium" | "hard"
 
+/**
+ * The language a job's screening interview is conducted in — the questions are
+ * spoken in it and the candidate is expected to answer in it.
+ *
+ * Set per JOB, and a bank question carries its own language, which is why the
+ * attach dialog can only offer questions whose language matches: a job cannot
+ * mix languages inside one interview. Also the language every downstream AI
+ * step (TTS, transcription, scoring) is told to work in.
+ *
+ * Declared here rather than in the bank's types because a job's language is
+ * the authority — the bank matches it. The bank's types import it from here.
+ */
+export type InterviewLanguage = "en" | "ur" | "ar" | "de"
+
 /** The universal list envelope (`page` min 1, `limit` max 100). */
 export interface Paginated<T> {
   data: T[]
@@ -268,6 +282,12 @@ export interface JobBase {
    * candidate has already been emailed about.
    */
   interviewDurationMinutes: number | null
+  /**
+   * The language the screening interview is conducted in. Always present —
+   * the backend defaults it to `en`, including on jobs saved before the field
+   * existed, so this is never optional on a read.
+   */
+  interviewLanguage: InterviewLanguage
   /** Custom application-form fields, in display order. */
   formFields: JobFormField[]
   /**
@@ -318,6 +338,13 @@ export interface JobQuestionView {
    */
   variantCount: number | null
   difficultyLevel: DifficultyLevel | null
+  /**
+   * The bank row's language. Always equal to the job's own
+   * `interviewLanguage` for anything attachable today (the attach dialog
+   * refuses a mismatch), so it is shown only where a legacy row could still
+   * disagree. `undefined` iff the bank row is gone.
+   */
+  interviewLanguage?: InterviewLanguage
   tags: string[]
 }
 
@@ -377,6 +404,11 @@ export interface CreateJobPayload {
   employmentType: EmploymentType
   workMode: WorkMode
   seniorityLevel: SeniorityLevel
+  /**
+   * Required on create — it decides which bank questions the job can attach,
+   * so a job that hasn't picked one has no attachable question set.
+   */
+  interviewLanguage: InterviewLanguage
   /**
    * REPLACE semantics on PATCH: sending this swaps the WHOLE eligibility
    * block and every omitted sub-field resets to null. Always build it from
@@ -448,6 +480,19 @@ export const WORK_MODE_LABELS: Record<WorkMode, string> = {
   onsite: "On-site",
   remote: "Remote",
   hybrid: "Hybrid",
+}
+
+/**
+ * Every supported interview language, in the order they should be offered.
+ * The wizard and the bank build their dropdowns from `Object.keys` of this
+ * map, so adding a language here is all it takes to offer it — and removing
+ * one silently drops it from every picker.
+ */
+export const INTERVIEW_LANGUAGE_LABELS: Record<InterviewLanguage, string> = {
+  en: "English",
+  ur: "Urdu",
+  ar: "Arabic",
+  de: "German",
 }
 
 export const SENIORITY_LABELS: Record<SeniorityLevel, string> = {

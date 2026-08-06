@@ -13,9 +13,15 @@
        face. Only the family an org actually selects is downloaded (browsers
        fetch @font-face lazily per rendered glyph); listing them here just makes
        every choice available for instant switching. Keep in step with
-       `src/features/organization/fonts.ts`. -->
+       `src/features/organization/fonts.ts`.
+
+       Noto Naskh Arabic is NOT selectable — it is the Arabic-script cover font
+       every stack in `fonts.ts` falls back to, since interviews can be held in
+       Urdu or Arabic and no brand face carries those glyphs. Lazy fetching is
+       what keeps it free: it downloads only for a viewer who actually renders
+       Arabic script. -->
   <link
-    href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700&family=Roboto:wght@400;500;700&family=Lora:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700&family=Roboto:wght@400;500;700&family=Lora:wght@400;500;600;700&family=Noto+Naskh+Arabic:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
     rel="stylesheet" />
   <!-- The PLATFORM's placeholder, not a tenant's. `TenantBrandingProvider`
          replaces this with the org's own name once `GET /org/branding`

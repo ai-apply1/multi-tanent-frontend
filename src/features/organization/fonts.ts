@@ -19,8 +19,21 @@ export interface FontOption {
   stack: string
 }
 
+/**
+ * Arabic-script cover font, first in every fallback chain below.
+ *
+ * None of the curated brand faces carry Arabic or Urdu glyphs, and interviews
+ * can be held in either — so those transcripts fall through the chain per
+ * glyph. Without this the next family that covers the script is the system one
+ * (`system-ui` / Segoe UI), which means the same transcript renders differently
+ * on every operating system. Loaded from Google Fonts in `index.html` like the
+ * brand faces; it never affects Latin text, which the brand face already
+ * covers. Mirrored in the `--font-sans` default in `styles/globals.css`.
+ */
+const ARABIC_FALLBACK = `"Noto Naskh Arabic"`
+
 const SANS_FALLBACK =
-  "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif"
+  `${ARABIC_FALLBACK}, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif`
 
 export const FONT_OPTIONS: readonly FontOption[] = [
   {
@@ -57,7 +70,7 @@ export const FONT_OPTIONS: readonly FontOption[] = [
     id: "lora",
     label: "Lora",
     hint: "Serif",
-    stack: `"Lora", ui-serif, Georgia, Cambria, "Times New Roman", serif`,
+    stack: `"Lora", ${ARABIC_FALLBACK}, ui-serif, Georgia, Cambria, "Times New Roman", serif`,
   },
 ]
 

@@ -47,6 +47,7 @@ import {
 } from "@/features/jobs/jobsApi";
 import {
   EMPLOYMENT_TYPE_LABELS,
+  INTERVIEW_LANGUAGE_LABELS,
   JOB_STATUS_LABELS,
   SENIORITY_LABELS,
   STATUS_TRANSITIONS,
@@ -637,12 +638,17 @@ function JobsTableSkeleton() {
   );
 }
 
-/** The three optional classification chips, or a single `—` when all are null. */
+/** The classification chips, or a single `—` when all of them are null. */
 function JobClassification({ job }: { job: JobListItem }) {
   const chips = [
     job.employmentType ? EMPLOYMENT_TYPE_LABELS[job.employmentType] : null,
     job.workMode ? WORK_MODE_LABELS[job.workMode] : null,
     job.seniorityLevel ? SENIORITY_LABELS[job.seniorityLevel] : null,
+    // Unlike the three above, never null on the wire — but guarded anyway so a
+    // value this build doesn't know about renders nothing instead of "undefined".
+    job.interviewLanguage
+      ? INTERVIEW_LANGUAGE_LABELS[job.interviewLanguage]
+      : null,
   ].filter((c): c is string => Boolean(c));
 
   if (chips.length === 0) {

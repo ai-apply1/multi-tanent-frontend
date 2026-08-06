@@ -375,6 +375,9 @@ export function JobQuestionsManager({ job }: JobQuestionsManagerProps) {
           open={addOpen}
           onOpenChange={setAddOpen}
           attachedIds={draft.map((q) => q.questionId)}
+          // The job decides the language; the dialog can only offer bank rows
+          // that match it, since one interview is never mixed-language.
+          jobLanguage={job.interviewLanguage}
           onAdd={handleAdd}
           saving={mutation.isPending}
         />

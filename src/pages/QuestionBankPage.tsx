@@ -62,6 +62,10 @@ import {
   type DifficultyLevel,
   type ScreeningQuestion,
 } from "@/features/screening-questions/types";
+import {
+  INTERVIEW_LANGUAGE_LABELS,
+  type InterviewLanguage,
+} from "@/features/jobs/types";
 import { useAuth } from "@/features/auth/AuthContext";
 import { canManageFunnel } from "@/features/auth/roles";
 import { errorMessage as apiError } from "@/lib/errors";
@@ -73,6 +77,10 @@ const DEFAULT_PAGE_SIZE = 20;
 
 /** Sentinel for the "no filter" option (Radix Select forbids empty values). */
 const ALL = "all";
+
+const INTERVIEW_LANGUAGES = Object.keys(
+  INTERVIEW_LANGUAGE_LABELS,
+) as InterviewLanguage[];
 
 /** Design-token classes for the difficulty pill. */
 const DIFFICULTY_PILL: Record<DifficultyLevel, string> = {
@@ -94,6 +102,9 @@ export function QuestionBankPage() {
   const [difficultyFilter, setDifficultyFilter] = useState<DifficultyLevel | "">(
     "",
   );
+  const [languageFilter, setLanguageFilter] = useState<InterviewLanguage | "">(
+    "",
+  );
   const [categoryFilter, setCategoryFilter] = useState("");
   const [tagFilter, setTagFilter] = useState<string[]>([]);
   const [formOpen, setFormOpen] = useState(false);
@@ -111,11 +122,16 @@ export function QuestionBankPage() {
   const debouncedSearch = useDebouncedValue(search);
 
   const filtersActive = Boolean(
-    search || difficultyFilter || categoryFilter || tagFilter.length > 0,
+    search ||
+      difficultyFilter ||
+      languageFilter ||
+      categoryFilter ||
+      tagFilter.length > 0,
   );
   const clearFilters = () => {
     setSearch("");
     setDifficultyFilter("");
+    setLanguageFilter("");
     setCategoryFilter("");
     setTagFilter([]);
     setPage(1);
@@ -129,6 +145,7 @@ export function QuestionBankPage() {
         limit: pageSize,
         search: debouncedSearch,
         difficultyLevel: difficultyFilter,
+        language: languageFilter,
         categoryId: categoryFilter,
         tags: tagFilter,
       },
@@ -139,6 +156,7 @@ export function QuestionBankPage() {
         limit: pageSize,
         search: debouncedSearch.trim() || undefined,
         difficultyLevel: difficultyFilter || undefined,
+        language: languageFilter || undefined,
         categoryId: categoryFilter || undefined,
         tags: tagFilter.length > 0 ? tagFilter : undefined,
       }),
@@ -241,7 +259,7 @@ export function QuestionBankPage() {
             {total} {total === 1 ? "question" : "questions"}
           </div>
           <div className="flex-1" />
-          {/* The four filters travel as one group pinned to the right and kept
+          {/* The five filters travel as one group pinned to the right and kept
               on a single line (sm+). Grouping them in a min-w-0 nowrap box lets
               the search and tags fields shrink to absorb tight width — e.g. the
               ~15px a vertical scrollbar steals once the list fills — instead of
@@ -308,6 +326,25 @@ export function QuestionBankPage() {
                 {DIFFICULTY_LEVELS.map((d) => (
                   <SelectItem key={d} value={d}>
                     {DIFFICULTY_LABELS[d]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={languageFilter || ALL}
+              onValueChange={(v) => {
+                setLanguageFilter(v === ALL ? "" : (v as InterviewLanguage));
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="h-[37px] w-[150px] flex-shrink-0 rounded-[9px] border-[var(--field-border)] bg-surface text-[13px]">
+                <SelectValue placeholder="All languages" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>All languages</SelectItem>
+                {INTERVIEW_LANGUAGES.map((l) => (
+                  <SelectItem key={l} value={l}>
+                    {INTERVIEW_LANGUAGE_LABELS[l]}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -385,6 +422,17 @@ export function QuestionBankPage() {
                             title={`Category: ${category}`}
                           >
                             {category}
+                          </span>
+                        ) : null}
+                        {/* Sits with the category pill, not the audio/usage
+                            ones: like the category it says what the question
+                            IS, and it decides which jobs may attach it. */}
+                        {row.language ? (
+                          <span
+                            className="inline-flex items-center rounded-full bg-surface-3 px-2.5 py-0.5 text-[11.5px] font-semibold text-ink-2"
+                            title={`Language: ${INTERVIEW_LANGUAGE_LABELS[row.language]}`}
+                          >
+                            {INTERVIEW_LANGUAGE_LABELS[row.language]}
                           </span>
                         ) : null}
                         <span

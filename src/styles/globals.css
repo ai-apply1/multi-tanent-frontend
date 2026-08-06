@@ -269,9 +269,16 @@
   /* Platform default typeface for the first paint before branding resolves.
      `applyTenantTheme` overrides `--font-sans` with the org's chosen font (this
      is the default, Plus Jakarta Sans, so an unbranded paint already matches
-     the default brand font). See src/features/organization/fonts.ts. */
-  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
-    sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+     the default brand font). See src/features/organization/fonts.ts.
+
+     "Noto Naskh Arabic" sits SECOND, ahead of the system stack: interviews can
+     be held in Urdu or Arabic, and none of the brand faces carry that script,
+     so those transcripts fall through per glyph. Leaving it to `system-ui` /
+     "Segoe UI" means the script renders in whatever the viewer's OS happens to
+     ship — legible on Windows, last-resort elsewhere. Keep the fallback chain
+     here and in `fonts.ts` in step; both feed the same variable. */
+  --font-sans: "Plus Jakarta Sans", "Noto Naskh Arabic", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 

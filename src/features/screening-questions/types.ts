@@ -1,3 +1,10 @@
+// A question's language is the JOB's concept — a job picks one and may only
+// attach questions that match it — so the union and its labels are owned by
+// the job types. Imported, never re-declared: a second copy of the union here
+// is exactly how the two would drift apart. Render sites import
+// `INTERVIEW_LANGUAGE_LABELS` from `@/features/jobs/types` directly.
+import type { InterviewLanguage } from "@/features/jobs/types"
+
 /**
  * Difficulty band of a screening question. Lowercase to match the backend
  * enum (`DifficultyLevel`); use `capitalize` at the render site.
@@ -146,6 +153,14 @@ export interface ScreeningQuestion {
   organizationId: string
   variants: QuestionVariant[]
   difficultyLevel: DifficultyLevel
+  /**
+   * The language every one of this question's wordings is written (and spoken)
+   * in. Always present — the backend defaults legacy rows to `en`.
+   *
+   * A question can only be attached to a job whose `interviewLanguage`
+   * matches, so this is a hard filter on the bank, not a label.
+   */
+  language: InterviewLanguage
   /** Primary category id (from `/admin/question-categories`). Null on legacy rows. */
   categoryId: string | null
   tags: string[]
@@ -190,6 +205,12 @@ export const askableCount = (q: { variants: QuestionVariant[] }): number =>
 export interface CreateScreeningQuestionPayload {
   variants: string[]
   difficultyLevel: DifficultyLevel
+  /**
+   * The language the wordings are written in. Sent on every create — the
+   * dialog defaults it to `en` rather than leaving it to the server, so the
+   * value the author saw is the value that gets stored.
+   */
+  language: InterviewLanguage
   /** Primary category id — sourced from `/admin/question-categories`. */
   categoryId?: string
   tags?: string[]
@@ -215,6 +236,12 @@ export interface UpdateQuestionVariantPayload {
 export interface UpdateScreeningQuestionPayload {
   variants?: UpdateQuestionVariantPayload[]
   difficultyLevel?: DifficultyLevel
+  /**
+   * Optional like everything else on the PATCH — absent leaves it unchanged.
+   * Changing it does NOT translate the stored wordings, so it is only ever a
+   * correction to a question filed under the wrong language.
+   */
+  language?: InterviewLanguage
   /** Send `null` to clear the category. Absent leaves it unchanged. */
   categoryId?: string | null
   tags?: string[]
@@ -224,6 +251,12 @@ export interface UpdateScreeningQuestionPayload {
 export interface SuggestVariantsPayload {
   sourceText: string
   difficultyLevel?: DifficultyLevel
+  /**
+   * The language the drafts must come back in. Sent from the question being
+   * edited, so synonyms of an Urdu question are drafted in Urdu rather than
+   * whatever language the model infers from the source text.
+   */
+  language?: InterviewLanguage
   /** FEWER may come back: drafts that drift in meaning or length are dropped. */
   count?: number
 }
@@ -232,6 +265,11 @@ export interface ListScreeningQuestionsParams {
   /** Case-insensitive substring match on ANY of a question's wordings. */
   search?: string
   difficultyLevel?: DifficultyLevel
+  /**
+   * Filter to one language. The job-attach dialog pins it to the job's own
+   * `interviewLanguage`, since anything else is unattachable there.
+   */
+  language?: InterviewLanguage
   /** Filter to one category id (from `/admin/question-categories`). */
   categoryId?: string
   /**

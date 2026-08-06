@@ -40,6 +40,7 @@ import { getJob, setJobStatus } from "@/features/jobs/jobsApi";
 import {
   EMPLOYMENT_TYPE_LABELS,
   FIELD_TYPE_LABELS,
+  INTERVIEW_LANGUAGE_LABELS,
   JOB_STATUS_LABELS,
   OPERATOR_LABELS,
   SENIORITY_LABELS,
@@ -246,6 +247,11 @@ export function JobDetailPage() {
     job.employmentType ? EMPLOYMENT_TYPE_LABELS[job.employmentType] : null,
     job.workMode ? WORK_MODE_LABELS[job.workMode] : null,
     job.seniorityLevel ? SENIORITY_LABELS[job.seniorityLevel] : null,
+    // Never null on the wire, unlike the three above; guarded so an unknown
+    // value renders nothing rather than "undefined".
+    job.interviewLanguage
+      ? INTERVIEW_LANGUAGE_LABELS[job.interviewLanguage]
+      : null,
   ].filter((c): c is string => Boolean(c));
 
   /*

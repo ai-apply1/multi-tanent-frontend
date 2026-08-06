@@ -57,11 +57,13 @@ import {
 import { createJob, getJob, updateJob } from "@/features/jobs/jobsApi";
 import {
   EMPLOYMENT_TYPE_LABELS,
+  INTERVIEW_LANGUAGE_LABELS,
   SENIORITY_LABELS,
   WORK_MODE_LABELS,
   seniorityExperienceLabel,
   type CreateJobPayload,
   type EmploymentType,
+  type InterviewLanguage,
   type Job,
   type JobEligibilityPayload,
   type SeniorityLevel,
@@ -75,7 +77,7 @@ import { blurOnWheel, cn } from "@/lib/utils";
 /**
  * The not-yet-chosen state for the classification Selects. Empty string, so
  * Radix shows the trigger's `placeholder` — there is deliberately no
- * "Not specified" SelectItem to pick, since all three are required (Radix
+ * "Not specified" SelectItem to pick, since all four are required (Radix
  * forbids `value=""` on an *item*, but the root reads it as "no selection").
  */
 const UNSET = "";
@@ -85,6 +87,9 @@ const EMPLOYMENT_TYPES = Object.keys(
 ) as EmploymentType[];
 const WORK_MODES = Object.keys(WORK_MODE_LABELS) as WorkMode[];
 const SENIORITY_LEVELS = Object.keys(SENIORITY_LABELS) as SeniorityLevel[];
+const INTERVIEW_LANGUAGES = Object.keys(
+  INTERVIEW_LANGUAGE_LABELS,
+) as InterviewLanguage[];
 
 const STEPS: Array<[string, string]> = [
   ["Basics", "Role title & description"],
@@ -225,7 +230,7 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
   const [titleTouched, setTitleTouched] = useState(false);
   const [description, setDescription] = useState(job?.description ?? "");
 
-  // ── Classification. All three required. A job saved before that rule seeds
+  // ── Classification. All four required. A job saved before that rule seeds
   // `UNSET` and has to be classified before it can be saved again.
   const [employmentType, setEmploymentType] = useState<string>(
     job?.employmentType ?? UNSET,
@@ -233,6 +238,12 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
   const [workMode, setWorkMode] = useState<string>(job?.workMode ?? UNSET);
   const [seniorityLevel, setSeniorityLevel] = useState<string>(
     job?.seniorityLevel ?? UNSET,
+  );
+  // The interview's language. Not defaulted to "en" on a NEW job on purpose:
+  // it decides which bank questions the job can attach, so it is a choice the
+  // author makes, not one the form makes quietly on their behalf.
+  const [interviewLanguage, setInterviewLanguage] = useState<string>(
+    job?.interviewLanguage ?? UNSET,
   );
   const [classificationTouched, setClassificationTouched] = useState(false);
 
@@ -309,6 +320,10 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
     classificationTouched && !workMode ? "Pick a work mode." : "";
   const seniorityError =
     classificationTouched && !seniorityLevel ? "Pick a seniority level." : "";
+  const languageError =
+    classificationTouched && !interviewLanguage
+      ? "Pick an interview language."
+      : "";
 
   const parsedRejection = parseOptionalNumber(rejectionThreshold);
   const rejectionError =
@@ -374,7 +389,9 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
   const stepValid = useMemo(
     () => [
       trimmedTitle.length > 0,
-      Boolean(employmentType && workMode && seniorityLevel),
+      Boolean(
+        employmentType && workMode && seniorityLevel && interviewLanguage,
+      ),
       // Everything edited on the Application form step gates THAT step:
       // the fields and HR's eligibility checks.
       formFieldErrors.length === 0 && customCheckErrors.length === 0,
@@ -386,6 +403,7 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
       employmentType,
       workMode,
       seniorityLevel,
+      interviewLanguage,
       formFieldErrors,
       rejectionError,
       maxAttemptsError,
@@ -428,6 +446,7 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
     employmentType: employmentType as EmploymentType,
     workMode: workMode as WorkMode,
     seniorityLevel: seniorityLevel as SeniorityLevel,
+    interviewLanguage: interviewLanguage as InterviewLanguage,
     // ALWAYS sent, and always complete: eligibility is REPLACE-semantics, so
     // an omitted block leaves the old one intact (clearing the last gate would
     // silently no-op) and an omitted sub-field resets to null.
@@ -671,6 +690,9 @@ function JobForm({ job, jobId }: { job: Job | null; jobId?: string }) {
               seniorityLevel={seniorityLevel}
               setSeniorityLevel={setSeniorityLevel}
               seniorityError={seniorityError}
+              interviewLanguage={interviewLanguage}
+              setInterviewLanguage={setInterviewLanguage}
+              languageError={languageError}
             />
           ) : null}
 
@@ -917,6 +939,9 @@ function ClassificationStep({
   seniorityLevel,
   setSeniorityLevel,
   seniorityError,
+  interviewLanguage,
+  setInterviewLanguage,
+  languageError,
 }: {
   employmentType: string;
   setEmploymentType: (v: string) => void;
@@ -927,6 +952,9 @@ function ClassificationStep({
   seniorityLevel: string;
   setSeniorityLevel: (v: string) => void;
   seniorityError: string;
+  interviewLanguage: string;
+  setInterviewLanguage: (v: string) => void;
+  languageError: string;
 }) {
   const triggerCls =
     "h-11 rounded-lg border-[var(--field-border)] bg-surface px-3.5 text-[14px]";
@@ -934,9 +962,9 @@ function ClassificationStep({
     <div>
       <StepHead
         title="Classification"
-        subtitle="All three are required. They label the posting and give the CV pre-screen the role's context."
+        subtitle="All four are required. They label the posting, give the CV pre-screen the role's context, and set the language the interview is held in."
       />
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div>
           <label htmlFor="job-employment" className={LABEL_CLASS}>
             Employment type
@@ -1047,6 +1075,37 @@ function ClassificationStep({
                     seniorityLevel as SeniorityLevel,
                   )} of relevant experience.`
                 : "Sets the experience band the CV pre-screen rates against."}
+            </p>
+          )}
+        </div>
+        <div>
+          <label htmlFor="job-language" className={LABEL_CLASS}>
+            Interview language
+          </label>
+          <Select value={interviewLanguage} onValueChange={setInterviewLanguage}>
+            <SelectTrigger
+              id="job-language"
+              aria-invalid={Boolean(languageError)}
+              className={triggerCls}
+            >
+              <SelectValue placeholder="Select…" />
+            </SelectTrigger>
+            <SelectContent>
+              {INTERVIEW_LANGUAGES.map((l) => (
+                <SelectItem key={l} value={l}>
+                  {INTERVIEW_LANGUAGE_LABELS[l]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {languageError ? (
+            <p className={ERROR_CLASS}>{languageError}</p>
+          ) : (
+            // Mutually exclusive with the error, like Seniority above. Worth
+            // spelling out: this is not just the voice the questions are read
+            // in — it decides which bank questions the job may attach at all.
+            <p className={HELP_CLASS}>
+              Only bank questions in this language can be attached.
             </p>
           )}
         </div>

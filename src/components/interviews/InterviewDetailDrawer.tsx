@@ -133,6 +133,22 @@ import type {
   ScoredAnswer,
   ScoringStatus,
 } from "@/features/interviews/types";
+import {
+  INTERVIEW_LANGUAGE_LABELS,
+  type InterviewLanguage,
+} from "@/features/jobs/types";
+
+/*
+ * Interviews are held in the job's language, so anything the candidate said —
+ * and anything the AI wrote ABOUT what they said — can be Urdu or Arabic while
+ * the dashboard's own chrome stays English.
+ *
+ * Every such render carries `dir="auto"` (and `lang` where the attempt's
+ * language is in scope) so the browser resolves direction per BLOCK from its
+ * first strong character. The document direction is deliberately NOT flipped:
+ * the drawer is a mixed page, and an RTL document would mirror the layout,
+ * the labels and the controls around one Urdu paragraph.
+ */
 
 /**
  * One option in the reattempt version dropdown, e.g. "Attempt 2 (latest)".
@@ -546,6 +562,7 @@ function AiScoreCard({
   recommendation,
   narrative,
   answeredCount,
+  language,
 }: {
   /** 0-10 (backend scale). */
   overall: number;
@@ -553,6 +570,8 @@ function AiScoreCard({
   recommendation: Recommendation;
   narrative: string;
   answeredCount: number;
+  /** The attempt's language — the narrative is written in it. */
+  language?: InterviewLanguage;
 }) {
   // Shared with the candidate tables' score cell. The 0-10 → 0-100 conversion
   // lived only here while the tables had no number at all; now that they do,
@@ -589,7 +608,11 @@ function AiScoreCard({
             <div className="mb-1 text-[13px] font-semibold text-ink-muted">
               Overall score
             </div>
-            <p className="text-[13.5px] leading-[1.55] text-ink-2">
+            <p
+              dir="auto"
+              lang={language}
+              className="text-[13.5px] leading-[1.55] text-ink-2"
+            >
               {narrative || "No narrative available."}
             </p>
           </div>
@@ -936,7 +959,10 @@ function ProfileCard({ profile }: { profile: CandidateProfile | null }) {
         <span className="text-[13.5px] font-bold">Profile</span>
       </div>
       {profile.summary ? (
-        <p className="text-[13px] leading-relaxed text-ink-2">
+        // No `lang`: this comes from the CV, whose language is the
+        // CANDIDATE's choice and unrelated to the interview's — `dir="auto"`
+        // reads it off the text instead of asserting one.
+        <p dir="auto" className="text-[13px] leading-relaxed text-ink-2">
           {profile.summary}
         </p>
       ) : (
@@ -960,7 +986,10 @@ function ProfileCard({ profile }: { profile: CandidateProfile | null }) {
             </span>
           </div>
           {profile.jobFit.summary ? (
-            <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-2">
+            <p
+              dir="auto"
+              className="mt-1.5 text-[12.5px] leading-relaxed text-ink-2"
+            >
               {profile.jobFit.summary}
             </p>
           ) : null}
@@ -1898,6 +1927,19 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                           Reattempted x{attempts.length - 1}
                         </span>
                       ) : null}
+                      {/* English is the default and the overwhelming majority,
+                          so badging it would be noise on nearly every drawer.
+                          The pill exists to warn a reviewer that the
+                          transcripts below are NOT in English. */}
+                      {data?.language && data.language !== "en" ? (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[11px] font-semibold text-ink-muted"
+                          title="Language this interview was conducted in"
+                        >
+                          {INTERVIEW_LANGUAGE_LABELS[data.language] ??
+                            data.language}
+                        </span>
+                      ) : null}
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12.5px] text-ink-muted">
                       {data?.jobTitle ? <span>{data.jobTitle}</span> : null}
@@ -2268,6 +2310,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                           chapters={chapters}
                           playerApiRef={playerApiRef}
                           questions={questions}
+                          language={data.language}
                           candidateName={data.candidateName}
                           retranscoding={retranscoding}
                           onRetranscode={handleRetranscode}
@@ -2315,11 +2358,13 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                                 ""
                               }
                               answeredCount={answeredCount || questions.length}
+                              language={data.language}
                             />
                             <EvaluationTab data={data} />
                             {questions.length > 0 ? (
                               <QuestionBreakdownList
                                 questions={questions}
+                                language={data.language}
                                 scoredByQuestionId={scoredByQuestionId}
                                 hlsReady={hlsReady}
                                 onJump={jumpToRecording}
@@ -2617,8 +2662,13 @@ function EvaluationTab({
           {highlights.length ? (
             <div className="grid gap-2.5">
               {highlights.map((t) => (
+                // `dir="auto"` on the ROW, not the text node: the icon is part
+                // of the line, so in an RTL highlight it has to move to the
+                // right of the sentence with it.
                 <div
                   key={t}
+                  dir="auto"
+                  lang={data.language}
                   className="flex gap-2.5 text-[13px] leading-snug text-ink-2"
                 >
                   <Check
@@ -2651,6 +2701,8 @@ function EvaluationTab({
               {probes.map((t) => (
                 <div
                   key={t}
+                  dir="auto"
+                  lang={data.language}
                   className="flex gap-2.5 text-[13px] leading-snug text-ink-2"
                 >
                   <span
@@ -2757,6 +2809,7 @@ function ResponsesTab({
   chapters,
   playerApiRef,
   questions,
+  language,
   candidateName,
   retranscoding,
   onRetranscode,
@@ -2776,6 +2829,8 @@ function ResponsesTab({
   chapters: Array<{ atSec: number; label: string }>;
   playerApiRef: React.MutableRefObject<VideoPlayerHandle | null>;
   questions: AdminInterviewQuestionItem[];
+  /** The attempt's language — the chapter labels are the questions verbatim. */
+  language?: InterviewLanguage;
   candidateName: string;
   retranscoding: boolean;
   onRetranscode: () => void;
@@ -2923,6 +2978,8 @@ function ResponsesTab({
                   Q{i + 1}
                 </span>
                 <span
+                  dir="auto"
+                  lang={language}
                   className={cn(
                     "flex-1 text-[13px]",
                     isActive
@@ -3362,11 +3419,14 @@ function ActivityTab({
 
 function QuestionBreakdownList({
   questions,
+  language,
   scoredByQuestionId,
   hlsReady,
   onJump,
 }: {
   questions: AdminInterviewQuestionItem[];
+  /** The attempt's language — questions, transcripts and feedback are in it. */
+  language?: InterviewLanguage;
   scoredByQuestionId: Map<string, ScoredAnswer>;
   hlsReady: boolean;
   onJump: (sec: number) => void;
@@ -3388,6 +3448,7 @@ function QuestionBreakdownList({
             key={q.questionId || i}
             index={i}
             question={q}
+            language={language}
             scored={scoredByQuestionId.get(q.questionId)}
             onJump={hlsReady ? onJump : undefined}
           />
@@ -3400,11 +3461,14 @@ function QuestionBreakdownList({
 function AnswerRow({
   index,
   question,
+  language,
   scored,
   onJump,
 }: {
   index: number;
   question: AdminInterviewQuestionItem;
+  /** The attempt's language — what the candidate was SUPPOSED to answer in. */
+  language?: InterviewLanguage;
   scored?: ScoredAnswer;
   onJump?: (sec: number) => void;
 }) {
@@ -3413,6 +3477,20 @@ function AnswerRow({
     question.transcript.trim() === SKIPPED_TRANSCRIPT_MARKER;
   const askedAtSec =
     typeof question.askedAtSec === "number" ? question.askedAtSec : null;
+  // A skipped answer has no language to be wrong about — the transcript is the
+  // marker string, not the candidate. Flagging it would blame them for a
+  // penalty the skip already explains.
+  const wrongLanguage = !skipped && question.languageMismatch === true;
+  // `detectedLanguage` is whatever the transcriber reported, so it may be a
+  // code we know ("ur"), a code we don't, or nothing at all. Name it when we
+  // can and stay vague when we can't — better than printing a bare "ur".
+  const detectedLabel = (() => {
+    const raw = question.detectedLanguage?.trim();
+    if (!raw) return "another language";
+    return (
+      INTERVIEW_LANGUAGE_LABELS[raw.toLowerCase() as InterviewLanguage] ?? raw
+    );
+  })();
   return (
     <li className="rounded-xl border border-line bg-surface-2 p-3">
       <div className="flex items-start gap-2.5">
@@ -3420,7 +3498,11 @@ function AnswerRow({
           {index + 1}
         </span>
         <div className="min-w-0 flex-1 space-y-2">
-          <p className="text-[13px] font-medium leading-snug">
+          <p
+            dir="auto"
+            lang={language}
+            className="text-[13px] font-medium leading-snug"
+          >
             {question.text}
           </p>
           {askedAtSec !== null ? (
@@ -3448,10 +3530,29 @@ function AnswerRow({
             </span>
           ) : question.transcript ? (
             <div className="rounded-lg border border-line bg-surface p-2.5">
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
-                Transcript
-              </p>
-              <p className="text-[13px] leading-snug whitespace-pre-wrap wrap-break-word">
+              <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
+                  Transcript
+                </p>
+                {/* Sits ON the transcript, not next to the score: without it a
+                    penalized answer reads as a wrong answer, and the reviewer
+                    has no way to tell the two apart. */}
+                {wrongLanguage ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-[var(--warning-soft)] px-2 py-0.5 text-[10.5px] font-semibold text-[color:var(--warning)]">
+                    <AlertTriangle className="h-3 w-3" strokeWidth={1.8} />
+                    Answered in {detectedLabel} — score penalized
+                  </span>
+                ) : null}
+              </div>
+              {/* `lang` is dropped when the answer is in the WRONG language:
+                  asserting the interview's language over text that isn't in it
+                  would hand the browser the wrong font and hyphenation rules.
+                  `dir="auto"` still resolves direction from the text itself. */}
+              <p
+                dir="auto"
+                lang={wrongLanguage ? undefined : language}
+                className="text-[13px] leading-snug whitespace-pre-wrap wrap-break-word"
+              >
                 {question.transcript}
               </p>
             </div>
@@ -3501,7 +3602,13 @@ function AnswerRow({
               <span className="mr-1 font-semibold uppercase tracking-wide">
                 Feedback:
               </span>
-              {question.feedback}
+              {/* `dir="auto"` belongs on the TEXT, not the wrapper: the English
+                  "Feedback:" label is the block's first strong character, so a
+                  wrapper would always resolve LTR and never flip for an Urdu
+                  or Arabic note. As an inline run it flips on its own. */}
+              <span dir="auto" lang={language}>
+                {question.feedback}
+              </span>
             </div>
           ) : null}
 
