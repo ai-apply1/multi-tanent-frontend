@@ -48,6 +48,8 @@ import { MaskedNumbers } from "@/components/ui/masked-amount";
 import { ScoringDetailsDialog } from "@/components/interviews/ScoringDetailsDialog";
 import { BulkEmailDialog } from "@/features/candidates/components/BulkEmailDialog";
 import { ChangeStatusSubMenu } from "@/features/candidates/components/ChangeStatusSubMenu";
+import { CandidateRemarks } from "@/features/candidates/components/CandidateRemarks";
+import { RemarkDialog } from "@/features/candidates/components/RemarkDialog";
 import {
   HlsPlayer,
   type VideoPlayerHandle,
@@ -1707,6 +1709,12 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   const [reinviting, setReinviting] = useState(false);
   const [invitingCand, setInvitingCand] = useState(false);
   const [statusPending, setStatusPending] = useState(false);
+  /**
+   * The move the user picked from the status menu, held while the remark
+   * dialog is open. Holding the CATALOG ROW rather than the key means the
+   * dialog can name and colour the destination without re-looking it up.
+   */
+  const [pendingMove, setPendingMove] = useState<CandidateStatus | null>(null);
   const [confirmDeleteInterview, setConfirmDeleteInterview] = useState(false);
   const [confirmDeleteCandidate, setConfirmDeleteCandidate] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
@@ -1800,18 +1808,28 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
     }
   };
 
-  const handleStatusChange = async (statusKey: string) => {
+  const handleStatusChange = async (statusKey: string, note?: string) => {
     if (!candidateId || statusPending) return;
     setStatusPending(true);
     try {
-      await updateCandidateStatus(candidateId, { statusKey });
-      toast.success("Candidate updated.");
+      // An empty remark is omitted rather than sent as "": the server stores
+      // `note` verbatim, and a blank string would render as a remark card
+      // with nothing in it on a timeline that has no delete.
+      await updateCandidateStatus(candidateId, {
+        statusKey,
+        ...(note ? { note } : {}),
+      });
+      toast.success(note ? "Candidate moved, remark saved." : "Candidate updated.");
+      setPendingMove(null);
       // Refetch the drawer's own `["candidate", id]` detail first — it's what
       // the open panel renders and the fan-out doesn't cover it. Then invalidate
       // every derived surface: a decision here (accept/reject/hire/shortlist)
       // can move the candidate out of Overview's "Awaiting your decision" panel
       // and shift its KPI counts, not just the list and board.
       await candidateQuery.refetch();
+      // Covers the remarks thread and the activity feed too — a manual move is
+      // a row a person produced, so it lands in both whether or not a remark
+      // rode along. See `invalidateCandidateData`.
       invalidateCandidateData(queryClient);
     } catch (err) {
       toast.error(errorMessage(err, "Could not update the candidate."));
@@ -2159,8 +2177,16 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                             currentKey={candidate?.currentStatusId?.key}
                             candidate={candidate}
                             pending={statusPending}
+                            // Opens the remark dialog rather than moving on the
+                            // spot. The move still happens on one more click, and
+                            // that click is where the optional "why" is offered —
+                            // the reason a decision was made is worth one extra
+                            // beat, and it is the only moment anyone has it in
+                            // mind.
                             onSelect={(statusKey) =>
-                              void handleStatusChange(statusKey)
+                              setPendingMove(
+                                statuses.find((s) => s.key === statusKey) ?? null
+                              )
                             }
                           />
                         ) : null}
@@ -2296,6 +2322,32 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                     </div>
                   </>
                 )}
+
+                {/*
+                  Remarks belong HERE too, not only in the tabbed branch below.
+                  This branch is every candidate who has not interviewed —
+                  applied, parked at needs_review, rejected at the CV screen —
+                  which is exactly who HR is most likely to be talking about
+                  ("called them", "the CV gate is wrong about their years").
+                  There are no tabs in this state, so the thread renders as
+                  another card in the stack, under its own heading.
+                */}
+                {candidateId ? (
+                  <div className="grid gap-2.5">
+                    <h3 className="flex items-center gap-2 px-0.5 text-[13px] font-semibold text-ink">
+                      <MessageSquare
+                        className="h-3.5 w-3.5 text-ink-subtle"
+                        strokeWidth={1.8}
+                      />
+                      Remarks
+                    </h3>
+                    <CandidateRemarks
+                      candidateId={candidateId}
+                      canWrite={canAct}
+                      timeZone={orgTimezone}
+                    />
+                  </div>
+                ) : null}
               </div>
             ) : is404 ? (
               <div className="flex h-72 flex-col items-center justify-center gap-3 px-6 text-center text-sm text-ink-muted">
@@ -2345,7 +2397,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                 ) : null}
 
                 <Tabs defaultValue="evaluation" className="w-full">
-                  <TabsList className="mb-4 grid w-full grid-cols-2">
+                  <TabsList className="mb-4 grid w-full grid-cols-3">
                     <TabsTrigger value="evaluation">
                       <Sparkles className="h-3.5 w-3.5" strokeWidth={1.8} />
                       Evaluation
@@ -2353,6 +2405,14 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                     <TabsTrigger value="activity">
                       <Activity className="h-3.5 w-3.5" strokeWidth={1.8} />
                       Activity
+                    </TabsTrigger>
+                    {/* Sibling to Activity, not a slice of it: Activity is what
+                        HAPPENED (machine output, one attempt), Remarks is what
+                        the TEAM SAID (whole candidate, and the only writable
+                        one of the two). */}
+                    <TabsTrigger value="remarks">
+                      <MessageSquare className="h-3.5 w-3.5" strokeWidth={1.8} />
+                      Remarks
                     </TabsTrigger>
                   </TabsList>
 
@@ -2550,6 +2610,17 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                       }
                     />
                   </TabsContent>
+
+                  {/* ── Remarks: the team's own thread on this candidate. ── */}
+                  <TabsContent value="remarks" className="mt-0">
+                    {candidateId ? (
+                      <CandidateRemarks
+                        candidateId={candidateId}
+                        canWrite={canAct}
+                        timeZone={orgTimezone}
+                      />
+                    ) : null}
+                  </TabsContent>
                 </Tabs>
 
                 {/* Pipeline stage component — disabled for now; flip
@@ -2618,6 +2689,30 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
           recipientLabel={data?.candidateName || "this candidate"}
         />
       ) : null}
+
+      {/* Confirm the pipeline move and offer the optional "why" in one step.
+          `pendingMove` is both the open flag and the destination, so the
+          dialog can never render without a target to name. */}
+      <RemarkDialog
+        open={Boolean(pendingMove)}
+        onOpenChange={(next) => {
+          if (!next) setPendingMove(null);
+        }}
+        mode={
+          pendingMove
+            ? {
+                kind: "move",
+                from: candidate?.currentStatusId ?? null,
+                to: pendingMove,
+              }
+            : null
+        }
+        candidateName={data?.candidateName ?? candidate?.fullName}
+        pending={statusPending}
+        onSubmit={(note) => {
+          if (pendingMove) void handleStatusChange(pendingMove.key, note);
+        }}
+      />
     </>
   );
 }
