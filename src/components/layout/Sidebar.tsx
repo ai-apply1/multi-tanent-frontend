@@ -82,12 +82,6 @@ const SETTINGS_CHILDREN: Array<{
   { label: "Manage Team", to: ROUTES.TEAM, requiresRoles: ["org_admin"] },
   // Per-user, so no `requiresRoles` — every role manages their own MFA.
   { label: "Security", to: ROUTES.SECURITY },
-  // The trash routes 403 interviewers server-side, so hide the entry for them.
-  {
-    label: "Recently deleted",
-    to: ROUTES.TRASH,
-    requiresRoles: ["org_admin", "hr"],
-  },
 ];
 
 export function visibleSections(
@@ -149,14 +143,8 @@ function SettingsNav({
     ROUTES.EMAIL_TEMPLATES,
   );
   const onSecurity = location.pathname.startsWith(ROUTES.SECURITY);
-  const onTrash = location.pathname.startsWith(ROUTES.TRASH);
   const groupActive =
-    onSettings ||
-    onPipeline ||
-    onTeam ||
-    onEmailTemplates ||
-    onSecurity ||
-    onTrash;
+    onSettings || onPipeline || onTeam || onEmailTemplates || onSecurity;
 
   const children = SETTINGS_CHILDREN.filter(
     (c) =>
@@ -181,7 +169,6 @@ function SettingsNav({
     if (to === ROUTES.TEAM) return onTeam;
     if (to === ROUTES.EMAIL_TEMPLATES) return onEmailTemplates;
     if (to === ROUTES.SECURITY) return onSecurity;
-    if (to === ROUTES.TRASH) return onTrash;
     // The only Settings-page child listed is "General", and it stands in for the
     // whole Settings page in the nav. So it stays active on EVERY settings tab
     // (Branding, Domains, Demo video, and the rest), which are reached from the

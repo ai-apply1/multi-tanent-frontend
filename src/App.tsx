@@ -14,7 +14,6 @@ import { PipelinePage } from "@/pages/PipelinePage";
 import { EmailTemplatesPage } from "@/pages/EmailTemplatesPage";
 import { TeamPage } from "@/pages/TeamPage";
 import { SecurityPage } from "@/pages/SecurityPage";
-import { TrashPage } from "@/pages/TrashPage";
 import { CvViewerPage } from "@/pages/CvViewerPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
 import { ROUTES } from "@/routes";
@@ -106,7 +105,6 @@ export default function App() {
         <Route path={ROUTES.SETTINGS} element={<OrgSettingsPage />} />
         <Route path={ROUTES.TEAM} element={<TeamPage />} />
         <Route path={ROUTES.SECURITY} element={<SecurityPage />} />
-        <Route path={ROUTES.TRASH} element={<TrashPage />} />
       </Route>
 
       {/* Standalone full-screen CV viewer, opened in a new tab from "Open CV".
