@@ -153,6 +153,9 @@ export function JobsPage() {
       // Deleting a job implicitly detaches its questions — the bank's
       // "Used by N jobs" counts (which gate Delete there) must drop.
       queryClient.invalidateQueries({ queryKey: ["screeningQuestions"] });
+      // The row lands in Recently deleted; refresh its warm cache so the
+      // trash shows it immediately.
+      queryClient.invalidateQueries({ queryKey: ["trash"] });
       setDeleteTarget(null);
     },
     onError: (err) => {
@@ -550,7 +553,7 @@ export function JobsPage() {
         open={Boolean(deleteTarget)}
         onOpenChange={(o) => !o && setDeleteTarget(null)}
         title={`Delete "${deleteTarget?.title ?? "job"}"?`}
-        description="Only draft or archived jobs with no candidates can be deleted. Anything else must be archived instead, so its candidates keep a valid parent. This cannot be undone."
+        description="Only draft or archived jobs with no candidates can be deleted. Anything else must be archived instead, so its candidates keep a valid parent. The job moves to Recently deleted, where it can be restored until it is erased for good."
         confirmLabel="Delete"
         loadingLabel="Deleting…"
         destructive

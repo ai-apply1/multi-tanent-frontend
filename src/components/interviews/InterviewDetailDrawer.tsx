@@ -1829,6 +1829,8 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
       // The candidate's row shows its latest interview's score/status, so a
       // deleted interview leaves those lists (and Overview) stale too.
       invalidateCandidateData(queryClient);
+      // The attempt lands in Recently deleted; refresh its warm cache.
+      queryClient.invalidateQueries({ queryKey: ["trash"] });
       closeDrawer();
     },
     onError: (err) =>
@@ -1843,6 +1845,8 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
       // Delete changes the job's TOTAL candidate count, so this is one of the
       // few sites that also refreshes the Jobs list's "Applicants" column.
       invalidateCandidateDataAndJobCounts(queryClient);
+      // The candidate lands in Recently deleted; refresh its warm cache.
+      queryClient.invalidateQueries({ queryKey: ["trash"] });
       closeDrawer();
     },
     onError: (err) =>
@@ -2590,7 +2594,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
         open={confirmDeleteInterview}
         onOpenChange={setConfirmDeleteInterview}
         title="Delete this interview?"
-        description="This removes this attempt entirely — recording, transcript, scores, and its emails and activity. The candidate keeps their row, an earlier attempt (if any) becomes the latest again, and they can be re-invited."
+        description="This moves the attempt to Recently deleted: recording, transcript and scores are kept there and can be restored until the Recently deleted period runs out. The candidate keeps their row, an earlier attempt (if any) becomes the latest again, and they can be re-invited. Any live link for this attempt stops working."
         destructive
         confirmLabel="Delete interview"
         loadingLabel="Deleting…"
@@ -2602,7 +2606,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
         open={confirmDeleteCandidate}
         onOpenChange={setConfirmDeleteCandidate}
         title={`Delete ${data?.candidateName || "candidate"}?`}
-        description="This permanently removes the candidate, their CV, every interview recording, and every score. This cannot be undone."
+        description="This moves the candidate to Recently deleted: their CV, recordings and scores are kept there and can be restored. Any live invite link stops working immediately. Once the Recently deleted period runs out, everything is erased for good."
         destructive
         confirmLabel="Delete candidate"
         loadingLabel="Deleting…"

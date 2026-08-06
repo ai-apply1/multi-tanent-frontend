@@ -554,6 +554,10 @@ export function CandidatesPage() {
       // Delete moves the job's TOTAL candidate count, so also refresh the
       // Jobs list's "Applicants" column (status/invite mutations don't).
       invalidateCandidateDataAndJobCounts(queryClient);
+      // The row lands in Recently deleted; a warm trash cache (30s
+      // staleTime) would otherwise omit it right after the dialog promised
+      // it moved there. No-op cost when the trash was never visited.
+      queryClient.invalidateQueries({ queryKey: ["trash"] });
       queryClient.removeQueries({ queryKey: ["candidate", res.candidateId] });
       if (drawerCandidateId === res.candidateId) closeDrawer();
       setSelectedIds((prev) => {
@@ -598,6 +602,8 @@ export function CandidatesPage() {
         );
       }
       invalidateCandidateDataAndJobCounts(queryClient);
+      // Same trash-cache refresh as the single delete above.
+      queryClient.invalidateQueries({ queryKey: ["trash"] });
       setSelectedIds(new Set());
       setBulkDeleteOpen(false);
     },
@@ -1220,11 +1226,14 @@ export function CandidatesPage() {
         title={`Delete ${deleteTarget?.fullName || "this candidate"}?`}
         description={
           <>
-            This permanently removes <strong>{deleteTarget?.fullName}</strong>{" "}
-            and everything about them: their CV, every interview attempt and
-            recording, their email history, and their activity timeline. Any
-            live invite link stops working immediately.{" "}
-            <strong>This can&apos;t be undone.</strong>
+            This moves <strong>{deleteTarget?.fullName}</strong> to Recently
+            deleted: their CV, every interview attempt and recording, email
+            history and timeline are kept there and can be restored. Any live
+            invite link stops working immediately.{" "}
+            <strong>
+              Once the Recently deleted period runs out, everything is erased
+              for good.
+            </strong>
           </>
         }
         confirmLabel="Delete candidate"
@@ -1244,11 +1253,15 @@ export function CandidatesPage() {
         title={`Delete ${selectedCount} candidate${selectedCount === 1 ? "" : "s"}?`}
         description={
           <>
-            This permanently removes the <strong>{selectedCount}</strong> selected
-            candidate{selectedCount === 1 ? "" : "s"} and everything about them:
-            CVs, every interview attempt and recording, email history, and
-            activity timelines. Live invite links stop working immediately.{" "}
-            <strong>This can&apos;t be undone.</strong>
+            This moves the <strong>{selectedCount}</strong> selected candidate
+            {selectedCount === 1 ? "" : "s"} to Recently deleted: CVs,
+            interview attempts and recordings, email history and timelines are
+            kept there and can be restored. Live invite links stop working
+            immediately.{" "}
+            <strong>
+              Once the Recently deleted period runs out, everything is erased
+              for good.
+            </strong>
           </>
         }
         confirmLabel="Delete selected"
