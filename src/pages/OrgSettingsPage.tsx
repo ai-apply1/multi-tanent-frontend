@@ -8,10 +8,12 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import {
+  DEFAULT_SETTINGS_TAB,
   SETTINGS_TABS,
   asSettingsTab,
   type SettingsTabId,
 } from "@/routes";
+import { LINKEDIN_ENABLED } from "@/lib/featureFlags";
 import {
   ImageOff,
   Loader2,
@@ -178,7 +180,11 @@ const SAVING_TAB_IDS = new Set<SettingsTab>([
 ]);
 
 const TABS: Array<{ id: SettingsTab; label: string; saves: boolean }> =
-  SETTINGS_TABS.map((t) => ({ ...t, saves: SAVING_TAB_IDS.has(t.id) }));
+  SETTINGS_TABS
+    // The Integrations tab is LinkedIn-only today, so it hides wholesale when
+    // the LinkedIn feature flag is off (VITE_LINKEDIN_ENABLED=false).
+    .filter((t) => t.id !== "integrations" || LINKEDIN_ENABLED)
+    .map((t) => ({ ...t, saves: SAVING_TAB_IDS.has(t.id) }));
 
 const inputBase =
   "h-11 w-full rounded-lg border border-[var(--field-border)] bg-surface px-3.5 text-[14px] text-ink outline-none placeholder:text-ink-subtle focus:border-primary focus:shadow-[0_0_0_3px_var(--accent-ring)] disabled:cursor-not-allowed disabled:bg-ink-faint disabled:text-ink-muted";
@@ -511,7 +517,13 @@ export function OrgSettingsPage() {
   // `?tab=`. An unknown or missing value narrows to the default rather than
   // rendering an empty card.
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = asSettingsTab(searchParams.get("tab"));
+  const requestedTab = asSettingsTab(searchParams.get("tab"));
+  // A deep link to a hidden tab (e.g. ?tab=integrations while LinkedIn is off)
+  // falls back to the default so the page never renders an empty card.
+  const activeTab =
+    requestedTab === "integrations" && !LINKEDIN_ENABLED
+      ? DEFAULT_SETTINGS_TAB
+      : requestedTab;
   const setActiveTab = (id: SettingsTab) => {
     setSearchParams(
       (prev) => {

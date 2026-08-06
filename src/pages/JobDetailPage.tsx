@@ -53,6 +53,7 @@ import { getJobTopCandidates } from "@/features/interviews/interviewsApi";
 import { formatRecommendation } from "@/features/interviews/helpers";
 import { ROUTES, jobEdit } from "@/routes";
 import { errorMessage } from "@/lib/errors";
+import { LINKEDIN_ENABLED } from "@/lib/featureFlags";
 import { JobStatusBadge } from "./JobsPage";
 
 type TabId = "overview" | "questions";
@@ -356,8 +357,9 @@ export function JobDetailPage() {
 
       {/* LinkedIn: post this job to your feed, view the live post, or unpublish.
           Connecting the account lives on Settings → Integrations. Publishing is
-          an edit, so it's hidden from the view-only interviewer. */}
-      {canAct ? <JobLinkedInControls job={job} /> : null}
+          an edit, so it's hidden from the view-only interviewer, and the whole
+          block hides when the LinkedIn feature flag is off. */}
+      {LINKEDIN_ENABLED && canAct ? <JobLinkedInControls job={job} /> : null}
 
       <JobShareDialog jobId={job._id} open={shareOpen} onOpenChange={setShareOpen} />
 
