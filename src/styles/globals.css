@@ -425,6 +425,31 @@
     cursor: not-allowed;
   }
 
+  /* `input[type="number"]` without the native stepper arrows. Opt-in, not
+     global: on a small counter (interview attempts, a 0-100 threshold) the
+     stepper is genuinely useful, so those keep it.
+
+     It is for the NARROW money-ish fields. Chrome renders the stepper only on
+     hover/focus and takes its width out of the CONTENT box, so a field wide
+     enough at rest silently clips the last digits the moment the caret enters
+     it — the worst possible time, since that is when the number is being read
+     back. Nobody steps to a salary one unit at a time anyway.
+
+     Written here rather than as arbitrary variants on the element because the
+     rule needs the -webkit-prefixed pseudo-elements AND `appearance:textfield`
+     for Firefox, which is more than a class list should be carrying. */
+  .no-spinner {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+
+  .no-spinner::-webkit-outer-spin-button,
+  .no-spinner::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    appearance: none;
+    margin: 0;
+  }
+
   input:-webkit-autofill,
   input:-webkit-autofill:hover,
   input:-webkit-autofill:focus,

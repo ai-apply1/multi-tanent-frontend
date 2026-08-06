@@ -769,6 +769,17 @@ function OverviewTab({
 function conditionSentence(job: Job, condition: JobCustomRuleCondition): string {
   const field = (job.formFields ?? []).find((f) => f.id === condition.fieldId);
   const name = field?.label ?? "a removed field";
+  // The soft range is the one operator whose four numbers cannot follow its
+  // label inline, so it assembles its own tail, naming what the tolerance
+  // DOES rather than listing the bounds and leaving that to be inferred.
+  if (
+    condition.op === "between_soft" &&
+    Array.isArray(condition.value) &&
+    condition.value.length === 4
+  ) {
+    const [softMin, min, max, softMax] = condition.value.map(ruleValueText);
+    return `${name} ${OPERATOR_LABELS.between_soft} ${min} and ${max} (${softMin} to ${softMax} goes to review)`;
+  }
   const op = OPERATOR_LABELS[condition.op] ?? condition.op;
   return `${name} ${op} ${ruleValueText(condition.value)}`;
 }

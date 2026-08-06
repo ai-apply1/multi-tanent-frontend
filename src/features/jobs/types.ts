@@ -166,6 +166,7 @@ export type CustomRuleOperator =
   | "gte"
   | "lte"
   | "between"
+  | "between_soft"
   | "is_one_of"
   | "includes_any"
   | "includes_all"
@@ -177,8 +178,9 @@ export interface JobCustomRuleCondition {
   op: CustomRuleOperator
   /**
    * Shape depends on `op`: number (gte/lte, eq on number), string (eq on
-   * select), boolean (eq on checkbox), [min, max] pair (between), or
-   * string[] (is_one_of / includes_*).
+   * select), boolean (eq on checkbox), [min, max] pair (between),
+   * [softMin, min, max, softMax] quad (between_soft), or string[]
+   * (is_one_of / includes_*).
    */
   value: unknown
 }
@@ -241,7 +243,7 @@ export const CHECK_NONE_OPTION = "None of the above"
 export const RULE_OPERATORS_BY_FIELD_TYPE: Partial<
   Record<ApplicationFieldType, readonly CustomRuleOperator[]>
 > = {
-  number: ["eq", "gte", "lte", "between"],
+  number: ["eq", "gte", "lte", "between", "between_soft"],
   select: ["eq", "is_one_of"],
   multiselect: ["includes_any", "includes_all"],
   checkbox: ["eq"],
@@ -266,6 +268,11 @@ export const OPERATOR_LABELS: Record<CustomRuleOperator, string> = {
   gte: "is at least",
   lte: "is at most",
   between: "is between",
+  // "ideally" is the whole distinction from `between` above, and it matches
+  // the editor's own captions (Ideal from/to, Will consider from/to). It is
+  // still a sentence stem, but `conditionSentence` (JobDetailPage) has to
+  // assemble the tail by hand: four numbers do not read inline.
+  between_soft: "is ideally between",
   is_one_of: "is one of",
   includes_any: "includes any of",
   includes_all: "includes all of",
