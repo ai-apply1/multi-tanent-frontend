@@ -6,6 +6,7 @@ import type {
   BulkEmailResult,
   BulkExtractRow,
   BulkPresignFile,
+  CandidateActivity,
   CandidateDetail,
   CandidateStatus,
   InviteResult,
@@ -67,6 +68,48 @@ export async function getCandidateActivities(
           : {}),
       },
     }
+  )
+  return data
+}
+
+/**
+ * The candidate's REMARKS thread — the same feed, narrowed server-side to the
+ * rows a person produced: HR remarks and their manual pipeline moves.
+ *
+ * Deliberately NOT attempt-scoped, unlike `getCandidateActivities`. Most
+ * remarks are written while screening the CV, long before an attempt exists,
+ * and an attempt-scoped thread would open on an empty state for exactly the
+ * candidates HR is talking about most.
+ */
+export async function getCandidateRemarks(
+  candidateId: string,
+  params: { page?: number; limit?: number } = {}
+) {
+  const { data } = await api.get<PaginatedActivities>(
+    `/admin/candidates/${candidateId}/activities`,
+    {
+      params: {
+        page: params.page ?? 1,
+        limit: params.limit ?? 25,
+        remarksOnly: true,
+      },
+    }
+  )
+  return data
+}
+
+/**
+ * Record one remark with NO status change. Returns the created row in the
+ * feed's own wire shape, so the caller can splice it straight into the thread
+ * rather than refetching to see what it just wrote.
+ *
+ * There is no edit or delete counterpart, by design — the timeline is an
+ * audit trail.
+ */
+export async function addCandidateRemark(candidateId: string, note: string) {
+  const { data } = await api.post<CandidateActivity>(
+    `/admin/candidates/${candidateId}/remarks`,
+    { note }
   )
   return data
 }
@@ -137,6 +180,22 @@ export async function reprocessJobThreshold(jobId: string) {
 export async function getCandidateCvUrl(candidateId: string) {
   const { data } = await api.get<{ downloadUrl: string; expiresIn: number }>(
     `/admin/candidates/${candidateId}/cv-url`
+  )
+  return data
+}
+
+/**
+ * Presigned GET for one FILE-field answer (the extra documents the job's
+ * application form collected). Same contract as the CV download above:
+ * short-lived, attachment-forced for anything that is not a PDF.
+ */
+export async function getCandidateAnswerFileUrl(
+  candidateId: string,
+  fieldId: string
+) {
+  const { data } = await api.get<{ downloadUrl: string; expiresIn: number }>(
+    `/admin/candidates/${candidateId}/answer-file-url`,
+    { params: { fieldId } }
   )
   return data
 }

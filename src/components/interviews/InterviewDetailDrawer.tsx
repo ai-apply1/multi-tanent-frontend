@@ -17,7 +17,9 @@ import {
   CheckCircle2,
   ClipboardCheck,
   ClipboardList,
+  ChevronDown,
   Clock,
+  Download,
   ExternalLink,
   EyeOff,
   FileText,
@@ -42,10 +44,12 @@ import {
 import { errorMessage } from "@/lib/errors";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/features/auth/AuthContext";
-import { MaskedAmount, MaskedNumbers } from "@/components/ui/masked-amount";
+import { MaskedNumbers } from "@/components/ui/masked-amount";
 import { ScoringDetailsDialog } from "@/components/interviews/ScoringDetailsDialog";
 import { BulkEmailDialog } from "@/features/candidates/components/BulkEmailDialog";
 import { ChangeStatusSubMenu } from "@/features/candidates/components/ChangeStatusSubMenu";
+import { CandidateRemarks } from "@/features/candidates/components/CandidateRemarks";
+import { RemarkDialog } from "@/features/candidates/components/RemarkDialog";
 import {
   HlsPlayer,
   type VideoPlayerHandle,
@@ -94,6 +98,7 @@ import {
   deleteCandidate,
   getCandidate,
   getCandidateActivities,
+  getCandidateAnswerFileUrl,
   listCandidateStatuses,
   sendCandidateInvite,
   updateCandidateStatus,
@@ -111,6 +116,7 @@ import {
   REJECTED_STATUS_KEYS,
   type BuiltinCandidateStatusKey,
   type CandidateActivity,
+  type CandidateAnswer,
   type CandidateDetail,
   type CandidateProfile,
   type CandidateStatus,
@@ -487,6 +493,56 @@ function InterviewDetailSkeleton() {
         </div>
       ))}
     </div>
+  );
+}
+
+/**
+ * Loading placeholder for the drawer HEADER.
+ *
+ * The header used to render live through the whole load: `initialsFor` of two
+ * undefineds produced an empty avatar, the title fell back to the literal
+ * "Interview detail", and the stage pill, the interview-status pill and the
+ * meta line were each absent until their own query landed — so opening the
+ * drawer showed a wrong name in an empty circle, then rewrote the header a
+ * line at a time. Mirrors the real header's geometry (50px avatar, title +
+ * pill row, meta line, action row) so nothing below it shifts on handover.
+ *
+ * The ✕ is REAL, not a placeholder: a slow or hanging request must never
+ * leave the drawer with no way out.
+ */
+function InterviewHeaderSkeleton({ onClose }: { onClose: () => void }) {
+  return (
+    <>
+      <div className="flex items-start gap-3.5">
+        <Skeleton className="h-[50px] w-[50px] shrink-0 rounded-full" />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Skeleton className="h-5.5 w-44 max-w-full" />
+            <Skeleton className="h-5 w-24 rounded-full" />
+            <Skeleton className="h-5 w-20 rounded-full" />
+          </div>
+          <Skeleton className="mt-2 h-3 w-72 max-w-full" />
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="inline-flex text-ink-muted hover:text-ink"
+          aria-label="Close"
+        >
+          <X className="h-5 w-5" strokeWidth={1.7} />
+        </button>
+      </div>
+      {/* Action row — Open CV, the attempts switcher, and the Actions menu.
+          Held as placeholders rather than rendered live because none of them
+          works yet: `handleOpenCv` no-ops until the interview resolves the
+          candidate id, and the attempt list is still in flight. */}
+      <div className="mt-3.5 flex flex-wrap items-center gap-2">
+        <Skeleton className="h-8 w-28" />
+        <Skeleton className="h-8 w-56" />
+        <div className="flex-1" />
+        <Skeleton className="h-8 w-10.5" />
+      </div>
+    </>
   );
 }
 
@@ -973,11 +1029,13 @@ function extractVettingChecks(
 
 /** One row of the pre-screen checklist: a status icon plus the check text. */
 function VettingCheckRow({ check }: { check: VettingCheck }) {
-  // The salary check embeds figures (the candidate's ask AND the role's max) —
-  // mask them behind a reveal toggle, matching the "Expected salary" field. For
-  // an interviewer the backend has already stripped the numbers, so MaskedNumbers
-  // finds nothing to hide and renders the sentence plainly with no toggle.
-  const isSalaryCheck = /expected salary/i.test(check.text);
+  // A salary-related check text embeds figures (the candidate's ask and the
+  // rule's threshold) — mask them behind a reveal toggle so a shoulder-surfed
+  // screen doesn't leak pay data. Display-side courtesy only: every role
+  // receives the full text, since the platform's built-in salary gate (and
+  // its per-role server-side redaction) was removed in favour of custom
+  // rules over form answers.
+  const isSalaryCheck = /salary/i.test(check.text);
   return (
     <div className="flex gap-2.5 text-[13px] leading-snug text-ink-2">
       {check.status === "pass" ? (
@@ -1027,11 +1085,9 @@ function citiesDisagree(applied: string, fromCv: string): boolean {
 }
 
 /**
- * What the job's optional gates actually found for this candidate.
- *
- * Separate from the pre-screen checklist below on purpose: that card shows
- * VERDICTS, this one shows the underlying facts, and a candidate who was
- * accepted has no checklist at all but still has these.
+ * The fixed application facts worth a reviewer's eye: the relocation answer
+ * and a CV-vs-form city disagreement. (Custom-form answers have their own
+ * card below; check verdicts live in the pre-screen checklist.)
  *
  * The city row appears ONLY on a disagreement. The city itself is already in
  * the drawer header, so repeating it unconditionally would be noise; what the
@@ -1041,15 +1097,9 @@ function citiesDisagree(applied: string, fromCv: string): boolean {
  * so it is context for the reviewer and gates nothing.
  */
 interface ExtraGatesCardProps {
-  university: CandidateProfile["universityCheck"] | null
-  expectedSalaryMin: number | null
   willingToRelocate: boolean | null
   city: string | null
   profileCity: string | null
-  // True for the `interviewer` role: the backend strips `expectedSalaryMin`,
-  // so we can't (and shouldn't) show a figure — the row reads "Restricted"
-  // instead. For every other role the value is present and masked-with-reveal.
-  salaryRestricted: boolean
 }
 
 /**
@@ -1063,30 +1113,15 @@ interface ExtraGatesCardProps {
  */
 function hasExtraGates(p: ExtraGatesCardProps): boolean {
   return (
-    Boolean(p.university) ||
-    p.expectedSalaryMin != null ||
-    // An interviewer always gets a salary row (a "Restricted" placeholder), so
-    // the card must render for them even when no other gate is present.
-    p.salaryRestricted ||
     p.willingToRelocate != null ||
     citiesDisagree(p.city ?? "", p.profileCity ?? "")
   );
 }
 
 function ExtraGatesCard(props: ExtraGatesCardProps) {
-  const {
-    university,
-    expectedSalaryMin,
-    willingToRelocate,
-    city,
-    profileCity,
-    salaryRestricted,
-  } = props;
+  const { willingToRelocate, city, profileCity } = props;
   const cityConflict = citiesDisagree(city ?? "", profileCity ?? "");
   if (!hasExtraGates(props)) return null;
-
-  const money = (n: number) =>
-    n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 
   return (
     <div className="rounded-2xl border border-line bg-surface p-[18px]">
@@ -1097,56 +1132,6 @@ function ExtraGatesCard(props: ExtraGatesCardProps) {
         <h4 className="text-[13.5px] font-bold text-ink">Role requirements</h4>
       </div>
       <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
-        {university ? (
-          <div className="grid gap-0.5">
-            <dt className="flex flex-wrap items-center gap-x-1.5 text-[12px] text-ink-muted">
-              University
-              <span className="text-[11px] text-ink-subtle">from the CV</span>
-            </dt>
-            <dd
-              className={cn(
-                "text-[13.5px] font-semibold",
-                university.verdict === "unclear" ? "text-ink-subtle" : "text-ink",
-              )}
-            >
-              {university.verdict === "yes"
-                ? university.matched || "An accepted university"
-                : university.verdict === "no"
-                  ? "Not an accepted university"
-                  : "Could not be matched"}
-            </dd>
-            {university.evidence ? (
-              <dd className="text-[12px] italic leading-snug text-ink-muted">
-                “{university.evidence}”
-              </dd>
-            ) : null}
-          </div>
-        ) : null}
-        {salaryRestricted ? (
-          <div className="grid gap-0.5">
-            <dt className="flex flex-wrap items-center gap-x-1.5 text-[12px] text-ink-muted">
-              Expected salary
-              <span className="text-[11px] text-ink-subtle">
-                from the application
-              </span>
-            </dt>
-            <dd className="text-[13.5px] font-semibold text-ink-subtle">
-              Restricted
-            </dd>
-          </div>
-        ) : expectedSalaryMin != null ? (
-          <div className="grid gap-0.5">
-            <dt className="flex flex-wrap items-center gap-x-1.5 text-[12px] text-ink-muted">
-              Expected salary
-              <span className="text-[11px] text-ink-subtle">
-                from the application
-              </span>
-            </dt>
-            <dd className="text-[13.5px] font-semibold text-ink">
-              <MaskedAmount value={money(expectedSalaryMin)} label="salary" />
-            </dd>
-          </div>
-        ) : null}
         {willingToRelocate != null ? (
           <div className="grid gap-0.5">
             <dt className="flex flex-wrap items-center gap-x-1.5 text-[12px] text-ink-muted">
@@ -1178,6 +1163,121 @@ function ExtraGatesCard(props: ExtraGatesCardProps) {
         ) : null}
       </dl>
     </div>
+  );
+}
+
+/**
+ * The candidate's custom application-form answers, from the snapshots taken
+ * at submit. Labels and types were frozen WITH the values, so this renders
+ * the questions as they were actually asked — deliberately not enriched from
+ * the job's current form config, which may have changed since. Hidden
+ * entirely when there are none (imports, or a job with no custom fields).
+ */
+function ApplicationAnswersCard({
+  answers,
+  candidateId,
+}: {
+  answers: CandidateAnswer[] | undefined;
+  /** Needed only to mint download links for `file` answers. */
+  candidateId: string | null;
+}) {
+  if (!answers || answers.length === 0) return null;
+
+  const display = (answer: CandidateAnswer): React.ReactNode => {
+    if (answer.type === "checkbox") return answer.value === true ? "Yes" : "No";
+    if (answer.type === "file") {
+      return candidateId ? (
+        <AnswerFileLink candidateId={candidateId} fieldId={answer.fieldId} />
+      ) : (
+        "Uploaded file"
+      );
+    }
+    if (Array.isArray(answer.value)) return answer.value.join(", ");
+    if (answer.type === "url" && typeof answer.value === "string") {
+      return (
+        <a
+          href={answer.value}
+          target="_blank"
+          rel="noreferrer"
+          className="break-all text-primary underline-offset-2 hover:underline"
+        >
+          {answer.value}
+        </a>
+      );
+    }
+    if (typeof answer.value === "number") {
+      return answer.value.toLocaleString("en-US", {
+        maximumFractionDigits: 2,
+      });
+    }
+    return String(answer.value);
+  };
+
+  return (
+    <div className="rounded-2xl border border-line bg-surface p-[18px]">
+      <div className="mb-3.5 flex items-center gap-2">
+        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent text-primary">
+          <ClipboardCheck className="h-3.5 w-3.5" strokeWidth={2} />
+        </span>
+        <h4 className="text-[13.5px] font-bold text-ink">
+          Application answers
+        </h4>
+      </div>
+      <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+        {answers.map((answer) => (
+          <div
+            key={answer.fieldId}
+            className={cn(
+              "grid gap-0.5",
+              // A long-text answer needs the full row to stay readable.
+              answer.type === "textarea" && "sm:col-span-2",
+            )}
+          >
+            <dt className="text-[12px] text-ink-muted">{answer.label}</dt>
+            <dd className="whitespace-pre-wrap text-[13.5px] font-semibold text-ink">
+              {display(answer)}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+/**
+ * Download affordance for one `file` answer. The presigned URL is minted ON
+ * CLICK, never at render: it expires in minutes, and a drawer can sit open
+ * far longer than that — a link minted eagerly would be dead by the time
+ * anyone used it.
+ */
+function AnswerFileLink({
+  candidateId,
+  fieldId,
+}: {
+  candidateId: string;
+  fieldId: string;
+}) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={() => {
+        setBusy(true);
+        getCandidateAnswerFileUrl(candidateId, fieldId)
+          .then(({ downloadUrl }) => {
+            window.open(downloadUrl, "_blank", "noopener");
+          })
+          .catch((err) =>
+            toast.error(errorMessage(err, "Could not open the file.")),
+          )
+          .finally(() => setBusy(false));
+      }}
+      className="inline-flex w-fit items-center gap-1.5 text-primary underline-offset-2 hover:underline disabled:opacity-60"
+    >
+      <Download className="h-3.5 w-3.5" strokeWidth={2} />
+      {busy ? "Opening…" : "Download file"}
+    </button>
   );
 }
 
@@ -1249,6 +1349,43 @@ function InitialRejectionCard({
  * died before vetting) has no checklist, and asserting a park that never
  * happened would send HR hunting for reasons that don't exist.
  */
+/**
+ * The auto-invite's pre-screen checklist, collapsed by default: for an
+ * invited/interviewed candidate it is confirmation rather than a decision
+ * aid, but hiding it entirely broke the check editor's promise that every
+ * verdict (including a pass, with its CV quote) is auditable in the drawer.
+ */
+function PassedChecksCard({ checks }: { checks: VettingCheck[] }) {
+  const allPassed = checks.every((c) => c.status === "pass");
+  return (
+    <details className="group rounded-2xl border border-line bg-surface">
+      <summary className="flex cursor-pointer list-none items-center gap-2 p-[18px] [&::-webkit-details-marker]:hidden">
+        <span
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-[color:var(--success)]"
+          style={{ background: "var(--success-soft)" }}
+        >
+          <ShieldCheck className="h-3.5 w-3.5" strokeWidth={2} />
+        </span>
+        <span className="text-[14px] font-bold">Pre-screen checks</span>
+        <span className="text-[12.5px] text-ink-muted">
+          {allPassed
+            ? `all ${checks.length} passed`
+            : `${checks.filter((c) => c.status === "pass").length} of ${checks.length} passed`}
+        </span>
+        <ChevronDown
+          className="ml-auto h-4 w-4 shrink-0 text-ink-subtle transition-transform group-open:rotate-180"
+          strokeWidth={2}
+        />
+      </summary>
+      <div className="grid gap-2 px-[18px] pb-[18px]">
+        {checks.map((check, i) => (
+          <VettingCheckRow key={`${i}-${check.text}`} check={check} />
+        ))}
+      </div>
+    </details>
+  );
+}
+
 function NeedsReviewCard({
   checks,
   loading,
@@ -1294,15 +1431,17 @@ function NeedsReviewCard({
             {reconsidered
               ? "The CV pre-screen rejected this candidate, and they were " +
                 "moved back here to be reconsidered. This is the original " +
-                "checklist — the red item(s) are what caused that rejection."
+                "checklist; the red item(s) are what caused that rejection."
               : canAct
-                ? "The CV pre-screen could not auto-decide, so this candidate " +
-                  "is parked for your call. The amber item(s) are what could " +
-                  "not be verified automatically — check them, then Invite or " +
+                ? "The CV pre-screen left this candidate for your call. The " +
+                  "amber item(s) need your judgment: something that could not " +
+                  "be verified automatically, or a miss this job routes to " +
+                  "review instead of rejecting. Check them, then Invite or " +
                   "Reject from the header."
-                : "The CV pre-screen could not auto-decide, so this candidate " +
-                  "is parked for a recruiter's call. The amber item(s) are " +
-                  "what could not be verified automatically."}
+                : "The CV pre-screen left this candidate for a recruiter's " +
+                  "call. The amber item(s) need a human's judgment: something " +
+                  "that could not be verified automatically, or a miss this " +
+                  "job routes to review instead of rejecting."}
           </p>
           <div className="grid gap-2.5">
             {checks.map((check, i) => (
@@ -1314,7 +1453,7 @@ function NeedsReviewCard({
         <p className="text-[13px] text-ink-muted">
           No pre-screen checklist was recorded for this candidate. The CV may
           still be processing, or they were moved here by hand
-          {canAct ? " — decide with Invite or Reject in the header." : "."}
+          {canAct ? ". Decide with Invite or Reject in the header." : "."}
         </p>
       )}
     </div>
@@ -1323,10 +1462,6 @@ function NeedsReviewCard({
 
 export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp, onOpenChange }: Props) {
   const { user } = useAuth();
-  // `interviewer` is a view-only reviewer walled off from salary: the backend
-  // strips the figure and redacts the salary rejection reason, and the UI
-  // hides candidate-mutating controls from it.
-  const isInterviewer = user?.role === "interviewer";
   // Reattempt history: `selectedSessionId` overrides which attempt's detail
   // we load; null = follow the prop. Reset whenever the entry point changes.
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
@@ -1482,19 +1617,14 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   const statuses = statusesQuery.data ?? [];
   const candidate = candidateQuery.data ?? null;
   const profile = candidate?.profile ?? null;
-  const universityCheck = profile?.universityCheck ?? null;
-  const expectedSalaryMin = candidate?.expectedSalaryMin ?? null;
   // Bundled because two call sites render this card and one of them also has
   // to ask `hasExtraGates` the same question, so the inputs must not drift.
   // `city` and `profileCity` are passed RAW: whether they actually disagree is
   // decided inside the card, next to the matching rule it depends on.
   const extraGatesProps: ExtraGatesCardProps = {
-    university: universityCheck,
-    expectedSalaryMin,
     willingToRelocate: candidate?.willingToRelocate ?? null,
     city: candidate?.city ?? null,
     profileCity: profile?.city ?? null,
-    salaryRestricted: isInterviewer,
   };
 
 
@@ -1518,10 +1648,11 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
     // could silently fall off page 1 and the card would claim nothing was
     // ever recorded.
     queryFn: () => getCandidateActivities(candidateId!, { limit: 100 }),
-    enabled:
-      Boolean(candidateId) &&
-      (isInitialRejected || isNeedsReview) &&
-      !activeSessionId,
+    // Every state reads this feed now: rejection and park cards for the two
+    // pre-decision states, and the passed-checklist card for candidates the
+    // engine auto-invited — the check editor promises "audit every verdict
+    // in the candidate drawer", which must include the verdicts that passed.
+    enabled: Boolean(candidateId),
     // See the staleTime note on the interview query above. A re-vet rewrites
     // these checks, so a cached read would keep showing the old reasons.
     staleTime: 0,
@@ -1554,6 +1685,23 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   const needsReviewChecks = needsReviewRow
     ? extractVettingChecks(needsReviewRow.meta, "unknown")
     : initialRejectionChecks;
+  // The auto-invite's checklist rides the status_changed row INTO `invited`,
+  // same as a rejection rides its own transition. Rendered collapsed for
+  // invited/interviewed candidates: it is confirmation, not a decision aid.
+  // The newest invited row that CARRIES a checklist, not the newest invited
+  // row full stop: a manual re-invite (or an HR invite from needs_review)
+  // writes its own transition with no checks, and matching that one would
+  // silently drop the card for exactly the candidates it exists for.
+  const invitedChecksRow = vettingActivitiesQuery.data?.data.find(
+    (a) =>
+      a.type === "status_changed" &&
+      a.toStatus?.key === "invited" &&
+      extractVettingChecks(a.meta).length > 0,
+  );
+  const passedChecks =
+    !isInitialRejected && !isNeedsReview
+      ? extractVettingChecks(invitedChecksRow?.meta)
+      : [];
 
   // Local mutation flags
   const [retranscoding, setRetranscoding] = useState(false);
@@ -1561,6 +1709,12 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   const [reinviting, setReinviting] = useState(false);
   const [invitingCand, setInvitingCand] = useState(false);
   const [statusPending, setStatusPending] = useState(false);
+  /**
+   * The move the user picked from the status menu, held while the remark
+   * dialog is open. Holding the CATALOG ROW rather than the key means the
+   * dialog can name and colour the destination without re-looking it up.
+   */
+  const [pendingMove, setPendingMove] = useState<CandidateStatus | null>(null);
   const [confirmDeleteInterview, setConfirmDeleteInterview] = useState(false);
   const [confirmDeleteCandidate, setConfirmDeleteCandidate] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
@@ -1654,18 +1808,28 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
     }
   };
 
-  const handleStatusChange = async (statusKey: string) => {
+  const handleStatusChange = async (statusKey: string, note?: string) => {
     if (!candidateId || statusPending) return;
     setStatusPending(true);
     try {
-      await updateCandidateStatus(candidateId, { statusKey });
-      toast.success("Candidate updated.");
+      // An empty remark is omitted rather than sent as "": the server stores
+      // `note` verbatim, and a blank string would render as a remark card
+      // with nothing in it on a timeline that has no delete.
+      await updateCandidateStatus(candidateId, {
+        statusKey,
+        ...(note ? { note } : {}),
+      });
+      toast.success(note ? "Candidate moved, remark saved." : "Candidate updated.");
+      setPendingMove(null);
       // Refetch the drawer's own `["candidate", id]` detail first — it's what
       // the open panel renders and the fan-out doesn't cover it. Then invalidate
       // every derived surface: a decision here (accept/reject/hire/shortlist)
       // can move the candidate out of Overview's "Awaiting your decision" panel
       // and shift its KPI counts, not just the list and board.
       await candidateQuery.refetch();
+      // Covers the remarks thread and the activity feed too — a manual move is
+      // a row a person produced, so it lands in both whether or not a remark
+      // rode along. See `invalidateCandidateData`.
       invalidateCandidateData(queryClient);
     } catch (err) {
       toast.error(errorMessage(err, "Could not update the candidate."));
@@ -1683,6 +1847,8 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
       // The candidate's row shows its latest interview's score/status, so a
       // deleted interview leaves those lists (and Overview) stale too.
       invalidateCandidateData(queryClient);
+      // The attempt lands in Recently deleted; refresh its warm cache.
+      queryClient.invalidateQueries({ queryKey: ["trash"] });
       closeDrawer();
     },
     onError: (err) =>
@@ -1697,6 +1863,8 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
       // Delete changes the job's TOTAL candidate count, so this is one of the
       // few sites that also refreshes the Jobs list's "Applicants" column.
       invalidateCandidateDataAndJobCounts(queryClient);
+      // The candidate lands in Recently deleted; refresh its warm cache.
+      queryClient.invalidateQueries({ queryKey: ["trash"] });
       closeDrawer();
     },
     onError: (err) =>
@@ -1774,6 +1942,24 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   // this flag to `true`; see the guarded render at the end of the detail body.
   const SHOW_PIPELINE = false;
 
+  /*
+   * ONE loading flag for the header AND the body, deliberately shared.
+   *
+   * The body has had a skeleton since day one; the header did not, so opening
+   * the drawer put a live-but-empty header above a skeleton body. Splitting
+   * them again — a skeleton header over a rendered body, or the reverse — is
+   * the failure mode this const exists to prevent.
+   *
+   * Two states are "loading", not "missing": the interview request is in
+   * flight, OR there is no session id YET because the candidate detail (which
+   * resolves the interview pointer) hasn't landed. Note `isLoading` is false
+   * for a DISABLED query, so the candidate-only entry point (no session at
+   * all) correctly falls through to the second clause and, once the candidate
+   * is loaded, out of loading entirely.
+   */
+  const detailLoading =
+    isLoading || (!activeSessionId && candidateQuery.isLoading);
+
   return (
     <>
       <Sheet open={sheetOpen} onOpenChange={(next) => { if (!next) closeDrawer(); }}>
@@ -1794,267 +1980,300 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
         >
           {/* Header */}
           <div className="bg-surface border-b border-line px-[22px] py-[18px]">
-            <div className="flex items-start gap-3.5">
-              <span
-                className="flex h-[50px] w-[50px] shrink-0 items-center justify-center rounded-full text-[17px] font-bold text-primary"
-                style={{ background: "var(--accent-soft)" }}
-              >
-                {initialsFor(
-                  data?.candidateName ?? candidate?.fullName,
-                  data?.email ?? candidate?.email,
-                )}
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2.5">
-                  <h2 className="m-0 truncate text-[19px] font-semibold tracking-tight">
-                    {data?.candidateName ||
-                      candidate?.fullName ||
-                      "Interview detail"}
-                  </h2>
-                  <StageBadge status={candidate?.currentStatusId} />
-                  {data ? (
-                    <span
-                      className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[11px] font-semibold text-ink-muted"
-                      title="Interview status"
-                    >
-                      {statusLabels[data.status]}
-                    </span>
-                  ) : null}
-                  {hasMultipleAttempts ? (
-                    <span className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[11px] font-semibold text-ink-muted">
-                      <History className="h-3 w-3" strokeWidth={1.7} />
-                      Reattempted x{attempts.length - 1}
-                    </span>
-                  ) : null}
-                </div>
-                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12.5px] text-ink-muted">
-                  {data?.jobTitle ? <span>{data.jobTitle}</span> : null}
-                  {data?.jobTitle && (data?.email || candidate?.email) ? (
-                    <span>·</span>
-                  ) : null}
-                  {data?.email || candidate?.email ? (
-                    <span>{data?.email || candidate?.email}</span>
-                  ) : null}
-                  {candidate?.phone ? (
-                    <>
-                      <span>·</span>
-                      <span>{candidate.phone}</span>
-                    </>
-                  ) : null}
-                  {candidate?.city ? (
-                    <>
-                      <span>·</span>
-                      <span className="capitalize">{candidate.city}</span>
-                    </>
-                  ) : null}
-                  {activeSessionId ? (
-                    <>
-                      <span>·</span>
-                      <button
-                        type="button"
-                        className="cursor-copy mono text-[11px] text-ink-subtle transition-colors hover:text-ink-muted"
-                        title={`Click to copy: ${activeSessionId}`}
-                        onClick={() => {
-                          navigator.clipboard.writeText(activeSessionId);
-                          toast.success("ID copied");
-                        }}
-                      >
-                        ID {formatSessionIdTail(activeSessionId)}
-                      </button>
-                    </>
-                  ) : null}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => closeDrawer()}
-                className="inline-flex text-ink-muted hover:text-ink"
-                aria-label="Close"
-              >
-                <X className="h-5 w-5" strokeWidth={1.7} />
-              </button>
-            </div>
-
-            <div className="mt-3.5 flex flex-wrap items-center gap-2">
-              <Button variant="secondary" size="sm" onClick={handleOpenCv}>
-                <FileText className="h-3.5 w-3.5" strokeWidth={1.7} />
-                Open CV
-                <ExternalLink className="h-3 w-3" strokeWidth={1.7} />
-              </Button>
-              {/* Attempts switcher — sits beside Open CV so the reviewer can
-                  flip between reattempts without hunting a separate row. */}
-              {hasAttempts ? (
-                <div className="flex items-center gap-1.5">
-                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle">
-                    <History className="h-3 w-3" strokeWidth={1.7} />
-                    Attempts
-                  </span>
-                  <Select
-                    value={activeSessionId ?? undefined}
-                    onValueChange={(v) => setSelectedSessionId(v)}
+            {detailLoading ? (
+              <InterviewHeaderSkeleton onClose={closeDrawer} />
+            ) : (
+              <>
+                <div className="flex items-start gap-3.5">
+                  <span
+                    className="flex h-[50px] w-[50px] shrink-0 items-center justify-center rounded-full text-[17px] font-bold text-primary"
+                    style={{ background: "var(--accent-soft)" }}
                   >
-                    <SelectTrigger className="h-8 w-auto min-w-36 gap-2 text-xs">
-                      <SelectValue placeholder="Select attempt" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {attempts.map((a) => (
-                        <SelectItem
-                          key={a.sessionId}
-                          value={a.sessionId}
-                          className="text-xs"
+                    {initialsFor(
+                      data?.candidateName ?? candidate?.fullName,
+                      data?.email ?? candidate?.email,
+                    )}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <h2 className="m-0 truncate text-[19px] font-semibold tracking-tight">
+                        {data?.candidateName ||
+                          candidate?.fullName ||
+                          "Interview detail"}
+                      </h2>
+                      {/* The candidate query is SEPARATE from the interview
+                          one and can still be in flight after the header has
+                          taken over from the skeleton — the two run in
+                          parallel, and this pill is the only thing in the
+                          title row that comes from the slower of them. Hold
+                          its footprint so the row doesn't reflow under the
+                          reviewer a beat after it painted. */}
+                      {candidateQuery.isLoading ? (
+                        <Skeleton className="h-5 w-24 rounded-full" />
+                      ) : (
+                        <StageBadge status={candidate?.currentStatusId} />
+                      )}
+                      {data ? (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[11px] font-semibold text-ink-muted"
+                          title="Interview status"
                         >
-                          {attemptOptionLabel(a)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                          {statusLabels[data.status]}
+                        </span>
+                      ) : null}
+                      {hasMultipleAttempts ? (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[11px] font-semibold text-ink-muted">
+                          <History className="h-3 w-3" strokeWidth={1.7} />
+                          Reattempted x{attempts.length - 1}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12.5px] text-ink-muted">
+                      {data?.jobTitle ? <span>{data.jobTitle}</span> : null}
+                      {data?.jobTitle && (data?.email || candidate?.email) ? (
+                        <span>·</span>
+                      ) : null}
+                      {data?.email || candidate?.email ? (
+                        <span>{data?.email || candidate?.email}</span>
+                      ) : null}
+                      {candidate?.phone ? (
+                        <>
+                          <span>·</span>
+                          <span>{candidate.phone}</span>
+                        </>
+                      ) : null}
+                      {candidate?.city ? (
+                        <>
+                          <span>·</span>
+                          <span className="capitalize">{candidate.city}</span>
+                        </>
+                      ) : null}
+                      {activeSessionId ? (
+                        <>
+                          <span>·</span>
+                          <button
+                            type="button"
+                            className="cursor-copy mono text-[11px] text-ink-subtle transition-colors hover:text-ink-muted"
+                            title={`Click to copy: ${activeSessionId}`}
+                            onClick={() => {
+                              navigator.clipboard.writeText(activeSessionId);
+                              toast.success("ID copied");
+                            }}
+                          >
+                            ID {formatSessionIdTail(activeSessionId)}
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => closeDrawer()}
+                    className="inline-flex text-ink-muted hover:text-ink"
+                    aria-label="Close"
+                  >
+                    <X className="h-5 w-5" strokeWidth={1.7} />
+                  </button>
                 </div>
-              ) : null}
-              <div className="flex-1" />
-              {/*
-               * No Reject / Shortlist here, deliberately.
-               *
-               * They used to sit in this header AND in the Pipeline stage card,
-               * which put the same two decisions in two places with different
-               * visibility rules: the header pair needed an interview plus a
-               * score, the card's needed the candidate to be sitting in
-               * `scored`. A reviewer could therefore see Shortlist in one spot
-               * and not the other on the same candidate.
-               *
-               * The card is the right home: the decision belongs next to the
-               * stage it moves the candidate out of, and it is the surface that
-               * also shows what the AI recommended. Nothing is lost from here —
-               * every status change stays reachable from the Actions menu.
-               */}
-              {showActionsMenu ? (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="secondary" size="sm" aria-label="Actions">
-                      <MoreHorizontal
-                        className="h-3.5 w-3.5"
-                        strokeWidth={1.9}
-                      />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-56">
-                    {/* Resend invite — re-sends the link for the CURRENT attempt,
-                        valid only while it's still pending (invited, not started).
-                        Once the attempt has been started/submitted the backend
-                        refuses with a message pointing at "Reattempt interview"
-                        below, which opens a new attempt. */}
-                    {canAct ? (
-                      <DropdownMenuItem
-                        disabled={
-                          !candidateId || !canSendCandidateInvite || invitingCand
-                        }
-                        onSelect={handleSendCandidateInvite}
-                        title={'Re-sends the link while the invite is still pending. Once started, use "Reattempt interview"'}
+
+                <div className="mt-3.5 flex flex-wrap items-center gap-2">
+                  <Button variant="secondary" size="sm" onClick={handleOpenCv}>
+                    <FileText className="h-3.5 w-3.5" strokeWidth={1.7} />
+                    Open CV
+                    <ExternalLink className="h-3 w-3" strokeWidth={1.7} />
+                  </Button>
+                  {/* Attempts switcher — sits beside Open CV so the reviewer can
+                      flip between reattempts without hunting a separate row. */}
+                  {hasAttempts ? (
+                    <div className="flex items-center gap-1.5">
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle">
+                        <History className="h-3 w-3" strokeWidth={1.7} />
+                        Attempts
+                      </span>
+                      <Select
+                        value={activeSessionId ?? undefined}
+                        onValueChange={(v) => setSelectedSessionId(v)}
                       >
-                        <Send className="h-3.5 w-3.5" strokeWidth={1.7} />
-                        Resend invite
-                      </DropdownMenuItem>
-                    ) : null}
-                    {canAct && candidateId ? (
-                      <DropdownMenuItem onSelect={() => setEmailOpen(true)}>
-                        <Mail className="h-3.5 w-3.5" strokeWidth={1.7} />
-                        Send email
-                      </DropdownMenuItem>
-                    ) : null}
-                    {/* Change the candidate's pipeline stage — the same move the
-                        candidates table offers, so a reviewer can decide without
-                        closing the drawer. */}
-                    {canAct && candidateId && statuses.length > 0 ? (
-                      // `candidate` is null only while the detail request is in
-                      // flight, and this menu is gated on `candidateId` — the
-                      // shared component treats that gap as unblocked and lets
-                      // the server have the final word.
-                      <ChangeStatusSubMenu
-                        statuses={statuses}
-                        currentKey={candidate?.currentStatusId?.key}
-                        candidate={candidate}
-                        pending={statusPending}
-                        onSelect={(statusKey) =>
-                          void handleStatusChange(statusKey)
-                        }
-                      />
-                    ) : null}
-                    {data?.scores ? (
-                      <DropdownMenuItem
-                        onSelect={() => setScoringDetailsOpen(true)}
-                      >
-                        <Calculator className="h-3.5 w-3.5" strokeWidth={1.7} />
-                        View scoring details
-                      </DropdownMenuItem>
-                    ) : null}
-                    {canAct && data?.status === "submitted" ? (
-                      <DropdownMenuItem
-                        disabled={rescoring || scoringRunning}
-                        onSelect={handleRescore}
-                      >
-                        <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.7} />
-                        {scoringRunning
-                          ? scoringStatus === "queued"
-                            ? "Queued…"
-                            : "Scoring…"
-                          : "Rescore interview"}
-                      </DropdownMenuItem>
-                    ) : null}
-                    {/* Role-gated after all: the transcode worker DELETES the
-                        raw S3 generations on success and re-queueing resets
-                        the failure diagnostics, so the backend now 403s
-                        interviewers. They still get the raw-parts fallback
-                        players. */}
-                    {canAct && hlsStatus === "failed" ? (
-                      <DropdownMenuItem
-                        disabled={retranscoding}
-                        onSelect={handleRetranscode}
-                      >
-                        <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.7} />
-                        Retry streaming conversion
-                      </DropdownMenuItem>
-                    ) : null}
-                    {canAct && data ? (
-                      <DropdownMenuItem
-                        disabled={reinviting}
-                        onSelect={handleReinvite}
-                        title="Create a NEW attempt (previous attempts are kept) and email a fresh link"
-                      >
-                        <MailPlus className="h-3.5 w-3.5" strokeWidth={1.7} />
-                        Reattempt interview
-                      </DropdownMenuItem>
-                    ) : null}
-                    {canAct && data ? (
-                      <DropdownMenuItem
-                        className="text-[color:var(--danger)] focus:text-[color:var(--danger)]"
-                        onSelect={() => setConfirmDeleteInterview(true)}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" strokeWidth={1.7} />
-                        Delete interview
-                      </DropdownMenuItem>
-                    ) : null}
-                    {canAct && candidateId ? (
-                      <DropdownMenuItem
-                        className="text-[color:var(--danger)] focus:text-[color:var(--danger)]"
-                        onSelect={() => setConfirmDeleteCandidate(true)}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" strokeWidth={1.7} />
-                        Delete candidate
-                      </DropdownMenuItem>
-                    ) : null}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              ) : null}
-            </div>
+                        <SelectTrigger className="h-8 w-auto min-w-36 gap-2 text-xs">
+                          <SelectValue placeholder="Select attempt" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {attempts.map((a) => (
+                            <SelectItem
+                              key={a.sessionId}
+                              value={a.sessionId}
+                              className="text-xs"
+                            >
+                              {attemptOptionLabel(a)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ) : attemptsQuery.isLoading ? (
+                    // Its own query, so it can land after the interview does —
+                    // without this the switcher pops into the action row and
+                    // shoves the Actions menu sideways. A DISABLED query has
+                    // `isLoading` false, so the candidate-only entry point
+                    // never reserves room for a switcher it will never get.
+                    <Skeleton className="h-8 w-56" />
+                  ) : null}
+                  <div className="flex-1" />
+                  {/*
+                   * No Reject / Shortlist here, deliberately.
+                   *
+                   * They used to sit in this header AND in the Pipeline stage card,
+                   * which put the same two decisions in two places with different
+                   * visibility rules: the header pair needed an interview plus a
+                   * score, the card's needed the candidate to be sitting in
+                   * `scored`. A reviewer could therefore see Shortlist in one spot
+                   * and not the other on the same candidate.
+                   *
+                   * The card is the right home: the decision belongs next to the
+                   * stage it moves the candidate out of, and it is the surface that
+                   * also shows what the AI recommended. Nothing is lost from here —
+                   * every status change stays reachable from the Actions menu.
+                   */}
+                  {showActionsMenu ? (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="secondary" size="sm" aria-label="Actions">
+                          <MoreHorizontal
+                            className="h-3.5 w-3.5"
+                            strokeWidth={1.9}
+                          />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-56">
+                        {/* Resend invite — re-sends the link for the CURRENT attempt,
+                            valid only while it's still pending (invited, not started).
+                            Once the attempt has been started/submitted the backend
+                            refuses with a message pointing at "Reattempt interview"
+                            below, which opens a new attempt. */}
+                        {canAct ? (
+                          <DropdownMenuItem
+                            disabled={
+                              !candidateId || !canSendCandidateInvite || invitingCand
+                            }
+                            onSelect={handleSendCandidateInvite}
+                            title={'Re-sends the link while the invite is still pending. Once started, use "Reattempt interview"'}
+                          >
+                            <Send className="h-3.5 w-3.5" strokeWidth={1.7} />
+                            Resend invite
+                          </DropdownMenuItem>
+                        ) : null}
+                        {canAct && candidateId ? (
+                          <DropdownMenuItem onSelect={() => setEmailOpen(true)}>
+                            <Mail className="h-3.5 w-3.5" strokeWidth={1.7} />
+                            Send email
+                          </DropdownMenuItem>
+                        ) : null}
+                        {/* Change the candidate's pipeline stage — the same move the
+                            candidates table offers, so a reviewer can decide without
+                            closing the drawer. */}
+                        {canAct && candidateId && statuses.length > 0 ? (
+                          // `candidate` is null only while the detail request is in
+                          // flight, and this menu is gated on `candidateId` — the
+                          // shared component treats that gap as unblocked and lets
+                          // the server have the final word.
+                          <ChangeStatusSubMenu
+                            statuses={statuses}
+                            currentKey={candidate?.currentStatusId?.key}
+                            candidate={candidate}
+                            pending={statusPending}
+                            // Opens the remark dialog rather than moving on the
+                            // spot. The move still happens on one more click, and
+                            // that click is where the optional "why" is offered —
+                            // the reason a decision was made is worth one extra
+                            // beat, and it is the only moment anyone has it in
+                            // mind.
+                            onSelect={(statusKey) =>
+                              setPendingMove(
+                                statuses.find((s) => s.key === statusKey) ?? null
+                              )
+                            }
+                          />
+                        ) : null}
+                        {data?.scores ? (
+                          <DropdownMenuItem
+                            onSelect={() => setScoringDetailsOpen(true)}
+                          >
+                            <Calculator className="h-3.5 w-3.5" strokeWidth={1.7} />
+                            View scoring details
+                          </DropdownMenuItem>
+                        ) : null}
+                        {canAct && data?.status === "submitted" ? (
+                          <DropdownMenuItem
+                            disabled={rescoring || scoringRunning}
+                            onSelect={handleRescore}
+                          >
+                            <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.7} />
+                            {scoringRunning
+                              ? scoringStatus === "queued"
+                                ? "Queued…"
+                                : "Scoring…"
+                              : "Rescore interview"}
+                          </DropdownMenuItem>
+                        ) : null}
+                        {/* Role-gated after all: the transcode worker DELETES the
+                            raw S3 generations on success and re-queueing resets
+                            the failure diagnostics, so the backend now 403s
+                            interviewers. They still get the raw-parts fallback
+                            players. */}
+                        {canAct && hlsStatus === "failed" ? (
+                          <DropdownMenuItem
+                            disabled={retranscoding}
+                            onSelect={handleRetranscode}
+                          >
+                            <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.7} />
+                            Retry streaming conversion
+                          </DropdownMenuItem>
+                        ) : null}
+                        {canAct && data ? (
+                          <DropdownMenuItem
+                            disabled={reinviting}
+                            onSelect={handleReinvite}
+                            title="Create a NEW attempt (previous attempts are kept) and email a fresh link"
+                          >
+                            <MailPlus className="h-3.5 w-3.5" strokeWidth={1.7} />
+                            Reattempt interview
+                          </DropdownMenuItem>
+                        ) : null}
+                        {canAct && data ? (
+                          <DropdownMenuItem
+                            className="text-[color:var(--danger)] focus:text-[color:var(--danger)]"
+                            onSelect={() => setConfirmDeleteInterview(true)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" strokeWidth={1.7} />
+                            Delete interview
+                          </DropdownMenuItem>
+                        ) : null}
+                        {canAct && candidateId ? (
+                          <DropdownMenuItem
+                            className="text-[color:var(--danger)] focus:text-[color:var(--danger)]"
+                            onSelect={() => setConfirmDeleteCandidate(true)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" strokeWidth={1.7} />
+                            Delete candidate
+                          </DropdownMenuItem>
+                        ) : null}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  ) : null}
+                </div>
+              </>
+            )}
           </div>
 
           {/* Body */}
           <div className="scroll flex-1 overflow-auto px-[22px] py-[18px]">
-            {isLoading || (!activeSessionId && candidateQuery.isLoading) ? (
+            {detailLoading ? (
               // Either the interview detail is loading, or we have no session id
               // YET because the candidate detail (which resolves the interview
               // pointer to a `publicSessionId`) is still in flight. Both are
               // "loading", NOT "no interview" — showing the empty state here
-              // would flash it for a candidate who does have one.
+              // would flash it for a candidate who does have one. Same flag the
+              // header skeleton above uses, so the two can never disagree.
               <InterviewDetailSkeleton />
             ) : !activeSessionId ? (
               // No interview yet, but there IS a candidate — the drawer must not
@@ -2069,6 +2288,10 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                     just the parsed-CV profile and a note. */}
                 <ProfileCard profile={profile} />
                 <ExtraGatesCard {...extraGatesProps} />
+                <ApplicationAnswersCard
+                  answers={candidate?.answers}
+                  candidateId={candidateId}
+                />
 
                 {isInitialRejected ? (
                   // Rejected at the CV pre-screen, no interview will ever exist,
@@ -2090,14 +2313,45 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                     canAct={canAct}
                   />
                 ) : (
-                  <div className="flex items-center gap-3 rounded-2xl border border-dashed border-line bg-surface px-5 py-4 text-[13px] text-ink-muted">
-                    <MicOff className="h-5 w-5 shrink-0 text-ink-subtle" />
-                    <p>
-                      No interview yet. Once this candidate completes one, the
-                      score, video and evaluation appear here.
-                    </p>
-                  </div>
+                  <>
+                    {passedChecks.length > 0 ? (
+                      <PassedChecksCard checks={passedChecks} />
+                    ) : null}
+                    <div className="flex items-center gap-3 rounded-2xl border border-dashed border-line bg-surface px-5 py-4 text-[13px] text-ink-muted">
+                      <MicOff className="h-5 w-5 shrink-0 text-ink-subtle" />
+                      <p>
+                        No interview yet. Once this candidate completes one,
+                        the score, video and evaluation appear here.
+                      </p>
+                    </div>
+                  </>
                 )}
+
+                {/*
+                  Remarks belong HERE too, not only in the tabbed branch below.
+                  This branch is every candidate who has not interviewed —
+                  applied, parked at needs_review, rejected at the CV screen —
+                  which is exactly who HR is most likely to be talking about
+                  ("called them", "the CV gate is wrong about their years").
+                  There are no tabs in this state, so the thread renders as
+                  another card in the stack, under its own heading.
+                */}
+                {candidateId ? (
+                  <div className="grid gap-2.5">
+                    <h3 className="flex items-center gap-2 px-0.5 text-[13px] font-semibold text-ink">
+                      <MessageSquare
+                        className="h-3.5 w-3.5 text-ink-subtle"
+                        strokeWidth={1.8}
+                      />
+                      Remarks
+                    </h3>
+                    <CandidateRemarks
+                      candidateId={candidateId}
+                      canWrite={canAct}
+                      timeZone={orgTimezone}
+                    />
+                  </div>
+                ) : null}
               </div>
             ) : is404 ? (
               <div className="flex h-72 flex-col items-center justify-center gap-3 px-6 text-center text-sm text-ink-muted">
@@ -2132,9 +2386,22 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                     <ExtraGatesCard {...extraGatesProps} />
                   </div>
                 ) : null}
+                {candidate?.answers?.length ? (
+                  <div className="mb-4">
+                    <ApplicationAnswersCard
+                      answers={candidate.answers}
+                      candidateId={candidateId}
+                    />
+                  </div>
+                ) : null}
+                {passedChecks.length > 0 ? (
+                  <div className="mb-4">
+                    <PassedChecksCard checks={passedChecks} />
+                  </div>
+                ) : null}
 
                 <Tabs defaultValue="evaluation" className="w-full">
-                  <TabsList className="mb-4 grid w-full grid-cols-2">
+                  <TabsList className="mb-4 grid w-full grid-cols-3">
                     <TabsTrigger value="evaluation">
                       <Sparkles className="h-3.5 w-3.5" strokeWidth={1.8} />
                       Evaluation
@@ -2142,6 +2409,14 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                     <TabsTrigger value="activity">
                       <Activity className="h-3.5 w-3.5" strokeWidth={1.8} />
                       Activity
+                    </TabsTrigger>
+                    {/* Sibling to Activity, not a slice of it: Activity is what
+                        HAPPENED (machine output, one attempt), Remarks is what
+                        the TEAM SAID (whole candidate, and the only writable
+                        one of the two). */}
+                    <TabsTrigger value="remarks">
+                      <MessageSquare className="h-3.5 w-3.5" strokeWidth={1.8} />
+                      Remarks
                     </TabsTrigger>
                   </TabsList>
 
@@ -2339,6 +2614,17 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                       }
                     />
                   </TabsContent>
+
+                  {/* ── Remarks: the team's own thread on this candidate. ── */}
+                  <TabsContent value="remarks" className="mt-0">
+                    {candidateId ? (
+                      <CandidateRemarks
+                        candidateId={candidateId}
+                        canWrite={canAct}
+                        timeZone={orgTimezone}
+                      />
+                    ) : null}
+                  </TabsContent>
                 </Tabs>
 
                 {/* Pipeline stage component — disabled for now; flip
@@ -2379,7 +2665,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
         open={confirmDeleteInterview}
         onOpenChange={setConfirmDeleteInterview}
         title="Delete this interview?"
-        description="This removes this attempt entirely — recording, transcript, scores, and its emails and activity. The candidate keeps their row, an earlier attempt (if any) becomes the latest again, and they can be re-invited."
+        description="This moves the attempt to Recently deleted: recording, transcript and scores are kept there and can be restored until the Recently deleted period runs out. The candidate keeps their row, an earlier attempt (if any) becomes the latest again, and they can be re-invited. Any live link for this attempt stops working."
         destructive
         confirmLabel="Delete interview"
         loadingLabel="Deleting…"
@@ -2391,7 +2677,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
         open={confirmDeleteCandidate}
         onOpenChange={setConfirmDeleteCandidate}
         title={`Delete ${data?.candidateName || "candidate"}?`}
-        description="This permanently removes the candidate, their CV, every interview recording, and every score. This cannot be undone."
+        description="This moves the candidate to Recently deleted: their CV, recordings and scores are kept there and can be restored. Any live invite link stops working immediately. Once the Recently deleted period runs out, everything is erased for good."
         destructive
         confirmLabel="Delete candidate"
         loadingLabel="Deleting…"
@@ -2407,6 +2693,30 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
           recipientLabel={data?.candidateName || "this candidate"}
         />
       ) : null}
+
+      {/* Confirm the pipeline move and offer the optional "why" in one step.
+          `pendingMove` is both the open flag and the destination, so the
+          dialog can never render without a target to name. */}
+      <RemarkDialog
+        open={Boolean(pendingMove)}
+        onOpenChange={(next) => {
+          if (!next) setPendingMove(null);
+        }}
+        mode={
+          pendingMove
+            ? {
+                kind: "move",
+                from: candidate?.currentStatusId ?? null,
+                to: pendingMove,
+              }
+            : null
+        }
+        candidateName={data?.candidateName ?? candidate?.fullName}
+        pending={statusPending}
+        onSubmit={(note) => {
+          if (pendingMove) void handleStatusChange(pendingMove.key, note);
+        }}
+      />
     </>
   );
 }
@@ -3007,6 +3317,50 @@ function feedEvent(row: CandidateActivity, timeZone: string): TimelineEvent {
   return { title: "Activity", sub: row.note || "", time, at, seq: 5, kind: "note" };
 }
 
+/**
+ * Loading placeholder for the activity timeline.
+ *
+ * The timeline is a MERGE of two sources with very different latencies: four
+ * milestones synthesized locally from the interview document (invited /
+ * started / submitted / scored), available on the very first render, and the
+ * audit feed fetched per attempt. So the tab used to paint the synthesized
+ * four immediately and then re-sort itself when the feed landed — real rows
+ * appearing BETWEEN rows already on screen, which reads as the list being
+ * built out of placeholders. Holding the whole list back until the first feed
+ * page resolves means it paints once, in final order.
+ *
+ * Only the FIRST page is gated. "Load earlier activity" and the refetch after
+ * a mutation keep their existing in-place behaviour, because there the rows on
+ * screen are already real.
+ */
+function ActivityTimelineSkeleton() {
+  return (
+    <div className="rounded-2xl border border-line bg-surface p-5">
+      <div className="mb-3.5 text-[14px] font-semibold">Activity timeline</div>
+      <div className="grid gap-0.5">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="flex gap-3">
+            <div className="flex flex-col items-center">
+              <Skeleton className="h-[30px] w-[30px] shrink-0 rounded-full" />
+              {i < 3 ? (
+                <span
+                  className="my-0.5 min-h-4 w-[2px] flex-1"
+                  style={{ background: "var(--line-2)" }}
+                />
+              ) : null}
+            </div>
+            <div className="min-w-0 flex-1 pb-4">
+              <Skeleton className="h-3.5 w-40 max-w-full" />
+              <Skeleton className="mt-1.5 h-3 w-56 max-w-full" />
+              <Skeleton className="mt-1.5 h-3 w-28" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ActivityTab({
   candidateId,
   attemptNumber,
@@ -3052,6 +3406,20 @@ function ActivityTab({
     enabled: Boolean(candidateId),
   });
   const feedRows = (feed.data?.pages ?? []).flatMap((p) => p.data);
+
+  /*
+   * Wait for the first feed page before rendering ANY of the timeline.
+   *
+   * The milestones below are synthesized from props, so without this the tab
+   * painted them instantly and then spliced the real rows in around them —
+   * the list visibly rebuilding itself. `isLoading` is first-load-only (it is
+   * false while a cached page refetches, and false for a DISABLED query, so a
+   * missing `candidateId` still falls through to the milestones rather than
+   * hanging on a skeleton forever), which is exactly the one case worth
+   * gating: after a mutation the rows already on screen are real, and
+   * replacing them with a skeleton would be the flicker this is fixing.
+   */
+  if (feed.isLoading) return <ActivityTimelineSkeleton />;
 
   /*
    * OLDEST FIRST — the invite at the top, the score at the bottom, read down

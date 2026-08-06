@@ -120,7 +120,11 @@ export async function setJobQuestions(
   return data
 }
 
-/** Hard delete — 409 unless the job is draft|archived AND has no candidates. */
+/**
+ * Move a job to Recently deleted (restorable from the trash for the
+ * retention window) — 409 unless the job is draft|archived AND has no
+ * candidates, trashed ones included.
+ */
 export async function deleteJob(id: string) {
   const { data } = await api.delete<{ deleted: boolean; jobId: string }>(
     `/admin/jobs/${id}`

@@ -12,8 +12,9 @@ interface ChipInputProps {
 }
 
 /**
- * Type-and-Enter chip editor for a `string[]` field (the job's required
- * skills). Backspace on an empty box removes the last chip; entries are
+ * Type-and-Enter chip editor for a `string[]` field (a dropdown field's
+ * options or an eligibility check's accepted values in the application-form
+ * editor). Backspace on an empty box removes the last chip; entries are
  * deduped case-insensitively but stored with the casing the user typed.
  */
 export function ChipInput({

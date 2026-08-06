@@ -46,11 +46,11 @@ interface PaletteGroup {
 }
 
 /**
- * Command palette (⌘K / Ctrl+K). Renders a centered modal 100px from the top
- * with a search input and result groups: recent Candidates, Jobs, and a
- * static "Go to" list of app routes. Candidate hits deep-link into the
- * Candidates page with `?candidate=<id>` so the drawer auto-opens; job hits
- * navigate to the job detail page.
+ * Command palette (⌘K / Ctrl+K). Renders a modal centred in the viewport with
+ * a search input and result groups: recent Candidates, Jobs, and a static
+ * "Go to" list of app routes. Candidate hits deep-link into the Candidates
+ * page with `?candidate=<id>` so the drawer auto-opens; job hits navigate to
+ * the job detail page.
  */
 export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const { user } = useAuth()
@@ -227,108 +227,154 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       role="dialog"
       aria-modal="true"
       aria-label="Command palette"
-      className="fixed inset-0 z-[80] flex items-start justify-center bg-[rgba(13,11,11,0.4)] px-6 pt-[100px]"
+      className="fixed inset-0 z-[80] overflow-y-auto overscroll-contain bg-[rgba(13,11,11,0.4)]"
       style={{ animation: backdropAnim }}
       onClick={() => onOpenChange(false)}
     >
-      <div
-        className="w-full max-w-[560px] overflow-hidden rounded-2xl border border-line bg-surface shadow-[0_24px_70px_rgba(13,11,11,0.28)]"
-        style={{ animation: panelAnim }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Search input row */}
-        <div className="flex items-center gap-3 border-b border-line px-[18px] py-[15px]">
-          <Search className="h-[18px] w-[18px] text-ink-muted" strokeWidth={1.7} />
-          <input
-            ref={inputRef}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Jump to a candidate, job, or action…"
-            className="flex-1 border-none bg-transparent text-[15px] text-ink outline-none placeholder:text-ink-subtle"
-          />
-          <span className="mono rounded-[5px] border border-line-2 px-1.5 py-0.5 text-[11px] text-ink-subtle">
-            esc
-          </span>
-        </div>
+      {/* Centred exactly the way every other dialog in the app centres
+          (`components/ui/dialog.tsx`): a `min-h-full` flex row inside a
+          scrollable backdrop. The palette used to be pinned `pt-[100px]` from
+          the top, which parked it over the top bar and read as a dropdown off
+          the search field rather than as a modal.
 
-        {/* Result body */}
-        <div className="scroll max-h-[340px] overflow-auto p-2">
-          {loading ? (
-            <div className="p-1">
-              {/* Mirror the result rows — icon tile + a line of text — so the
-                  palette body doesn't jump when matches resolve. */}
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="flex items-center gap-3 rounded-[9px] px-2.5 py-2"
-                >
-                  <Skeleton className="h-7 w-7 flex-shrink-0 rounded-[8px]" />
-                  <Skeleton className="h-3.5 w-48 max-w-full" />
-                </div>
-              ))}
-            </div>
-          ) : empty ? (
-            <div className="px-3 py-8 text-center">
-              <div className="text-[13.5px] font-semibold text-ink">No results</div>
-              <div className="mt-1 text-[12.5px] text-ink-muted">
-                Try a candidate name, a job title, or a page like &quot;team&quot;.
-              </div>
-            </div>
-          ) : (
-            groups.map((group) => (
-              <div key={group.label}>
-                <div className="px-2.5 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle">
-                  {group.label}
-                </div>
-                {group.items.map((item) => {
-                  flatIndex += 1
-                  const active = flatIndex === activeIndex
-                  const Icon = item.icon
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      ref={active ? activeItemRef : null}
-                      onMouseEnter={((idx) => () => setActiveIndex(idx))(flatIndex)}
-                      onClick={item.onSelect}
-                      className={
-                        "flex w-full cursor-pointer items-center gap-3 rounded-[9px] px-2.5 py-2 text-left transition-colors " +
-                        (active ? "bg-surface-3" : "hover:bg-surface-3")
-                      }
-                    >
-                      <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[8px] bg-surface-3 text-primary">
-                        <Icon className="h-[15px] w-[15px]" strokeWidth={1.7} />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[14px] font-medium text-ink">{item.title}</span>
-                        <span className="block truncate text-[12px] text-ink-muted">{item.sub}</span>
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            ))
-          )}
-        </div>
+          The `min-h-full` wrapper is what makes centring safe. `items-center`
+          on the fixed element alone overflows in BOTH directions on a short
+          viewport, putting the panel's top edge above the scroll origin where
+          nothing can reach it; growing a scrollable child instead pushes the
+          overflow downwards, where the backdrop can scroll to it. */}
+      <div className="flex min-h-full items-center justify-center px-6 py-6">
+        <div
+          className="w-full max-w-[560px] overflow-hidden rounded-2xl border border-line bg-surface shadow-[0_24px_70px_rgba(13,11,11,0.28)]"
+          style={{ animation: panelAnim }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Search input row */}
+          <div className="flex items-center gap-3 border-b border-line px-[18px] py-[15px]">
+            <Search className="h-[18px] w-[18px] text-ink-muted" strokeWidth={1.7} />
+            <input
+              ref={inputRef}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Jump to a candidate, job, or action…"
+              className="flex-1 border-none bg-transparent text-[15px] text-ink outline-none placeholder:text-ink-subtle"
+            />
+            <Key>esc</Key>
+          </div>
 
-        {/* Footer key hints */}
-        <div className="flex items-center gap-4 border-t border-line bg-surface-2 px-[18px] py-2 text-[11.5px] text-ink-subtle">
-          <span className="flex items-center gap-1">
-            <span className="mono rounded border border-line-2 px-1 text-[10px]">↑</span>
-            <span className="mono rounded border border-line-2 px-1 text-[10px]">↓</span>
-            navigate
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="mono rounded border border-line-2 px-1 text-[10px]">↵</span>
-            open
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="mono rounded border border-line-2 px-1 text-[10px]">esc</span>
-            close
-          </span>
+          {/* Result body */}
+          <div className="scroll max-h-[340px] overflow-auto p-2">
+            {loading ? (
+              <div className="p-1">
+                {/* Mirror the result rows — icon tile + a line of text — so the
+                    palette body doesn't jump when matches resolve. */}
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-3 rounded-[9px] px-2.5 py-2"
+                  >
+                    <Skeleton className="h-7 w-7 flex-shrink-0 rounded-[8px]" />
+                    <Skeleton className="h-3.5 w-48 max-w-full" />
+                  </div>
+                ))}
+              </div>
+            ) : empty ? (
+              <div className="px-3 py-8 text-center">
+                <div className="text-[13.5px] font-semibold text-ink">No results</div>
+                <div className="mt-1 text-[12.5px] text-ink-muted">
+                  Try a candidate name, a job title, or a page like &quot;team&quot;.
+                </div>
+              </div>
+            ) : (
+              groups.map((group) => (
+                <div key={group.label}>
+                  <div className="px-2.5 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-muted">
+                    {group.label}
+                  </div>
+                  {group.items.map((item) => {
+                    flatIndex += 1
+                    const active = flatIndex === activeIndex
+                    const Icon = item.icon
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        ref={active ? activeItemRef : null}
+                        onMouseEnter={((idx) => () => setActiveIndex(idx))(flatIndex)}
+                        onClick={item.onSelect}
+                        className={
+                          "flex w-full cursor-pointer items-center gap-3 rounded-[9px] px-2.5 py-2 text-left transition-colors " +
+                          // The active row is the one Enter fires, so it has to
+                          // be obvious in a glance-and-type flow. `bg-surface-3`
+                          // was only a couple of percent off the panel and the
+                          // hover state was the SAME colour, so pointer and
+                          // keyboard selection were indistinguishable. Accent
+                          // tint + a filled icon tile separates them.
+                          (active ? "bg-accent" : "hover:bg-hover")
+                        }
+                      >
+                        <span
+                          className={
+                            "flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[8px] transition-colors " +
+                            (active ? "bg-primary text-primary-foreground" : "bg-surface-3 text-primary")
+                          }
+                        >
+                          <Icon className="h-[15px] w-[15px]" strokeWidth={1.7} />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[14px] font-medium text-ink">{item.title}</span>
+                          <span className="block truncate text-[12px] text-ink-muted">{item.sub}</span>
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Footer key hints. Wraps rather than overflowing: three hints plus
+              their caps do not fit a phone-width panel on one line. */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line bg-surface-2 px-[18px] py-2.5 text-[12px] font-medium text-ink-muted">
+            <span className="flex items-center gap-1.5">
+              <span className="flex items-center gap-1">
+                <Key>↑</Key>
+                <Key>↓</Key>
+              </span>
+              navigate
+            </span>
+            <span className="flex items-center gap-1.5">
+              <Key>↵</Key>
+              open
+            </span>
+            <span className="flex items-center gap-1.5">
+              <Key>esc</Key>
+              close
+            </span>
+          </div>
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * A keycap, used for the footer hints and the input row's `esc` affordance.
+ *
+ * A `<kbd>`, not a styled `<span>`: the content is literally keyboard input,
+ * and "keyboard escape, close" is the entire hint a screen reader has to
+ * convey.
+ *
+ * The caps it replaces were bare 10px outlines in `--ink-subtle`, which lands
+ * around 2.5:1 against the footer's `--surface-2` — readable as decoration,
+ * not as text. Filled, on `--ink-2`, at 11px, they read as keys at a glance.
+ * `min-w-[22px]` is what keeps the single-glyph caps (↑ ↓ ↵) square instead of
+ * letting them collapse into slivers beside the wider `esc`.
+ */
+function Key({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="mono inline-flex h-[20px] min-w-[22px] items-center justify-center rounded-[6px] border border-line-2 bg-surface px-1.5 text-[11px] font-semibold leading-none text-ink-2">
+      {children}
+    </kbd>
   )
 }

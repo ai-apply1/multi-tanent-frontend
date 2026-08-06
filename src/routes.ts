@@ -28,6 +28,9 @@ export const ROUTES = {
   /** Per-user account security (two-factor authentication). Self-scoped, so
    *  available to every role, not just org_admin. */
   SECURITY: "/dashboard/security",
+  /** "Recently deleted": restore or permanently erase trashed candidates,
+   *  interview attempts and jobs before the retention purge does. */
+  TRASH: "/dashboard/trash",
 } as const;
 
 /**

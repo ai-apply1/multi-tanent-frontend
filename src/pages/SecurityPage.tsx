@@ -351,7 +351,11 @@ export function SecurityPage() {
     qc.invalidateQueries({ queryKey: MFA_STATUS_KEY });
 
   return (
-    <div className="mx-auto max-w-[760px] px-6 py-6 lg:px-8 lg:py-8">
+    // 1240px is the shell-wide page measure — every destination uses it, so
+    // their left edges line up as you move between them, and the card below
+    // fills it like Hiring Pipeline's and Team's do. A page-specific width
+    // here would re-centre the column and visibly shift the page sideways.
+    <div className="mx-auto max-w-[1240px] px-6 py-6 lg:px-8 lg:py-8">
       <div className="mb-6 flex items-center gap-2.5">
         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-primary">
           <ShieldCheck className="h-5 w-5" aria-hidden />

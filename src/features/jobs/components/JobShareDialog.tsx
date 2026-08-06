@@ -44,8 +44,9 @@ interface JobShareDialogProps {
 /**
  * Job share modal. Two cards side by side:
  *   - Invite by email (chip input + send)
- *   - Share the public interview link (copy)
- * Mirrors the jobjen design; QR-code affordance omitted for now.
+ *   - The public apply link (copy). One URL, one name: it is the careers
+ *     apply page (apply.<domain>/<slug>), not an "interview link" — the
+ *     interview happens later on screening.<domain>.
  */
 export function JobShareDialog({ jobId, open, onOpenChange }: JobShareDialogProps) {
   const { user } = useAuth()
@@ -153,7 +154,7 @@ export function JobShareDialog({ jobId, open, onOpenChange }: JobShareDialogProp
             <DialogDescription className="mt-1 text-[13px]">
               {linkQuery.data?.jobTitle ? (
                 <>
-                  Send the invite link for{" "}
+                  Send the apply link for{" "}
                   <span className="font-semibold text-ink">
                     {linkQuery.data.jobTitle}
                   </span>{" "}
@@ -161,9 +162,9 @@ export function JobShareDialog({ jobId, open, onOpenChange }: JobShareDialogProp
                   {isNonOpen ? "." : " - anyone with the link can apply."}
                 </>
               ) : isNonOpen ? (
-                "Send the invite link to candidates."
+                "Send the apply link to candidates."
               ) : (
-                "Send the invite link to candidates — anyone with the link can apply."
+                "Send the apply link to candidates, anyone with the link can apply."
               )}
             </DialogDescription>
           </div>
@@ -185,8 +186,8 @@ export function JobShareDialog({ jobId, open, onOpenChange }: JobShareDialogProp
             />
             <p className="text-[12.5px] text-[var(--warning)]">
               {status === "draft"
-                ? "This job isn't published yet — the link won't work for candidates until you publish it."
-                : `This job isn't open (${status}) — the link won't work for candidates until it's reopened.`}
+                ? "This job isn't published yet, so the link won't work for candidates until you publish it."
+                : `This job isn't open (${status}), so the link won't work for candidates until it's reopened.`}
             </p>
           </div>
         ) : null}
@@ -289,7 +290,7 @@ export function JobShareDialog({ jobId, open, onOpenChange }: JobShareDialogProp
               </span>
               <div className="min-w-0">
                 <h3 className="text-[13.5px] font-semibold text-ink">
-                  Share interview link
+                  Public apply link
                 </h3>
                 <p className="text-[12px] text-ink-muted">
                   {isNonOpen
@@ -336,7 +337,7 @@ export function JobShareDialog({ jobId, open, onOpenChange }: JobShareDialogProp
             <p className="mt-2 text-[11.5px] text-ink-muted">
               {isNonOpen
                 ? "It won't reach candidates until the job is open."
-                : "Post it anywhere — a job board, a Slack message, a QR code."}
+                : "Post it anywhere: a job board, a Slack message, a QR code."}
             </p>
           </section>
         </div>

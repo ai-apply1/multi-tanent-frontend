@@ -194,10 +194,10 @@ export interface CandidateBase {
   jobId: string
   fullName: string
   email: string
-  /** Required at every write path — never empty on a row created since. */
-  phone: string
-  /** Required at every write path. Stored lowercased; re-case for display. */
-  city: string
+  /** Null when the job's form did not collect one (per-job phone policy). */
+  phone: string | null
+  /** Null when the job asks no city (no location gate). Stored lowercased. */
+  city: string | null
   /** S3 key, never a URL. `null` ⇒ no CV on file ⇒ the Open-CV action is hidden. */
   cvKey: string | null
   /** Computed from the parsed CV's work history; `null` until the parse lands. */
@@ -260,11 +260,6 @@ export interface CandidateDetail extends CandidateBase {
   /** The parsed-CV cache. `null` until the cv-parse worker finishes. */
   profile: CandidateProfile | null
   /**
-   * The LEAST this candidate said they would accept, from the apply form.
-   * Null when the job's salary gate is off, so the question was never asked.
-   */
-  expectedSalaryMin?: number | null
-  /**
    * Would they move for the role? Their own answer from the apply form.
    *
    * `null`/absent means NOT ASKED, which is different from "no": the job may
@@ -273,6 +268,32 @@ export interface CandidateDetail extends CandidateBase {
    * than rendering a "No" nobody said.
    */
   willingToRelocate?: boolean | null
+  /**
+   * Custom application-form answers, SNAPSHOTTED at submit: label and type
+   * were frozen with the value, so these render correctly even after HR
+   * edits or deletes the field on the job. Render them as-is — never
+   * "refresh" a label from the job's current form config.
+   */
+  answers?: CandidateAnswer[]
+}
+
+/** One snapshotted custom-form answer (see `answers` above). */
+export interface CandidateAnswer {
+  fieldId: string
+  /** The question AS ASKED at submit time. */
+  label: string
+  type:
+    | "text"
+    | "textarea"
+    | "number"
+    | "select"
+    | "multiselect"
+    | "checkbox"
+    | "date"
+    | "url"
+    | "file"
+  /** For a `file` answer the string is the document's S3 key. */
+  value: string | number | boolean | string[]
 }
 
 /**
@@ -298,16 +319,6 @@ export interface CandidateProfile {
   jobFit?: {
     rating: "strong" | "moderate" | "weak" | "unclear"
     summary: string
-  }
-  /**
-   * The university gate's verdict, from the CV. Absent when the job had no
-   * university gate when this CV was read.
-   */
-  universityCheck?: {
-    verdict: "yes" | "no" | "unclear"
-    /** The accepted institution matched, verbatim. '' when none. */
-    matched: string
-    evidence: string
   }
   technologies?: Array<{ name: string; category: string; isCoreProgramming: boolean }>
   workHistory?: Array<{
@@ -370,7 +381,14 @@ export interface CandidateActivity {
   /** Interview attempt the event belongs to; null = pre-attempt lifecycle. */
   attemptNumber: number | null
   actorType: CandidateActivityActor
-  /** Frozen at write time (an email for users), so renames/deletes don't blank history. */
+  /**
+   * The acting user's id when `actorType === "user"`, else null. Present so a
+   * row can be marked as the VIEWER's own ("You"); `actorName` cannot do that
+   * job, being a non-unique display string, so matching on it would label a
+   * namesake's remark as yours.
+   */
+  actorId: string | null
+  /** Frozen at write time, so renames/deletes don't blank history. */
   actorName: string | null
   note: string | null
   meta: Record<string, unknown> | null
@@ -397,10 +415,10 @@ export interface KanbanCard {
   _id: string
   fullName: string
   email: string
-  /** Required at every write path — never empty on a row created since. */
-  phone: string
-  /** Required at every write path. Stored lowercased; re-case for display. */
-  city: string
+  /** Null when the job's form did not collect one (per-job phone policy). */
+  phone: string | null
+  /** Null when the job asks no city (no location gate). Stored lowercased. */
+  city: string | null
   yearsOfExperience: number | null
   attemptCount: number
   latestInterviewId: string | null
@@ -440,16 +458,14 @@ export interface KanbanBoard {
 // ── bulk CV import ────────────────────────────────────────────────────
 
 /**
- * The only three CV mime types the funnel accepts. Enforced by the presign
- * DTO (`@IsIn`), by what `S3Service` can build an extension for, and by what
- * the CV parser can extract text from — so filtering client-side is a
- * courtesy, not the gate.
+ * The only CV mime type the funnel accepts — PDF only, everywhere, matching
+ * the backend's ALLOWED_CV_CONTENT_TYPES (a per-job Word opt-in existed for
+ * one day and was removed on request). Enforced by the presign DTO
+ * (`@IsIn`), so filtering client-side is a courtesy, not the gate. The
+ * EXTRA-document file fields keep their own per-field formats; this governs
+ * the CV alone.
  */
-export const ALLOWED_CV_CONTENT_TYPES = [
-  "application/pdf",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-] as const
+export const ALLOWED_CV_CONTENT_TYPES = ["application/pdf"] as const
 
 export type AllowedCvContentType = (typeof ALLOWED_CV_CONTENT_TYPES)[number]
 
@@ -475,17 +491,14 @@ export interface PresignedCvUpload {
 export interface BulkConfirmRow {
   fullName: string
   email: string
-  /** Required server-side (`@IsNotEmpty`) — an empty string is a 400. */
-  phone: string
-  /** Required server-side: the job's city gate compares against it. */
-  city: string
-  cvKey: string
+  /** Optional: a blank stores null (the phone policy is candidate-facing). */
+  phone?: string
   /**
-   * The minimum salary this candidate would accept. Required when the job's
-   * salary gate is on; a row missing it is skipped server-side
-   * (`missing_expected_salary`), which is why the dialog blocks it first.
+   * Required exactly when the target job GATES on a city (the server skips
+   * the row as `missing_city` otherwise); omitted stores null.
    */
-  expectedSalaryMin?: number
+  city?: string
+  cvKey: string
 }
 
 /**

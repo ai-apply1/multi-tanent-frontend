@@ -17,8 +17,6 @@ import {
 
 const CONTENT_TYPE_BY_EXTENSION: Record<string, AllowedCvContentType> = {
   pdf: "application/pdf",
-  doc: "application/msword",
-  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
 
 /**
@@ -34,7 +32,7 @@ const MAX_ENTRIES = 2000
 
 export interface UnzippedCvs {
   files: File[]
-  /** Entries that weren't a PDF/DOC/DOCX — reported, never silently dropped. */
+  /** Entries that weren't a PDF — reported, never silently dropped. */
   skipped: number
   /** True when the archive blew the size/entry cap and we stopped early. */
   truncated: boolean

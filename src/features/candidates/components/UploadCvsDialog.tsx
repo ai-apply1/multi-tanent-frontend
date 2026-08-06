@@ -66,21 +66,17 @@ import {
   listJobOptions,
 } from "@/features/jobs/jobsApi"
 import { errorMessage } from "@/lib/errors"
-import { blurOnWheel, cn } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 
 /**
- * Extension → mime, for the browsers that hand us an empty (or plain
- * `application/octet-stream`) `File.type` for .doc/.docx. The mime we send at
- * presign is what S3 signs the PUT for, so guessing wrong here surfaces as a
- * 403 on upload, not a validation error.
+ * Extension → mime, for the browsers/OSes that hand us an empty (or plain
+ * `application/octet-stream`) `File.type`. The mime we send at presign is
+ * what S3 signs the PUT for, so guessing wrong here surfaces as a 403 on
+ * upload, not a validation error. PDF only, like the whole funnel.
  */
 const CONTENT_TYPE_BY_EXTENSION: Record<string, AllowedCvContentType> = {
   pdf: "application/pdf",
-  doc: "application/msword",
-  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
-
-const ACCEPT_ATTR = ".pdf,.doc,.docx,.zip"
 
 function contentTypeFor(file: File): AllowedCvContentType | null {
   if ((ALLOWED_CV_CONTENT_TYPES as readonly string[]).includes(file.type)) {
@@ -141,11 +137,6 @@ interface UploadRow {
   phoneIso: string
   phoneNumber: string
   city: string
-  /**
-   * The minimum salary this candidate would accept. A raw string so a
-   * half-typed number is a legal editing state; parsed at confirm.
-   */
-  expectedSalaryMin: string
   status: RowStatus
   progress: number
   /** Why the direct S3 PUT failed — shown inline, not toasted. */
@@ -232,23 +223,22 @@ export function UploadCvsDialog({
   })
 
   /**
-   * The TARGET job's own custom fields. Keyed on `selectedJobId`, not the
-   * `jobId` prop, because the dialog lets the admin re-point the import at a
-   * different job mid-flow and the columns must follow it.
+   * The TARGET job's own config. Keyed on `selectedJobId`, not the `jobId`
+   * prop, because the dialog lets the admin re-point the import at a
+   * different job mid-flow and the rules must follow it: the city column
+   * blocks a row exactly when the job gates on location.
    */
   const targetJobQuery = useQuery({
     queryKey: ["job", selectedJobId],
     queryFn: () => getJob(selectedJobId),
     enabled: open && Boolean(selectedJobId),
   })
-
-  /**
-   * Does the TARGET job ask for an expected salary? Keyed on `selectedJobId`,
-   * not the `jobId` prop, because the dialog lets the admin re-point the import
-   * at a different job mid-flow and the column must follow it.
-   */
-  const asksSalary =
-    targetJobQuery.data?.eligibility.expectedSalary?.enabled === true
+  const targetJob = targetJobQuery.data
+  // Until the job loads, assume the city IS required: briefly over-asking
+  // beats letting rows through that the server then skips.
+  const cityRequired = targetJob
+    ? targetJob.workMode !== "remote" && Boolean(targetJob.eligibility.city)
+    : true
 
   const jobOptions = useMemo(() => {
     const all = jobsQuery.data ?? []
@@ -281,7 +271,6 @@ export function UploadCvsDialog({
         phoneIso: "",
         phoneNumber: "",
         city: "",
-        expectedSalaryMin: "",
         status: "idle",
         progress: 0,
         error: null,
@@ -291,7 +280,7 @@ export function UploadCvsDialog({
     }
     if (rejected > 0) {
       toast.error(
-        `Skipped ${rejected} file${rejected === 1 ? "" : "s"}. Only PDF, DOC and DOCX are accepted.`
+        `Skipped ${rejected} file${rejected === 1 ? "" : "s"}. Only PDF files are accepted.`
       )
     }
     setRows((prev) => {
@@ -339,7 +328,7 @@ export function UploadCvsDialog({
         toast.error("That archive was too large, so only part of it was read.")
       }
       if (fromZips.length === 0 && skipped === 0) {
-        toast.error("No PDF, DOC or DOCX files were found in that ZIP.")
+        toast.error("No PDF files were found in that ZIP.")
       }
       appendFiles([...loose, ...fromZips], skipped)
     } finally {
@@ -372,7 +361,10 @@ export function UploadCvsDialog({
    */
   const phoneError = (row: UploadRow): string | null => {
     const number = row.phoneNumber.trim()
-    if (!number) return "Phone is required. The CV didn't have one."
+    // Optional now (the public form's phone policy is per job, and HR types
+    // what they have): a blank stores null, but a HALF-typed number still
+    // blocks — wrong beats missing.
+    if (!number) return null
     if (!/^\d+$/.test(number))
       return "Digits only — the country code goes in the dropdown."
     if (!row.phoneIso) return "Pick a country code."
@@ -386,38 +378,19 @@ export function UploadCvsDialog({
   }
 
   /**
-   * City is required because the job's city gate compares against it. A CV
-   * that doesn't say where someone lives can't be gated, so the import
-   * stops here rather than guessing.
+   * City blocks the row exactly when the target job's city gate will read
+   * it — a gated candidate with no city could never be gated, so the
+   * import stops here rather than guessing. Jobs without a location gate
+   * store null, same as the public form.
    */
   const cityError = (row: UploadRow): string | null =>
-    row.city.trim() ? null : "City is required. Pick one from the list."
-
-  /**
-   * The same rule as `cityError`, generalised: a REQUIRED custom field the
-   * job gates on has to be filled before the row can become a candidate.
-   *
-   * Blocking here rather than letting the server skip the row is deliberate.
-   * The server does refuse it (`missing_custom_answer`), but it can only say
-   * so after the whole batch has been sent, on the summary screen, with no way
-   * to fix it in place. Only fields the CANDIDATE answers appear at all; the
-   * resume-sourced ones are the CV parser's job.
-   */
-  const salaryError = (row: UploadRow): string | null => {
-    if (!asksSalary) return null
-    const raw = row.expectedSalaryMin.trim()
-    if (!raw) return "Expected salary is required for this job."
-    const n = Number(raw)
-    return Number.isFinite(n) && n >= 0 ? null : "Enter a number."
-  }
+    !cityRequired || row.city.trim()
+      ? null
+      : "City is required for this job. Pick one from the list."
 
   const rowIncomplete = (row: UploadRow): boolean =>
     Boolean(
-      emailError(row) ||
-        nameError(row) ||
-        phoneError(row) ||
-        cityError(row) ||
-        salaryError(row)
+      emailError(row) || nameError(row) || phoneError(row) || cityError(row)
     )
 
   /** Only uploaded rows can become candidates — a failed PUT has no key. */
@@ -539,14 +512,12 @@ export function UploadCvsDialog({
           email: row.email.trim(),
           // The halves rejoin here and nowhere else: the stored value is a
           // single E.164-shaped string, same as the apply portal writes.
-          phone: combinePhone(row.phoneIso, row.phoneNumber.trim()),
-          city: row.city.trim(),
-          cvKey: row.cvKey as string,
-          // Only when this job asks, so a stale answer left behind by
-          // re-pointing the import at another job is never sent.
-          ...(asksSalary && row.expectedSalaryMin.trim()
-            ? { expectedSalaryMin: Number(row.expectedSalaryMin.trim()) }
+          // Blank phone/city are OMITTED (store as null), not sent empty.
+          ...(row.phoneNumber.trim()
+            ? { phone: combinePhone(row.phoneIso, row.phoneNumber.trim()) }
             : {}),
+          ...(row.city.trim() ? { city: row.city.trim() } : {}),
+          cvKey: row.cvKey as string,
         }))
       ),
     onSuccess: (res) => {
@@ -607,8 +578,8 @@ export function UploadCvsDialog({
                 <>
                   Add up to {MAX_CV_UPLOAD_FILES} CVs. Drop a{" "}
                   <strong>ZIP</strong> or pick files. Each becomes a candidate at{" "}
-                  <em>Applied</em>, and the CV is parsed and pre-screened automatically. PDF,
-                  DOC and DOCX only.
+                  <em>Applied</em>, and the CV is parsed and pre-screened automatically.
+                  {" PDF only."}
                 </>
               )}
             </DialogDescription>
@@ -712,14 +683,14 @@ export function UploadCvsDialog({
                       <span className="mt-1.5 text-[12.5px] text-ink-muted">
                         {rows.length > 0
                           ? `${rows.length} of ${MAX_CV_UPLOAD_FILES} selected`
-                          : `or click to browse · ZIP, PDF or DOCX, up to ${MAX_CV_UPLOAD_FILES} files`}
+                          : `or click to browse · ZIP or PDF, up to ${MAX_CV_UPLOAD_FILES} files`}
                       </span>
                     </button>
                     <input
                       ref={fileInputRef}
                       type="file"
                       multiple
-                      accept={ACCEPT_ATTR}
+                      accept=".pdf,.zip"
                       className="hidden"
                       onChange={(e) => {
                         void addFiles(e.target.files)
@@ -773,8 +744,6 @@ export function UploadCvsDialog({
                           nameMsg={touched.has(row.id) ? nameError(row) : null}
                           phoneMsg={touched.has(row.id) ? phoneError(row) : null}
                           cityMsg={touched.has(row.id) ? cityError(row) : null}
-                          asksSalary={asksSalary}
-                          salaryMsg={touched.has(row.id) ? salaryError(row) : null}
                           onPatch={(patch) => patchRow(row.id, patch)}
                           onTouch={() => setTouched((prev) => new Set(prev).add(row.id))}
                           onRemove={() => removeRow(row.id)}
@@ -951,8 +920,6 @@ function ReviewRow({
   nameMsg,
   phoneMsg,
   cityMsg,
-  asksSalary,
-  salaryMsg,
   onPatch,
   onTouch,
   onRemove,
@@ -964,9 +931,6 @@ function ReviewRow({
   nameMsg: string | null
   phoneMsg: string | null
   cityMsg: string | null
-  /** Does the target job ask for an expected salary? */
-  asksSalary: boolean
-  salaryMsg: string | null
   onPatch: (patch: Partial<UploadRow>) => void
   onTouch: () => void
   onRemove: () => void
@@ -1103,33 +1067,6 @@ function ReviewRow({
           onChange={(city) => onPatch({ city })}
           onTouch={onTouch}
         />
-        {/*
-         * Only when the job asks. The candidate states a MINIMUM; the job's
-         * maximum stays server-side, so nothing here reveals the ceiling.
-         */}
-        {asksSalary ? (
-          <div className="space-y-1.5">
-            <Label htmlFor={`salary-${row.id}`} className="text-xs text-ink">
-              Expected salary<span className="text-[var(--danger)]"> *</span>
-            </Label>
-            <Input
-              id={`salary-${row.id}`}
-              type="number"
-              inputMode="numeric"
-              min={0}
-              value={row.expectedSalaryMin}
-              disabled={busy}
-              aria-invalid={Boolean(salaryMsg)}
-              placeholder="Minimum they would accept"
-              onWheel={blurOnWheel}
-              onChange={(e) => onPatch({ expectedSalaryMin: e.target.value })}
-              onBlur={onTouch}
-            />
-            {salaryMsg ? (
-              <p className="text-xs text-[var(--danger)]">{salaryMsg}</p>
-            ) : null}
-          </div>
-        ) : null}
       </div>
     </div>
   )

@@ -51,6 +51,7 @@ import { SortHeader } from "@/components/ui/sort-header";
 import { InterviewDetailDrawer } from "@/components/interviews/InterviewDetailDrawer";
 import { BulkEmailDialog } from "@/features/candidates/components/BulkEmailDialog";
 import { ChangeStatusSubMenu } from "@/features/candidates/components/ChangeStatusSubMenu";
+import { RemarkDialog } from "@/features/candidates/components/RemarkDialog";
 import {
   deleteCandidate,
   exportCandidatesCsv,
@@ -330,6 +331,18 @@ export function CandidatesPage() {
     mergeValues?: Record<string, string>;
   } | null>(null);
   const [exporting, setExporting] = useState(false);
+  /**
+   * The move picked from a row's status menu, held while the remark dialog is
+   * open. Snapshots the candidate's NAME and both catalog rows rather than an
+   * id, so the dialog keeps naming the right person and destination through
+   * its close animation and across a list refetch underneath it.
+   */
+  const [pendingMove, setPendingMove] = useState<{
+    id: string;
+    name: string;
+    from: CandidateStatus | null;
+    to: CandidateStatus;
+  } | null>(null);
 
   // The candidate whose interview the drawer shows, read straight from the URL
   // so it survives a refresh and supports deep-links (the Command Palette
@@ -554,6 +567,10 @@ export function CandidatesPage() {
       // Delete moves the job's TOTAL candidate count, so also refresh the
       // Jobs list's "Applicants" column (status/invite mutations don't).
       invalidateCandidateDataAndJobCounts(queryClient);
+      // The row lands in Recently deleted; a warm trash cache (30s
+      // staleTime) would otherwise omit it right after the dialog promised
+      // it moved there. No-op cost when the trash was never visited.
+      queryClient.invalidateQueries({ queryKey: ["trash"] });
       queryClient.removeQueries({ queryKey: ["candidate", res.candidateId] });
       if (drawerCandidateId === res.candidateId) closeDrawer();
       setSelectedIds((prev) => {
@@ -598,6 +615,8 @@ export function CandidatesPage() {
         );
       }
       invalidateCandidateDataAndJobCounts(queryClient);
+      // Same trash-cache refresh as the single delete above.
+      queryClient.invalidateQueries({ queryKey: ["trash"] });
       setSelectedIds(new Set());
       setBulkDeleteOpen(false);
     },
@@ -607,10 +626,20 @@ export function CandidatesPage() {
   });
 
   const statusMutation = useMutation({
-    mutationFn: (vars: { id: string; statusKey: string }) =>
-      updateCandidateStatus(vars.id, { statusKey: vars.statusKey }),
+    mutationFn: (vars: { id: string; statusKey: string; note?: string }) =>
+      // An empty remark is omitted rather than sent as "" — the server stores
+      // `note` verbatim onto an append-only row, so a blank string would
+      // become a remark card with nothing in it and no way to remove it.
+      updateCandidateStatus(vars.id, {
+        statusKey: vars.statusKey,
+        ...(vars.note ? { note: vars.note } : {}),
+      }),
     onSuccess: (_res, vars) => {
-      toast.success("Status updated.");
+      toast.success(vars.note ? "Status updated, remark saved." : "Status updated.");
+      setPendingMove(null);
+      // Covers the remarks thread and the activity feed too — a manual move is
+      // a row a person produced, so it lands in both whether or not a remark
+      // rode along. See `invalidateCandidateData`.
       invalidateCandidates();
       queryClient.invalidateQueries({ queryKey: ["candidate", vars.id] });
     },
@@ -1140,9 +1169,20 @@ export function CandidatesPage() {
                         ),
                       })
                     }
-                    onChangeStatus={(statusKey) =>
-                      statusMutation.mutate({ id: row._id, statusKey })
-                    }
+                    // Opens the remark dialog rather than moving on the spot:
+                    // the move is one more click away, and that click is where
+                    // the optional "why" is offered.
+                    onChangeStatus={(statusKey) => {
+                      const to = statuses.find((s) => s.key === statusKey);
+                      if (to) {
+                        setPendingMove({
+                          id: row._id,
+                          name: row.fullName || "this candidate",
+                          from: row.currentStatusId ?? null,
+                          to,
+                        });
+                      }
+                    }}
                     onDelete={() => setDeleteTarget(row)}
                   />
                 ))}
@@ -1220,11 +1260,14 @@ export function CandidatesPage() {
         title={`Delete ${deleteTarget?.fullName || "this candidate"}?`}
         description={
           <>
-            This permanently removes <strong>{deleteTarget?.fullName}</strong>{" "}
-            and everything about them: their CV, every interview attempt and
-            recording, their email history, and their activity timeline. Any
-            live invite link stops working immediately.{" "}
-            <strong>This can&apos;t be undone.</strong>
+            This moves <strong>{deleteTarget?.fullName}</strong> to Recently
+            deleted: their CV, every interview attempt and recording, email
+            history and timeline are kept there and can be restored. Any live
+            invite link stops working immediately.{" "}
+            <strong>
+              Once the Recently deleted period runs out, everything is erased
+              for good.
+            </strong>
           </>
         }
         confirmLabel="Delete candidate"
@@ -1244,11 +1287,15 @@ export function CandidatesPage() {
         title={`Delete ${selectedCount} candidate${selectedCount === 1 ? "" : "s"}?`}
         description={
           <>
-            This permanently removes the <strong>{selectedCount}</strong> selected
-            candidate{selectedCount === 1 ? "" : "s"} and everything about them:
-            CVs, every interview attempt and recording, email history, and
-            activity timelines. Live invite links stop working immediately.{" "}
-            <strong>This can&apos;t be undone.</strong>
+            This moves the <strong>{selectedCount}</strong> selected candidate
+            {selectedCount === 1 ? "" : "s"} to Recently deleted: CVs,
+            interview attempts and recordings, email history and timelines are
+            kept there and can be restored. Live invite links stop working
+            immediately.{" "}
+            <strong>
+              Once the Recently deleted period runs out, everything is erased
+              for good.
+            </strong>
           </>
         }
         confirmLabel="Delete selected"
@@ -1315,6 +1362,31 @@ export function CandidatesPage() {
           // A send launched from the multi-select bar clears the selection;
           // a single-row send leaves any selection untouched.
           if (emailState?.fromSelection) setSelectedIds(new Set());
+        }}
+      />
+
+      {/* Confirm the move and offer the optional "why" in one step. Held in
+          `pendingMove`, which is both the open flag and the target, so the
+          dialog can never render without a candidate and destination to name. */}
+      <RemarkDialog
+        open={Boolean(pendingMove)}
+        onOpenChange={(open) => {
+          if (!open) setPendingMove(null);
+        }}
+        mode={
+          pendingMove
+            ? { kind: "move", from: pendingMove.from, to: pendingMove.to }
+            : null
+        }
+        candidateName={pendingMove?.name}
+        pending={statusMutation.isPending}
+        onSubmit={(note) => {
+          if (!pendingMove) return;
+          statusMutation.mutate({
+            id: pendingMove.id,
+            statusKey: pendingMove.to.key,
+            ...(note ? { note } : {}),
+          });
         }}
       />
 

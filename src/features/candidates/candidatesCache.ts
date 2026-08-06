@@ -1,6 +1,17 @@
 import type { QueryClient } from "@tanstack/react-query"
 
 /**
+ * One candidate's REMARKS thread — the drawer's Remarks tab.
+ *
+ * Lives here, beside the fan-out that invalidates it, rather than in the
+ * component that renders it: three surfaces write rows into this thread (the
+ * table's status menu, the drawer, the board's drag) and a key spelled by hand
+ * at each is a key that goes stale at one of them.
+ */
+export const remarksQueryKey = (candidateId: string) =>
+  ["candidateRemarks", candidateId] as const
+
+/**
  * Invalidate every query whose data is derived from candidate state.
  *
  * A single candidate mutation — a status decision, a delete, a manual invite,
@@ -23,10 +34,21 @@ export function invalidateCandidateData(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ["candidateKanban"] })
   queryClient.invalidateQueries({ queryKey: ["awaiting-decision"] })
   queryClient.invalidateQueries({ queryKey: ["overviewStats"] })
+  // The job overview's "Top ranked candidates" leaderboard. It ranks by the
+  // interview's `scores.overall`, so a rescore re-orders it and a delete drops
+  // a row — and its rows OPEN THE DRAWER, so those mutations are launched from
+  // the card itself. Without this the deleted candidate stayed sitting at #1
+  // behind the closing drawer.
+  queryClient.invalidateQueries({ queryKey: ["jobTopCandidates"] })
   // The drawer's Activity timeline — every mutation above also appends an
   // audit row, so the feed must refetch with the rest or the admin's own
   // action won't appear until reopen.
   queryClient.invalidateQueries({ queryKey: ["candidateActivities"] })
+  // The drawer's Remarks thread, for the same reason and one more: a MANUAL
+  // STATUS MOVE is itself a row in that thread (it is what makes a run of
+  // remarks read as eras), so a move refreshes it even when no remark was
+  // attached to it.
+  queryClient.invalidateQueries({ queryKey: ["candidateRemarks"] })
 }
 
 /**
