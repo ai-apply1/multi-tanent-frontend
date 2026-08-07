@@ -31,6 +31,7 @@ import {
   MessageSquare,
   MicOff,
   MoreHorizontal,
+  NotebookPen,
   Play,
   RefreshCw,
   Send,
@@ -48,8 +49,8 @@ import { MaskedNumbers } from "@/components/ui/masked-amount";
 import { ScoringDetailsDialog } from "@/components/interviews/ScoringDetailsDialog";
 import { BulkEmailDialog } from "@/features/candidates/components/BulkEmailDialog";
 import { ChangeStatusSubMenu } from "@/features/candidates/components/ChangeStatusSubMenu";
-import { CandidateRemarks } from "@/features/candidates/components/CandidateRemarks";
-import { RemarkDialog } from "@/features/candidates/components/RemarkDialog";
+import { CandidateNotes } from "@/features/candidates/components/CandidateNotes";
+import { StatusMoveDialog } from "@/features/candidates/components/StatusMoveDialog";
 import {
   HlsPlayer,
   type VideoPlayerHandle,
@@ -1710,7 +1711,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
   const [invitingCand, setInvitingCand] = useState(false);
   const [statusPending, setStatusPending] = useState(false);
   /**
-   * The move the user picked from the status menu, held while the remark
+   * The move the user picked from the status menu, held while the move
    * dialog is open. Holding the CATALOG ROW rather than the key means the
    * dialog can name and colour the destination without re-looking it up.
    */
@@ -1812,14 +1813,14 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
     if (!candidateId || statusPending) return;
     setStatusPending(true);
     try {
-      // An empty remark is omitted rather than sent as "": the server stores
-      // `note` verbatim, and a blank string would render as a remark card
-      // with nothing in it on a timeline that has no delete.
+      // An empty reason is omitted rather than sent as "": the server stores
+      // `note` verbatim, and a blank string would render as an empty quote
+      // under the move on a timeline that has no delete.
       await updateCandidateStatus(candidateId, {
         statusKey,
         ...(note ? { note } : {}),
       });
-      toast.success(note ? "Candidate moved, remark saved." : "Candidate updated.");
+      toast.success(note ? "Candidate moved, reason saved." : "Candidate updated.");
       setPendingMove(null);
       // Refetch the drawer's own `["candidate", id]` detail first — it's what
       // the open panel renders and the fan-out doesn't cover it. Then invalidate
@@ -1827,9 +1828,11 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
       // can move the candidate out of Overview's "Awaiting your decision" panel
       // and shift its KPI counts, not just the list and board.
       await candidateQuery.refetch();
-      // Covers the remarks thread and the activity feed too — a manual move is
-      // a row a person produced, so it lands in both whether or not a remark
-      // rode along. See `invalidateCandidateData`.
+      // Covers the activity feed too — a manual move is a row a person
+      // produced, so it lands there whether or not a reason rode along. It
+      // deliberately does NOT touch the HR notes thread: a move writes nothing
+      // into it any more, and refetching a thread nobody changed is churn.
+      // See `invalidateCandidateData`.
       invalidateCandidateData(queryClient);
     } catch (err) {
       toast.error(errorMessage(err, "Could not update the candidate."));
@@ -2177,7 +2180,7 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                             currentKey={candidate?.currentStatusId?.key}
                             candidate={candidate}
                             pending={statusPending}
-                            // Opens the remark dialog rather than moving on the
+                            // Opens the move dialog rather than moving on the
                             // spot. The move still happens on one more click, and
                             // that click is where the optional "why" is offered —
                             // the reason a decision was made is worth one extra
@@ -2324,24 +2327,29 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                 )}
 
                 {/*
-                  Remarks belong HERE too, not only in the tabbed branch below.
+                  HR notes belong HERE too, not only in the tabbed branch below.
                   This branch is every candidate who has not interviewed —
                   applied, parked at needs_review, rejected at the CV screen —
-                  which is exactly who HR is most likely to be talking about
+                  which is exactly who HR is most likely to be writing about
                   ("called them", "the CV gate is wrong about their years").
                   There are no tabs in this state, so the thread renders as
                   another card in the stack, under its own heading.
+
+                  And this mount is the ONLY one those candidates ever get: the
+                  Notes tab below sits inside the interview-exists branch and
+                  never renders for them. Losing it here would leave the bulk of
+                  what a team writes with no surface to be read on at all.
                 */}
                 {candidateId ? (
                   <div className="grid gap-2.5">
                     <h3 className="flex items-center gap-2 px-0.5 text-[13px] font-semibold text-ink">
-                      <MessageSquare
+                      <NotebookPen
                         className="h-3.5 w-3.5 text-ink-subtle"
                         strokeWidth={1.8}
                       />
-                      Remarks
+                      HR notes
                     </h3>
-                    <CandidateRemarks
+                    <CandidateNotes
                       candidateId={candidateId}
                       canWrite={canAct}
                       timeZone={orgTimezone}
@@ -2407,12 +2415,13 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                       Activity
                     </TabsTrigger>
                     {/* Sibling to Activity, not a slice of it: Activity is what
-                        HAPPENED (machine output, one attempt), Remarks is what
-                        the TEAM SAID (whole candidate, and the only writable
-                        one of the two). */}
-                    <TabsTrigger value="remarks">
-                      <MessageSquare className="h-3.5 w-3.5" strokeWidth={1.8} />
-                      Remarks
+                        HAPPENED to this candidate (machine output, scoped to
+                        one attempt), Notes is what the TEAM WROTE (whole
+                        candidate, no pipeline rows, and the only writable one
+                        of the two). */}
+                    <TabsTrigger value="notes">
+                      <NotebookPen className="h-3.5 w-3.5" strokeWidth={1.8} />
+                      Notes
                     </TabsTrigger>
                   </TabsList>
 
@@ -2611,10 +2620,10 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
                     />
                   </TabsContent>
 
-                  {/* ── Remarks: the team's own thread on this candidate. ── */}
-                  <TabsContent value="remarks" className="mt-0">
+                  {/* ── Notes: the team's own thread on this candidate. ── */}
+                  <TabsContent value="notes" className="mt-0">
                     {candidateId ? (
-                      <CandidateRemarks
+                      <CandidateNotes
                         candidateId={candidateId}
                         canWrite={canAct}
                         timeZone={orgTimezone}
@@ -2690,23 +2699,18 @@ export function InterviewDetailDrawer({ sessionId, candidateId: candidateIdProp,
         />
       ) : null}
 
-      {/* Confirm the pipeline move and offer the optional "why" in one step.
+      {/* Confirm the pipeline move and offer the optional reason in one step.
           `pendingMove` is both the open flag and the destination, so the
-          dialog can never render without a target to name. */}
-      <RemarkDialog
+          dialog can never render without a target to name — and it goes null
+          in the same tick the dialog closes, which is exactly what
+          `StatusMoveDialog`'s retained-target state is there to absorb. */}
+      <StatusMoveDialog
         open={Boolean(pendingMove)}
         onOpenChange={(next) => {
           if (!next) setPendingMove(null);
         }}
-        mode={
-          pendingMove
-            ? {
-                kind: "move",
-                from: candidate?.currentStatusId ?? null,
-                to: pendingMove,
-              }
-            : null
-        }
+        from={candidate?.currentStatusId ?? null}
+        to={pendingMove}
         candidateName={data?.candidateName ?? candidate?.fullName}
         pending={statusPending}
         onSubmit={(note) => {

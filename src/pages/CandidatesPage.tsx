@@ -51,7 +51,7 @@ import { SortHeader } from "@/components/ui/sort-header";
 import { InterviewDetailDrawer } from "@/components/interviews/InterviewDetailDrawer";
 import { BulkEmailDialog } from "@/features/candidates/components/BulkEmailDialog";
 import { ChangeStatusSubMenu } from "@/features/candidates/components/ChangeStatusSubMenu";
-import { RemarkDialog } from "@/features/candidates/components/RemarkDialog";
+import { StatusMoveDialog } from "@/features/candidates/components/StatusMoveDialog";
 import {
   deleteCandidate,
   exportCandidatesCsv,
@@ -332,7 +332,7 @@ export function CandidatesPage() {
   } | null>(null);
   const [exporting, setExporting] = useState(false);
   /**
-   * The move picked from a row's status menu, held while the remark dialog is
+   * The move picked from a row's status menu, held while the move dialog is
    * open. Snapshots the candidate's NAME and both catalog rows rather than an
    * id, so the dialog keeps naming the right person and destination through
    * its close animation and across a list refetch underneath it.
@@ -621,19 +621,20 @@ export function CandidatesPage() {
 
   const statusMutation = useMutation({
     mutationFn: (vars: { id: string; statusKey: string; note?: string }) =>
-      // An empty remark is omitted rather than sent as "" — the server stores
+      // An empty reason is omitted rather than sent as "" — the server stores
       // `note` verbatim onto an append-only row, so a blank string would
-      // become a remark card with nothing in it and no way to remove it.
+      // become a move entry quoting nothing, with no way to remove it.
       updateCandidateStatus(vars.id, {
         statusKey: vars.statusKey,
         ...(vars.note ? { note: vars.note } : {}),
       }),
     onSuccess: (_res, vars) => {
-      toast.success(vars.note ? "Status updated, remark saved." : "Status updated.");
+      toast.success(vars.note ? "Status updated, reason saved." : "Status updated.");
       setPendingMove(null);
-      // Covers the remarks thread and the activity feed too — a manual move is
-      // a row a person produced, so it lands in both whether or not a remark
-      // rode along. See `invalidateCandidateData`.
+      // Covers the activity feed too — a manual move is a row a person
+      // produced, and it lands there whether or not a reason rode along. The
+      // HR notes thread is deliberately outside that fan-out: a status move
+      // writes nothing to it. See `invalidateCandidateData`.
       invalidateCandidates();
       queryClient.invalidateQueries({ queryKey: ["candidate", vars.id] });
     },
@@ -1163,7 +1164,7 @@ export function CandidatesPage() {
                         ),
                       })
                     }
-                    // Opens the remark dialog rather than moving on the spot:
+                    // Opens the move dialog rather than moving on the spot:
                     // the move is one more click away, and that click is where
                     // the optional "why" is offered.
                     onChangeStatus={(statusKey) => {
@@ -1355,16 +1356,13 @@ export function CandidatesPage() {
       {/* Confirm the move and offer the optional "why" in one step. Held in
           `pendingMove`, which is both the open flag and the target, so the
           dialog can never render without a candidate and destination to name. */}
-      <RemarkDialog
+      <StatusMoveDialog
         open={Boolean(pendingMove)}
         onOpenChange={(open) => {
           if (!open) setPendingMove(null);
         }}
-        mode={
-          pendingMove
-            ? { kind: "move", from: pendingMove.from, to: pendingMove.to }
-            : null
-        }
+        from={pendingMove?.from ?? null}
+        to={pendingMove?.to ?? null}
         candidateName={pendingMove?.name}
         pending={statusMutation.isPending}
         onSubmit={(note) => {

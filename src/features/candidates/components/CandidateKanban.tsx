@@ -16,15 +16,15 @@ import {
 } from "@dnd-kit/core"
 import { Loader2 } from "lucide-react"
 import {
-  addCandidateRemark,
+  createHrNote,
   getCandidateKanban,
   updateCandidateStatus,
 } from "@/features/candidates/candidatesApi"
 import {
+  hrNotesQueryKey,
   invalidateCandidateData,
-  remarksQueryKey,
 } from "@/features/candidates/candidatesCache"
-import { RemarkDialog } from "@/features/candidates/components/RemarkDialog"
+import { NoteComposerDialog } from "@/features/candidates/components/NoteComposerDialog"
 import { manualMoveBlocker } from "@/features/candidates/manualMove"
 import { useAuth } from "@/features/auth/AuthContext"
 import { canManageFunnel } from "@/features/auth/roles"
@@ -92,7 +92,7 @@ export function CandidateKanban({ jobId, onOpenCandidate }: Props) {
       candidateId: string
       statusKey: string
       fromKey: string
-      /** For the follow-up remark offer below — never sent to the server. */
+      /** For the follow-up note offer below — never sent to the server. */
       name: string
     }) => updateCandidateStatus(vars.candidateId, { statusKey: vars.statusKey }),
     onMutate: async (vars) => {
@@ -128,19 +128,26 @@ export function CandidateKanban({ jobId, onOpenCandidate }: Props) {
     },
     onSuccess: (_res, vars) => {
       /*
-       * The drag deliberately does NOT open the remark dialog the status MENU
-       * opens.
+       * The drag deliberately does NOT open a dialog the way the status MENU
+       * does.
        *
        * A drag is a spatial, often-repeated gesture — you reorganise a board,
        * you don't deliberate over each card — and a modal landing under the
        * cursor at the end of every drop would make the board unusable for the
        * one thing it is better than the table at. So the move commits
-       * instantly and the remark is OFFERED instead: same feature, same
-       * moment, no toll on the gesture.
+       * instantly and writing something is OFFERED instead: same moment, no
+       * toll on the gesture.
+       *
+       * What is offered is an HR NOTE, not the move reason the status menu
+       * collects. The move is already committed by the time this toast
+       * exists, so there is no transition row left to annotate — and the two
+       * are different records anyway: the reason belongs to the status
+       * change, a note belongs to the candidate.
        *
        * The offer lives on the toast because that is already where the
        * outcome is reported, so it costs no new surface and no new decision
-       * point. Missing it is harmless — the Remarks tab is always there.
+       * point. Missing it is harmless — the drawer's HR notes thread is
+       * always there.
        */
       const label =
         data?.columns.find((c) => c.key === vars.statusKey)?.label ?? "the new stage"
@@ -154,10 +161,10 @@ export function CandidateKanban({ jobId, onOpenCandidate }: Props) {
             className="shrink-0 rounded-md border border-border px-2 py-1 text-[12px] font-semibold text-ink hover:bg-surface-3"
             onClick={() => {
               toast.dismiss(t.id)
-              setRemarkTarget({ id: vars.candidateId, name: vars.name })
+              setNoteTarget({ id: vars.candidateId, name: vars.name })
             }}
           >
-            Add remark
+            Add note
           </button>
         </span>
       ))
@@ -175,27 +182,29 @@ export function CandidateKanban({ jobId, onOpenCandidate }: Props) {
     },
   })
 
-  /** Standalone-remark target, set from the post-move toast above. */
-  const [remarkTarget, setRemarkTarget] = useState<{
+  /** Standalone-note target, set from the post-move toast above. */
+  const [noteTarget, setNoteTarget] = useState<{
     id: string
     name: string
   } | null>(null)
 
-  const remarkMutation = useMutation({
-    mutationFn: (vars: { candidateId: string; note: string }) =>
-      addCandidateRemark(vars.candidateId, vars.note),
+  const noteMutation = useMutation({
+    mutationFn: (vars: { candidateId: string; body: string }) =>
+      createHrNote(vars.candidateId, vars.body),
     onSuccess: (_res, vars) => {
-      toast.success("Remark saved.")
-      setRemarkTarget(null)
-      // Targeted, unlike a status move: a remark changes nothing about the
+      toast.success("Note saved.")
+      setNoteTarget(null)
+      // Targeted, unlike a status move: a note changes nothing about the
       // board, the lists or the KPI panels, so the full candidate fan-out
       // would refetch a page of surfaces for a row none of them render.
-      queryClient.invalidateQueries({ queryKey: remarksQueryKey(vars.candidateId) })
-      queryClient.invalidateQueries({
-        queryKey: ["candidateActivities", vars.candidateId],
-      })
+      //
+      // The activity feed is not touched either. A note is its own collection
+      // now — writing one produces no timeline row — so invalidating
+      // `candidateActivities` here would refetch a feed that cannot have
+      // changed.
+      queryClient.invalidateQueries({ queryKey: hrNotesQueryKey(vars.candidateId) })
     },
-    onError: (err) => toast.error(errorMessage(err, "Could not save your remark.")),
+    onError: (err) => toast.error(errorMessage(err, "Could not save your note.")),
   })
 
   const handleDragStart = (event: DragStartEvent) => {
@@ -307,19 +316,18 @@ export function CandidateKanban({ jobId, onOpenCandidate }: Props) {
       </DragOverlay>
 
       {/* Opened from the post-move toast. The move is already committed, so
-          this writes a STANDALONE remark rather than a transition note — the
-          same row the drawer's composer writes. */}
-      <RemarkDialog
-        open={Boolean(remarkTarget)}
+          this writes a STANDALONE HR note rather than a reason on the
+          transition — the same row the drawer's composer writes. */}
+      <NoteComposerDialog
+        open={Boolean(noteTarget)}
         onOpenChange={(open) => {
-          if (!open) setRemarkTarget(null)
+          if (!open) setNoteTarget(null)
         }}
-        mode={remarkTarget ? { kind: "remark" } : null}
-        candidateName={remarkTarget?.name}
-        pending={remarkMutation.isPending}
-        onSubmit={(note) => {
-          if (remarkTarget)
-            remarkMutation.mutate({ candidateId: remarkTarget.id, note })
+        candidateName={noteTarget?.name}
+        pending={noteMutation.isPending}
+        onSubmit={(body) => {
+          if (noteTarget)
+            noteMutation.mutate({ candidateId: noteTarget.id, body })
         }}
       />
     </DndContext>

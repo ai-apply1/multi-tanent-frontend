@@ -385,7 +385,7 @@ export interface CandidateActivity {
    * The acting user's id when `actorType === "user"`, else null. Present so a
    * row can be marked as the VIEWER's own ("You"); `actorName` cannot do that
    * job, being a non-unique display string, so matching on it would label a
-   * namesake's remark as yours.
+   * namesake's row as yours.
    */
   actorId: string | null
   /** Frozen at write time, so renames/deletes don't blank history. */
@@ -403,6 +403,31 @@ export interface CandidateActivity {
 }
 
 export type PaginatedActivities = Paginated<CandidateActivity>
+
+// ── HR notes ──────────────────────────────────────────────────────────
+
+/**
+ * One standalone HR note. Nothing from the pipeline lives here — status
+ * moves and their reasons stay on the Activity timeline.
+ *
+ * `authorId` (not `authorName`) is what marks a row as the viewer's own and
+ * gates the edit/delete kebab — a display name is not unique.
+ */
+export interface HrNote {
+  id: string
+  body: string
+  authorId: string
+  authorName: string
+  createdAt: string
+  /**
+   * Non-null once the body has been rewritten, and set ONLY by that path —
+   * never derived from a generic `updatedAt`, which starts lying the moment
+   * any other field is written.
+   */
+  editedAt: string | null
+}
+
+export type PaginatedHrNotes = Paginated<HrNote>
 
 // ── the kanban board ──────────────────────────────────────────────────
 

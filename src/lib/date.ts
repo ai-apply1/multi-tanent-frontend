@@ -38,7 +38,7 @@ export function formatDate(value?: string | null, timeZone?: string): string {
 /**
  * Elapsed time — "just now", "12m ago", "3h ago", "yesterday", "Mar 4".
  *
- * For CONVERSATIONAL surfaces (the candidate remarks thread), where "how
+ * For CONVERSATIONAL surfaces (the candidate's HR notes thread), where "how
  * long ago" is what you actually want to know and a full timestamp on every
  * row is noise you have to subtract dates in your head to read. Always pair
  * it with the exact `formatDateTime` in a `title`, so precision is one hover

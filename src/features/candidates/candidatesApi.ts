@@ -6,14 +6,15 @@ import type {
   BulkEmailResult,
   BulkExtractRow,
   BulkPresignFile,
-  CandidateActivity,
   CandidateDetail,
   CandidateStatus,
+  HrNote,
   InviteResult,
   KanbanBoard,
   ListCandidatesParams,
   PaginatedActivities,
   PaginatedCandidates,
+  PaginatedHrNotes,
   PresignedCvUpload,
   SendCandidateEmailPayload,
 } from "@/features/candidates/types"
@@ -73,25 +74,27 @@ export async function getCandidateActivities(
 }
 
 /**
- * The candidate's REMARKS thread — the same feed, narrowed server-side to the
- * rows a person produced: HR remarks and their manual pipeline moves.
+ * The candidate's HR NOTES thread, newest first, paginated. A separate
+ * collection from the activity feed above, not a filtered view of it: it
+ * holds nothing but what a colleague typed, and its rows are editable and
+ * deletable, which an audit timeline can never be.
  *
- * Deliberately NOT attempt-scoped, unlike `getCandidateActivities`. Most
- * remarks are written while screening the CV, long before an attempt exists,
- * and an attempt-scoped thread would open on an empty state for exactly the
- * candidates HR is talking about most.
+ * Deliberately NOT attempt-scoped, unlike `getCandidateActivities`. A note is
+ * about the person, not about one interview attempt — most are written while
+ * screening the CV, long before an attempt exists, and an attempt-scoped
+ * thread would open on an empty state for exactly the candidates HR is
+ * talking about most.
  */
-export async function getCandidateRemarks(
+export async function listHrNotes(
   candidateId: string,
   params: { page?: number; limit?: number } = {}
 ) {
-  const { data } = await api.get<PaginatedActivities>(
-    `/admin/candidates/${candidateId}/activities`,
+  const { data } = await api.get<PaginatedHrNotes>(
+    `/admin/candidates/${candidateId}/notes`,
     {
       params: {
         page: params.page ?? 1,
         limit: params.limit ?? 25,
-        remarksOnly: true,
       },
     }
   )
@@ -99,17 +102,49 @@ export async function getCandidateRemarks(
 }
 
 /**
- * Record one remark with NO status change. Returns the created row in the
- * feed's own wire shape, so the caller can splice it straight into the thread
- * rather than refetching to see what it just wrote.
+ * Write one note. The body is the ONLY thing the client sends — the author's
+ * id and name are taken from the JWT server-side, so a caller cannot post
+ * under someone else's byline.
  *
- * There is no edit or delete counterpart, by design — the timeline is an
- * audit trail.
+ * Returns the created row in the list's own wire shape, so the caller can
+ * splice it straight into the thread rather than refetching to see what it
+ * just wrote.
  */
-export async function addCandidateRemark(candidateId: string, note: string) {
-  const { data } = await api.post<CandidateActivity>(
-    `/admin/candidates/${candidateId}/remarks`,
-    { note }
+export async function createHrNote(candidateId: string, body: string) {
+  const { data } = await api.post<HrNote>(
+    `/admin/candidates/${candidateId}/notes`,
+    { body }
+  )
+  return data
+}
+
+/**
+ * Rewrite one of the CALLER'S OWN notes; the server stamps `editedAt` and
+ * 403s on anyone else's — including for an org admin, who may delete a
+ * colleague's note but never reword it. Returns the updated row in the same
+ * wire shape, so the caller splices instead of refetching.
+ */
+export async function updateHrNote(
+  candidateId: string,
+  noteId: string,
+  body: string
+) {
+  const { data } = await api.patch<HrNote>(
+    `/admin/candidates/${candidateId}/notes/${noteId}`,
+    { body }
+  )
+  return data
+}
+
+/**
+ * Delete a note — the caller's own, or anyone's for an org admin. A hard
+ * delete with no tombstone row: a thread of "note deleted" markers defeats
+ * the point of being able to take something off a hiring record, and the
+ * audit trail proper lives next door on the activity timeline.
+ */
+export async function deleteHrNote(candidateId: string, noteId: string) {
+  const { data } = await api.delete<{ deleted: true; noteId: string }>(
+    `/admin/candidates/${candidateId}/notes/${noteId}`
   )
   return data
 }

@@ -1,15 +1,12 @@
 import type { QueryClient } from "@tanstack/react-query"
 
 /**
- * One candidate's REMARKS thread — the drawer's Remarks tab.
- *
- * Lives here, beside the fan-out that invalidates it, rather than in the
- * component that renders it: three surfaces write rows into this thread (the
- * table's status menu, the drawer, the board's drag) and a key spelled by hand
- * at each is a key that goes stale at one of them.
+ * One candidate's HR notes thread. Lives here, beside the fan-out, because
+ * two surfaces write it (the drawer's Notes tab and the board's post-drop
+ * toast) and a key spelled by hand at each goes stale at one of them.
  */
-export const remarksQueryKey = (candidateId: string) =>
-  ["candidateRemarks", candidateId] as const
+export const hrNotesQueryKey = (candidateId: string) =>
+  ["candidateHrNotes", candidateId] as const
 
 /**
  * Invalidate every query whose data is derived from candidate state.
@@ -44,11 +41,12 @@ export function invalidateCandidateData(queryClient: QueryClient) {
   // audit row, so the feed must refetch with the rest or the admin's own
   // action won't appear until reopen.
   queryClient.invalidateQueries({ queryKey: ["candidateActivities"] })
-  // The drawer's Remarks thread, for the same reason and one more: a MANUAL
-  // STATUS MOVE is itself a row in that thread (it is what makes a run of
-  // remarks read as eras), so a move refreshes it even when no remark was
-  // attached to it.
-  queryClient.invalidateQueries({ queryKey: ["candidateRemarks"] })
+  // `["candidateHrNotes"]` is deliberately NOT here. The old remarks arm
+  // existed only because a manual status move was itself a row in that thread;
+  // HR notes are a separate collection that no pipeline action writes, so none
+  // of the mutations that fan out from here can change one. Both surfaces that
+  // DO write a note (the drawer's Notes tab, the board's post-drop toast) do
+  // their own targeted update against `hrNotesQueryKey`.
 }
 
 /**
