@@ -28,7 +28,16 @@ const sheetVariants = cva(
   // The slide lives on the Content node (Radix owns its `data-state` and its
   // Presence waits on THIS node's exit animation before unmounting) so the
   // panel animates both in and out. Backdrop fades on the sibling overlay.
-  "fixed z-50 gap-4 bg-card border-border p-0 shadow-lg",
+  //
+  // `focus:outline-none` is load-bearing, not cosmetic. This node carries
+  // `tabindex="-1"` and Radix's FocusScope parks focus on it whenever the
+  // element that HAD focus stops being focusable (a control that disables
+  // itself mid-request is the common one). Focus lands here programmatically,
+  // but the browser still honours the LAST INPUT MODALITY — so after a
+  // keyboard submit `:focus-visible` matches and Chrome rings the entire
+  // panel. `react-menu`/`react-select` set `outline: none` inline for exactly
+  // this; `react-dialog` leaves it to the consumer.
+  "fixed z-50 gap-4 bg-card border-border p-0 shadow-lg focus:outline-none",
   {
     variants: {
       side: {

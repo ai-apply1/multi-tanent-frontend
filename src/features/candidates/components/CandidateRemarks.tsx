@@ -118,21 +118,71 @@ export function CandidateRemarks({
             value={draft}
             maxLength={REMARK_MAX}
             placeholder="Add a remark for your team…"
-            disabled={addRemark.isPending}
+            /*
+             * `readOnly` while the write is in flight, NOT `disabled`.
+             *
+             * Disabling the focused textarea makes the browser drop focus to
+             * `<body>`, and the button's icon swap in that same commit trips
+             * Radix's FocusScope MutationObserver, which then parks focus on
+             * the drawer's `tabindex="-1"` Content node. After a KEYBOARD
+             * submit that node still matches `:focus-visible`, so the browser
+             * rings the entire drawer — the pending state of a 200ms request
+             * lighting up an 860px panel.
+             *
+             * `focus:outline-none` on SheetContent kills the ring; this kills
+             * the focus jump behind it, which is the part that was actually
+             * costing something: the caret stays in the composer, so the line
+             * after the one you just sent starts where you're already typing
+             * instead of somewhere up the drawer.
+             */
+            readOnly={addRemark.isPending}
+            aria-busy={addRemark.isPending}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
               // Cmd/Ctrl+Enter, never bare Enter: remarks run to two or three
               // sentences and a newline has to stay a newline.
+              //
+              // `isPending` is checked HERE now — a read-only field still
+              // delivers keydown (a disabled one did not), and remarks can't
+              // be edited or deleted, so a second shortcut press landing
+              // mid-flight would post a duplicate nobody can take back.
               if (
                 (event.metaKey || event.ctrlKey) &&
                 event.key === "Enter" &&
-                trimmed
+                trimmed &&
+                !addRemark.isPending
               ) {
                 event.preventDefault();
                 addRemark.mutate(trimmed);
               }
             }}
-            className="resize-y border-0 bg-transparent p-0 text-[13.5px] shadow-none focus-visible:ring-0"
+            /*
+             * `-mx-2 px-2` is one gesture, not two competing ones: the padding
+             * is what the field needs, the negative margin is what the LAYOUT
+             * needs, and they cancel to zero.
+             *
+             * A borderless composer wants its text to line up with the caption
+             * and the button under it, and the cheap way to get that is `p-0`.
+             * But a text field's caret is drawn AT the text origin, so with no
+             * padding the origin sits exactly on the content-box edge and the
+             * browser clips the caret and the leading pixel column of the
+             * first glyph against it — which is why the "A" of the
+             * placeholder looked shaved. Padding the field and pulling the box
+             * back out by the same 8px keeps the text where the design wants
+             * it and gives the caret somewhere to live.
+             *
+             * The width has to grow by that same 1rem. `w-full` under a
+             * negative margin doesn't widen the box, it MOVES it — the field
+             * would hang 8px off the right edge and every line would wrap
+             * 16px early. `calc(100%+1rem)` puts the two 8px pads outside the
+             * old box on both sides, so the text column is exactly what it
+             * was.
+             *
+             * `py-0` stays: vertical padding inside a textarea scrolls with
+             * the content, so it buys nothing here, and it would drop the
+             * resize grip onto the divider below.
+             */
+            className="-mx-2 w-[calc(100%+1rem)] resize-y border-0 bg-transparent px-2 py-0 text-[13.5px] shadow-none focus-visible:ring-0"
           />
           <div className="mt-2.5 flex items-center justify-between gap-3 border-t border-border pt-2.5">
             <span className="text-[11.5px] text-ink-subtle">
