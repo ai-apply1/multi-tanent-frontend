@@ -62,7 +62,16 @@ export const DialogContent = React.forwardRef<
       // Content is full-screen + transparent, so fading/zooming it
       // reads as the centered box fading/zooming; the backdrop is the
       // separate Overlay above and fades on its own.
-      className="fixed inset-0 z-50 overflow-y-auto overscroll-contain data-[state=open]:animate-dialog-in data-[state=closed]:animate-dialog-out"
+      //
+      // `focus:outline-none` matters MORE here than on a normal
+      // dialog box: this node is `tabindex="-1"` AND full-viewport,
+      // and Radix's FocusScope parks focus on it whenever the
+      // focused control stops being focusable (e.g. a submit button
+      // that disables itself while the request is in flight). Focus
+      // arrives programmatically but the browser still honours the
+      // last input modality, so a KEYBOARD submit leaves
+      // `:focus-visible` matching and Chrome rings the whole screen.
+      className="fixed inset-0 z-50 overflow-y-auto overscroll-contain focus:outline-none data-[state=open]:animate-dialog-in data-[state=closed]:animate-dialog-out"
       // Radix's default outside-click handler fires on clicks
       // OUTSIDE Content. Now that Content fills the viewport there
       // are no clicks outside it, so this handler never fires —
