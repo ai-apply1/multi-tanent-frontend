@@ -1,4 +1,21 @@
-import { useState } from "react"
+import { useState, type CSSProperties } from "react"
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core"
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable"
+import { CSS } from "@dnd-kit/utilities"
 import {
   AlignLeft,
   ArrowDown,
@@ -8,6 +25,7 @@ import {
   ChevronDown,
   FileText,
   FileUp,
+  GripVertical,
   Hash,
   Link2,
   List,
@@ -430,6 +448,68 @@ export function ApplicationFormEditor({
     ? (ruleLabelsByFieldId?.get(pendingDeleteId) ?? [])
     : []
 
+  /**
+   * Retype a field in place, keeping its id.
+   *
+   * Safe by construction: the id is the field's permanent identity, and a
+   * candidate's answers are snapshotted onto their own row WITH the label
+   * and type as asked, so past submissions stay readable as the question
+   * they actually answered. The server rebuilds the field from the payload
+   * and never compares against the stored type.
+   *
+   * The per-type baggage is deliberately NOT wiped. The server does 422 a
+   * non-choice field carrying options, but `serializeFormFields` already
+   * drops both `options` and `fileTypes` for the types that must not send
+   * them, so the payload is valid without the draft losing anything. That
+   * makes a retype reversible: mis-click Dropdown to Short text and back,
+   * and eight hand-typed options are still there. Clearing them here would
+   * have destroyed that list to satisfy a constraint the serializer
+   * already satisfies.
+   *
+   * The one thing that IS written: becoming a file field seeds PDF when no
+   * formats are set, exactly as a fresh file field does, so it is never
+   * momentarily invalid.
+   */
+  const applyTypeChange = (id: string, nextType: ApplicationFieldType) => {
+    const field = fields.find((f) => f.id === id)
+    if (!field || field.type === nextType) return
+    patchField(id, {
+      type: nextType,
+      ...(nextType === "file" && field.fileTypes.length === 0
+        ? { fileTypes: ["pdf" as ApplicationFileType] }
+        : {}),
+    })
+  }
+
+  const [pendingTypeChange, setPendingTypeChange] = useState<{
+    fieldId: string
+    nextType: ApplicationFieldType
+  } | null>(null)
+
+  const pendingTypeRuleLabels = pendingTypeChange
+    ? (ruleLabelsByFieldId?.get(pendingTypeChange.fieldId) ?? [])
+    : []
+
+  /**
+   * Gate the retype on the requirements that screen this field.
+   *
+   * Every type carries its OWN operator set (`RULE_OPERATORS_BY_FIELD_TYPE`),
+   * and no two sets are the same — several types have none at all — so any
+   * retype of a screened field leaves its conditions holding an operator the
+   * new type does not offer. Same warning shape as deleting one, because it
+   * is the same breakage: the Eligibility step's validator then names what
+   * needs repointing.
+   */
+  const requestTypeChange = (id: string, nextType: ApplicationFieldType) => {
+    const field = fields.find((f) => f.id === id)
+    if (!field || field.type === nextType) return
+    if ((ruleLabelsByFieldId?.get(id) ?? []).length > 0) {
+      setPendingTypeChange({ fieldId: id, nextType })
+      return
+    }
+    applyTypeChange(id, nextType)
+  }
+
   const moveField = (index: number, delta: -1 | 1) => {
     const target = index + delta
     if (target < 0 || target >= fields.length) return
@@ -437,6 +517,49 @@ export function ApplicationFormEditor({
     const [moved] = next.splice(index, 1)
     next.splice(target, 0, moved)
     onChange(next)
+  }
+
+  // Shared by BOTH lists (fields and checks). Same sensor pair as
+  // JobQuestionsManager, and for the same two reasons: the 6px activation
+  // distance keeps a click on a card's own inputs and buttons from being
+  // swallowed as a micro-drag, and the keyboard sensor is what makes the
+  // handles operable without a mouse (space to lift, arrows to move,
+  // space to drop).
+  const dragSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  )
+
+  /**
+   * Field order IS the order candidates are asked, top to bottom, on the
+   * published apply form — the same order the preview above lists. The
+   * up/down buttons stay: they are the discoverable path and the one that
+   * works when a card is expanded to full height, where a drag would mean
+   * hauling a tall card across the viewport.
+   */
+  const handleFieldDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIndex = fields.findIndex((f) => f.id === active.id)
+    const newIndex = fields.findIndex((f) => f.id === over.id)
+    if (oldIndex < 0 || newIndex < 0) return
+    onChange(arrayMove(fields, oldIndex, newIndex))
+  }
+
+  /**
+   * Check order is not decoration either: the form-asked checks are
+   * synthesized into candidate-facing dropdowns IN ARRAY ORDER, appended
+   * after the fields, so this arranges what applicants are asked.
+   */
+  const handleCheckDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIndex = checks.findIndex((c) => c.id === active.id)
+    const newIndex = checks.findIndex((c) => c.id === over.id)
+    if (oldIndex < 0 || newIndex < 0) return
+    onChecksChange(arrayMove(checks, oldIndex, newIndex))
   }
 
   return (
@@ -452,26 +575,37 @@ export function ApplicationFormEditor({
           Eligibility checks
         </p>
         {checks.length > 0 ? (
-          <div className="grid gap-3">
-            {checks.map((check, index) => (
-              <CheckCard
-                key={check.id}
-                check={check}
-                index={index}
-                hasError={errorCardIds?.has(check.id) ?? false}
-                onPatch={(patch) =>
-                  onChecksChange(
-                    checks.map((c) =>
-                      c.id === check.id ? { ...c, ...patch } : c,
-                    ),
-                  )
-                }
-                onRemove={() =>
-                  onChecksChange(checks.filter((c) => c.id !== check.id))
-                }
-              />
-            ))}
-          </div>
+          <DndContext
+            sensors={dragSensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleCheckDragEnd}
+          >
+            <SortableContext
+              items={checks.map((c) => c.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              <div className="grid gap-3">
+                {checks.map((check, index) => (
+                  <SortableCheckCard
+                    key={check.id}
+                    check={check}
+                    index={index}
+                    hasError={errorCardIds?.has(check.id) ?? false}
+                    onPatch={(patch) =>
+                      onChecksChange(
+                        checks.map((c) =>
+                          c.id === check.id ? { ...c, ...patch } : c,
+                        ),
+                      )
+                    }
+                    onRemove={() =>
+                      onChecksChange(checks.filter((c) => c.id !== check.id))
+                    }
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
         ) : (
           <p className="text-[12px] text-ink-muted">
             No checks yet. A check can read the CV silently, or add one
@@ -481,256 +615,339 @@ export function ApplicationFormEditor({
       </div>
 
       {/* HR's own fields. */}
-      {fields.map((field, index) => {
-        const open = openId === field.id
-        const name = field.label.trim() || "Untitled field"
-        return (
-          <div
-            key={field.id}
-            id={`card-${field.id}`}
-            className={cn(
-              "rounded-xl border border-[var(--field-border)] bg-surface",
-              errorCardIds?.has(field.id) && "border-[var(--danger)]",
-            )}
-          >
-            <div className="flex items-center gap-2 px-3.5 py-2.5">
-              <button
-                type="button"
-                onClick={() => setOpenId(open ? null : field.id)}
-                className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 border-0 bg-transparent p-0 text-left"
-                aria-expanded={open}
-              >
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-accent text-primary">
-                  {TYPE_ICONS[field.type]}
-                </span>
-                <span className="min-w-0">
-                  <span className="block truncate text-[13.5px] font-semibold text-ink">
-                    {name}
-                    {field.required ? (
-                      <span className="ml-1 text-[var(--danger)]">*</span>
-                    ) : null}
-                  </span>
-                  <span className="block text-[11.5px] text-ink-subtle">
-                    {FIELD_TYPE_LABELS[field.type]}
-                    {isChoiceType(field.type) && field.options.length > 0
-                      ? `, ${field.options.length} options`
-                      : ""}
-                  </span>
-                </span>
-              </button>
-              <div className="flex shrink-0 items-center gap-0.5">
-                <IconButton
-                  label={`Move "${name}" up`}
-                  disabled={index === 0}
-                  onClick={() => moveField(index, -1)}
-                >
-                  <ArrowUp className="h-3.5 w-3.5" strokeWidth={2} />
-                </IconButton>
-                <IconButton
-                  label={`Move "${name}" down`}
-                  disabled={index === fields.length - 1}
-                  onClick={() => moveField(index, 1)}
-                >
-                  <ArrowDown className="h-3.5 w-3.5" strokeWidth={2} />
-                </IconButton>
-                <IconButton
-                  label={`Remove "${name}"`}
-                  onClick={() => requestRemoveField(field.id)}
-                  danger
-                >
-                  <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
-                </IconButton>
-                <IconButton
-                  label={open ? "Collapse" : "Edit field"}
-                  onClick={() => setOpenId(open ? null : field.id)}
-                >
-                  <ChevronDown
+      {/* Neither DndContext nor SortableContext renders any DOM, so the
+          cards stay direct children of the `grid gap-3` above and the
+          layout is untouched. A SEPARATE context from the checks list on
+          purpose: they are different entities, and one shared context
+          would let a field be dropped into the checks group. */}
+      <DndContext
+        sensors={dragSensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleFieldDragEnd}
+      >
+        <SortableContext
+          items={fields.map((f) => f.id)}
+          strategy={verticalListSortingStrategy}
+        >
+          {fields.map((field, index) => {
+            const open = openId === field.id
+            const name = field.label.trim() || "Untitled field"
+            return (
+              <SortableRow key={field.id} id={field.id}>
+                {({
+                  sortableRef,
+                  style,
+                  isDragging,
+                  handleRef,
+                  handleListeners,
+                  handleAttributes,
+                }) => (
+                  <div
+                    ref={sortableRef}
+                    style={style}
+                    id={`card-${field.id}`}
                     className={cn(
-                      "h-4 w-4 transition-transform",
-                      open && "rotate-180",
+                      "rounded-xl border border-[var(--field-border)] bg-surface",
+                      errorCardIds?.has(field.id) && "border-[var(--danger)]",
+                      isDragging && "relative z-10 opacity-80 shadow-lg",
                     )}
-                    strokeWidth={2}
-                  />
-                </IconButton>
-              </div>
-            </div>
-
-            {open ? (
-              <div className="grid gap-3.5 border-t border-[var(--field-border)] px-3.5 py-3.5">
-                <div className="grid gap-3.5 sm:grid-cols-2">
-                  <div>
-                    <label
-                      htmlFor={`ff-label-${field.id}`}
-                      className="mb-1.5 block text-[12.5px] font-semibold text-ink"
-                    >
-                      Question
-                    </label>
-                    <input
-                      id={`ff-label-${field.id}`}
-                      value={field.label}
-                      maxLength={200}
-                      onChange={(e) =>
-                        patchField(field.id, { label: e.target.value })
-                      }
-                      placeholder="e.g. Do you have your own laptop?"
-                      className={FIELD_CLASS}
-                    />
-                  </div>
-                  <div>
-                    <label
-                      htmlFor={`ff-help-${field.id}`}
-                      className="mb-1.5 block text-[12.5px] font-semibold text-ink"
-                    >
-                      Helper text{" "}
-                      <span className="font-normal text-ink-subtle">
-                        (optional)
-                      </span>
-                    </label>
-                    <input
-                      id={`ff-help-${field.id}`}
-                      value={field.help}
-                      maxLength={500}
-                      onChange={(e) =>
-                        patchField(field.id, { help: e.target.value })
-                      }
-                      placeholder="Shown under the input"
-                      className={FIELD_CLASS}
-                    />
-                  </div>
-                </div>
-
-                {isChoiceType(field.type) ? (
-                  <div>
-                    <label
-                      htmlFor={`ff-options-${field.id}`}
-                      className="mb-1.5 block text-[12.5px] font-semibold text-ink"
-                    >
-                      Options
-                    </label>
-                    <ChipInput
-                      id={`ff-options-${field.id}`}
-                      values={field.options}
-                      onChange={(options) => patchField(field.id, { options })}
-                      maxLength={120}
-                      placeholder="Type an option and press Enter"
-                    />
-                    <p className={HELP_CLASS}>
-                      {field.type === "select"
-                        ? "Candidates pick exactly one."
-                        : "Candidates can pick several."}
-                    </p>
-                  </div>
-                ) : null}
-
-                {field.type === "file" ? (
-                  <div>
-                    <p className="mb-1.5 text-[12.5px] font-semibold text-ink">
-                      Accepted formats
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {(
-                        Object.keys(FILE_TYPE_LABELS) as ApplicationFileType[]
-                      ).map((group) => {
-                        const picked = field.fileTypes.includes(group)
-                        return (
-                          <label
-                            key={group}
+                  >
+                    <div className="flex items-center gap-2 px-3.5 py-2.5">
+                      <button
+                        type="button"
+                        ref={handleRef}
+                        {...handleAttributes}
+                        {...handleListeners}
+                        aria-label={`Reorder ${name}`}
+                        title="Drag to reorder"
+                        className="-ml-1.5 flex h-7 w-5 shrink-0 cursor-grab touch-none items-center justify-center rounded border-0 bg-transparent p-0 text-ink-subtle transition-colors hover:text-ink-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
+                      >
+                        <GripVertical className="h-4 w-4" strokeWidth={1.9} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setOpenId(open ? null : field.id)}
+                        className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 border-0 bg-transparent p-0 text-left"
+                        aria-expanded={open}
+                      >
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-accent text-primary">
+                          {TYPE_ICONS[field.type]}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block truncate text-[13.5px] font-semibold text-ink">
+                            {name}
+                            {field.required ? (
+                              <span className="ml-1 text-[var(--danger)]">*</span>
+                            ) : null}
+                          </span>
+                          <span className="block text-[11.5px] text-ink-subtle">
+                            {FIELD_TYPE_LABELS[field.type]}
+                            {isChoiceType(field.type) && field.options.length > 0
+                              ? `, ${field.options.length} options`
+                              : ""}
+                          </span>
+                        </span>
+                      </button>
+                      <div className="flex shrink-0 items-center gap-0.5">
+                        <IconButton
+                          label={`Move "${name}" up`}
+                          disabled={index === 0}
+                          onClick={() => moveField(index, -1)}
+                        >
+                          <ArrowUp className="h-3.5 w-3.5" strokeWidth={2} />
+                        </IconButton>
+                        <IconButton
+                          label={`Move "${name}" down`}
+                          disabled={index === fields.length - 1}
+                          onClick={() => moveField(index, 1)}
+                        >
+                          <ArrowDown className="h-3.5 w-3.5" strokeWidth={2} />
+                        </IconButton>
+                        <IconButton
+                          label={`Remove "${name}"`}
+                          onClick={() => requestRemoveField(field.id)}
+                          danger
+                        >
+                          <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
+                        </IconButton>
+                        <IconButton
+                          label={open ? "Collapse" : "Edit field"}
+                          onClick={() => setOpenId(open ? null : field.id)}
+                        >
+                          <ChevronDown
                             className={cn(
-                              "flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-semibold transition-colors",
-                              picked
-                                ? "border-primary bg-accent text-primary"
-                                : "border-line-2 bg-surface text-ink-2 hover:bg-hover",
+                              "h-4 w-4 transition-transform",
+                              open && "rotate-180",
                             )}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={picked}
-                              onChange={() =>
-                                patchField(field.id, {
-                                  fileTypes: picked
-                                    ? field.fileTypes.filter(
-                                        (g) => g !== group,
-                                      )
-                                    : [...field.fileTypes, group],
-                                })
-                              }
-                              className="sr-only"
-                            />
-                            {FILE_TYPE_LABELS[group]}
-                          </label>
-                        )
-                      })}
+                            strokeWidth={2}
+                          />
+                        </IconButton>
+                      </div>
                     </div>
-                    <p className={HELP_CLASS}>
-                      Candidates can attach one file in any format you tick
-                      (max 10MB). It is stored for your team to download; the
-                      AI does not read it.
-                    </p>
-                  </div>
-                ) : null}
 
-                {/* No min/max inputs for number fields, on purpose: a bound
-                    that disqualifies is a screening rule and belongs on the
-                    Eligibility step's Custom requirements, next to what
-                    happens when it is missed. */}
-
-                <label
-                  htmlFor={`ff-required-${field.id}`}
-                  className="flex w-fit cursor-pointer items-center gap-2 text-[13px] font-semibold text-ink"
-                >
-                  <input
-                    id={`ff-required-${field.id}`}
-                    type="checkbox"
-                    checked={field.required}
-                    onChange={(e) =>
-                      patchField(field.id, { required: e.target.checked })
-                    }
-                    className="h-3.5 w-3.5 rounded border-[var(--field-border)] accent-[var(--primary)]"
-                  />
-                  {field.type === "checkbox"
-                    ? "Must be checked to apply"
-                    : "Required to apply"}
-                </label>
-
-                {/* Screening status for the types a requirement can gate on:
-                    without this line the answer's consequence (or lack of
-                    one) is invisible until the Eligibility step. */}
-                {(RULE_OPERATORS_BY_FIELD_TYPE[field.type] ?? []).length >
-                0 ? (
-                  <p className="border-t border-[var(--field-border)] pt-2.5 text-[12px] text-ink-muted">
-                    {(ruleLabelsByFieldId?.get(field.id) ?? []).length > 0 ? (
-                      <>
-                        Screened by{" "}
-                        {(ruleLabelsByFieldId?.get(field.id) ?? [])
-                          .map((label) => `"${label.trim() || "Untitled"}"`)
-                          .join(", ")}{" "}
-                        on the Eligibility step.
-                      </>
-                    ) : (
-                      <>
-                        Answers are collected only. To screen on this answer,
-                        add a requirement on the{" "}
-                        {onGoToEligibility ? (
-                          <button
-                            type="button"
-                            onClick={onGoToEligibility}
-                            className="font-semibold text-primary hover:underline"
+                    {open ? (
+                      <div className="grid gap-3.5 border-t border-[var(--field-border)] px-3.5 py-3.5">
+                        {/* Retyping in place, rather than delete-and-re-add.
+                            The id is what stored answers are keyed to, so
+                            rebuilding a field to fix a wrong type used to
+                            cost every answer already collected under it. */}
+                        <div className="w-full sm:max-w-[240px]">
+                          <p className="mb-1.5 text-[12.5px] font-semibold text-ink">
+                            Field type
+                          </p>
+                          <Select
+                            value={field.type}
+                            onValueChange={(next) =>
+                              requestTypeChange(
+                                field.id,
+                                next as ApplicationFieldType,
+                              )
+                            }
                           >
-                            Eligibility step
-                          </button>
-                        ) : (
-                          "Eligibility step"
-                        )}
-                        .
-                      </>
-                    )}
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        )
-      })}
+                            <SelectTrigger
+                              aria-label={`Field type for "${name}"`}
+                              className="h-10 w-full rounded-lg border-[var(--field-border)] bg-surface px-3 text-[13.5px]"
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {FIELD_TYPES.map((type) => (
+                                <SelectItem key={type} value={type}>
+                                  {FIELD_TYPE_LABELS[type]}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <p className={HELP_CLASS}>
+                            The question keeps its id, so answers already
+                            collected stay readable as the question they were
+                            asked.
+                          </p>
+                        </div>
+                        <div className="grid gap-3.5 sm:grid-cols-2">
+                          <div>
+                            <label
+                              htmlFor={`ff-label-${field.id}`}
+                              className="mb-1.5 block text-[12.5px] font-semibold text-ink"
+                            >
+                              Question
+                            </label>
+                            <input
+                              id={`ff-label-${field.id}`}
+                              value={field.label}
+                              maxLength={200}
+                              onChange={(e) =>
+                                patchField(field.id, { label: e.target.value })
+                              }
+                              placeholder="e.g. Do you have your own laptop?"
+                              className={FIELD_CLASS}
+                            />
+                          </div>
+                          <div>
+                            <label
+                              htmlFor={`ff-help-${field.id}`}
+                              className="mb-1.5 block text-[12.5px] font-semibold text-ink"
+                            >
+                              Helper text{" "}
+                              <span className="font-normal text-ink-subtle">
+                                (optional)
+                              </span>
+                            </label>
+                            <input
+                              id={`ff-help-${field.id}`}
+                              value={field.help}
+                              maxLength={500}
+                              onChange={(e) =>
+                                patchField(field.id, { help: e.target.value })
+                              }
+                              placeholder="Shown under the input"
+                              className={FIELD_CLASS}
+                            />
+                          </div>
+                        </div>
+
+                        {isChoiceType(field.type) ? (
+                          <div>
+                            <label
+                              htmlFor={`ff-options-${field.id}`}
+                              className="mb-1.5 block text-[12.5px] font-semibold text-ink"
+                            >
+                              Options
+                            </label>
+                            <ChipInput
+                              id={`ff-options-${field.id}`}
+                              values={field.options}
+                              onChange={(options) => patchField(field.id, { options })}
+                              maxLength={120}
+                              placeholder="Type an option and press Enter"
+                            />
+                            <p className={HELP_CLASS}>
+                              {field.type === "select"
+                                ? "Candidates pick exactly one."
+                                : "Candidates can pick several."}
+                            </p>
+                          </div>
+                        ) : null}
+
+                        {field.type === "file" ? (
+                          <div>
+                            <p className="mb-1.5 text-[12.5px] font-semibold text-ink">
+                              Accepted formats
+                            </p>
+                            {/* Toggle BUTTONS, not labels wrapping `sr-only`
+                                checkboxes. That older shape put the real focus
+                                target in a 1px `clip`ped box, and clicking a pill
+                                focused it — so the browser scrolled its nearest
+                                scrollable ancestor to reveal it. In this shell the
+                                window never scrolls (`<main>` does), so every click
+                                yanked the whole page. It also hid the focus ring,
+                                leaving keyboard users with no visible position.
+                                Same element and classes as the option pills in
+                                CustomRulesEditor; these two are the same control
+                                and must not drift again. */}
+                            <div className="flex flex-wrap gap-1.5">
+                              {(
+                                Object.keys(FILE_TYPE_LABELS) as ApplicationFileType[]
+                              ).map((group) => {
+                                const picked = field.fileTypes.includes(group)
+                                return (
+                                  <button
+                                    key={group}
+                                    type="button"
+                                    aria-pressed={picked}
+                                    onClick={() =>
+                                      patchField(field.id, {
+                                        fileTypes: picked
+                                          ? field.fileTypes.filter((g) => g !== group)
+                                          : [...field.fileTypes, group],
+                                      })
+                                    }
+                                    className={cn(
+                                      "rounded-full border px-2.5 py-1 text-[12px] font-semibold transition-colors",
+                                      picked
+                                        ? "border-primary bg-accent text-primary"
+                                        : "border-line-2 bg-surface text-ink-2 hover:bg-hover",
+                                    )}
+                                  >
+                                    {FILE_TYPE_LABELS[group]}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                            <p className={HELP_CLASS}>
+                              Candidates can attach one file in any format you tick
+                              (max 10MB). It is stored for your team to download; the
+                              AI does not read it.
+                            </p>
+                          </div>
+                        ) : null}
+
+                        {/* No min/max inputs for number fields, on purpose: a bound
+                            that disqualifies is a screening rule and belongs on the
+                            Eligibility step's Custom requirements, next to what
+                            happens when it is missed. */}
+
+                        <label
+                          htmlFor={`ff-required-${field.id}`}
+                          className="flex w-fit cursor-pointer items-center gap-2 text-[13px] font-semibold text-ink"
+                        >
+                          <input
+                            id={`ff-required-${field.id}`}
+                            type="checkbox"
+                            checked={field.required}
+                            onChange={(e) =>
+                              patchField(field.id, { required: e.target.checked })
+                            }
+                            className="h-3.5 w-3.5 rounded border-[var(--field-border)] accent-[var(--primary)]"
+                          />
+                          {field.type === "checkbox"
+                            ? "Must be checked to apply"
+                            : "Required to apply"}
+                        </label>
+
+                        {/* Screening status for the types a requirement can gate on:
+                            without this line the answer's consequence (or lack of
+                            one) is invisible until the Eligibility step. */}
+                        {(RULE_OPERATORS_BY_FIELD_TYPE[field.type] ?? []).length >
+                        0 ? (
+                          <p className="border-t border-[var(--field-border)] pt-2.5 text-[12px] text-ink-muted">
+                            {(ruleLabelsByFieldId?.get(field.id) ?? []).length > 0 ? (
+                              <>
+                                Screened by{" "}
+                                {(ruleLabelsByFieldId?.get(field.id) ?? [])
+                                  .map((label) => `"${label.trim() || "Untitled"}"`)
+                                  .join(", ")}{" "}
+                                on the Eligibility step.
+                              </>
+                            ) : (
+                              <>
+                                Answers are collected only. To screen on this answer,
+                                add a requirement on the{" "}
+                                {onGoToEligibility ? (
+                                  <button
+                                    type="button"
+                                    onClick={onGoToEligibility}
+                                    className="font-semibold text-primary hover:underline"
+                                  >
+                                    Eligibility step
+                                  </button>
+                                ) : (
+                                  "Eligibility step"
+                                )}
+                                .
+                              </>
+                            )}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+              </SortableRow>
+            )
+          })}
+        </SortableContext>
+      </DndContext>
 
       {/* Add field / check. The box always renders: checks have their own
           cap and their own storage (eligibility.customChecks), so hitting
@@ -855,6 +1072,30 @@ export function ApplicationFormEditor({
           setPendingDeleteId(null)
         }}
       />
+
+      {/* Not `destructive`: nothing is lost, the requirements just need
+          repointing. Answers already collected keep their own snapshot of
+          the question as it was asked. */}
+      <ConfirmDialog
+        open={pendingTypeChange !== null}
+        onOpenChange={(open) => !open && setPendingTypeChange(null)}
+        title="Change the type of a screened question?"
+        description={
+          pendingTypeRuleLabels.length === 1
+            ? `This question is used by the requirement "${pendingTypeRuleLabels[0].trim() || "Untitled"}" on the Eligibility step. Each type allows different checks, so that requirement will need its check picked again.`
+            : `This question is used by ${pendingTypeRuleLabels.length} requirements on the Eligibility step. Each type allows different checks, so those requirements will need their checks picked again.`
+        }
+        confirmLabel="Change type"
+        onConfirm={() => {
+          if (pendingTypeChange) {
+            applyTypeChange(
+              pendingTypeChange.fieldId,
+              pendingTypeChange.nextType,
+            )
+          }
+          setPendingTypeChange(null)
+        }}
+      />
     </div>
   )
 }
@@ -888,19 +1129,121 @@ const CRITERION_STARTERS = [
   "Has led a team of 3 or more people.",
 ] as const
 
-function CheckCard({
-  check,
-  index,
-  hasError,
-  onPatch,
-  onRemove,
+/**
+ * The sortable bits one row needs, handed to a render prop.
+ *
+ * A render prop rather than an extracted `<FieldCard>` because `useSortable`
+ * is a hook and cannot be called inside the `fields.map()` in the parent —
+ * while the field card's body is ~250 lines of per-type editors that would
+ * be a large, risky lift to pull out just to gain a drag handle. This buys
+ * the hook a component of its own and renders NO extra DOM, so the card
+ * keeps its place as a direct child of the parent grid.
+ */
+interface SortableRowBag {
+  sortableRef: (node: HTMLElement | null) => void
+  style: CSSProperties
+  isDragging: boolean
+  handleRef: (node: HTMLElement | null) => void
+  handleListeners: ReturnType<typeof useSortable>["listeners"]
+  handleAttributes: ReturnType<typeof useSortable>["attributes"]
+}
+
+function SortableRow({
+  id,
+  children,
 }: {
+  id: string
+  children: (bag: SortableRowBag) => React.ReactNode
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id })
+  return (
+    <>
+      {children({
+        sortableRef: setNodeRef,
+        style: { transform: CSS.Transform.toString(transform), transition },
+        isDragging,
+        handleRef: setActivatorNodeRef,
+        handleListeners: listeners,
+        handleAttributes: attributes,
+      })}
+    </>
+  )
+}
+
+interface CheckCardProps {
   check: CheckDraft
   index: number
   /** Flagged by the step's validators: outlined in the danger colour. */
   hasError: boolean
   onPatch: (patch: Partial<CheckDraft>) => void
   onRemove: () => void
+}
+
+/**
+ * `CheckCard` wired for reordering. Split from the card itself so the card
+ * stays a plain presentational component and the sortable machinery has
+ * exactly one home.
+ *
+ * `setActivatorNodeRef` is the load-bearing part: it scopes the drag to the
+ * grip alone. Spreading the listeners on the whole card would make every
+ * press inside it a potential drag, which on a card built out of text
+ * inputs, radio tiles and a chip editor means selecting text or tapping a
+ * mode tile starts dragging instead.
+ */
+function SortableCheckCard(props: CheckCardProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: props.check.id })
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  }
+  return (
+    <CheckCard
+      {...props}
+      sortableRef={setNodeRef}
+      style={style}
+      isDragging={isDragging}
+      dragHandleRef={setActivatorNodeRef}
+      dragHandleListeners={listeners}
+      dragHandleAttributes={attributes}
+    />
+  )
+}
+
+function CheckCard({
+  check,
+  index,
+  hasError,
+  onPatch,
+  onRemove,
+  sortableRef,
+  style,
+  isDragging,
+  dragHandleRef,
+  dragHandleListeners,
+  dragHandleAttributes,
+}: CheckCardProps & {
+  sortableRef?: (node: HTMLElement | null) => void
+  style?: CSSProperties
+  isDragging?: boolean
+  dragHandleRef?: (node: HTMLElement | null) => void
+  dragHandleListeners?: ReturnType<typeof useSortable>["listeners"]
+  dragHandleAttributes?: ReturnType<typeof useSortable>["attributes"]
 }) {
   const mode = checkModeOf(check)
   const modeOptions: Array<{
@@ -931,13 +1274,32 @@ function CheckCard({
 
   return (
     <div
+      ref={sortableRef}
+      style={style}
       id={`card-${check.id}`}
       className={cn(
         "rounded-xl border border-[var(--field-border)] bg-surface-muted p-3.5",
         hasError && "border-[var(--danger)]",
+        // Lifted card: above its neighbours and slightly faded, so the gap
+        // it left behind stays readable as the drop target.
+        isDragging && "relative z-10 opacity-80 shadow-lg",
       )}
     >
       <div className="flex items-start gap-3">
+        {/* `touch-none` is required, not cosmetic: without it a touch drag
+            is claimed by the page's own scrolling and the card never
+            lifts. */}
+        <button
+          type="button"
+          ref={dragHandleRef}
+          {...dragHandleAttributes}
+          {...dragHandleListeners}
+          aria-label={`Reorder check ${check.label.trim() || index + 1}`}
+          title="Drag to reorder"
+          className="mt-1.5 -ml-1 flex h-7 w-5 shrink-0 cursor-grab touch-none items-center justify-center rounded border-0 bg-transparent p-0 text-ink-subtle transition-colors hover:text-ink-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
+        >
+          <GripVertical className="h-4 w-4" strokeWidth={1.9} />
+        </button>
         <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-primary">
           <ShieldCheck className="h-4 w-4" strokeWidth={1.9} />
         </span>
@@ -960,7 +1322,10 @@ function CheckCard({
         </IconButton>
       </div>
 
-      <div className="mt-3 grid gap-2 pl-11">
+      {/* Indent tracks the header: grip (20px, pulled 4px left) + gap +
+          icon (32px) + gap, so the body still starts under the name input
+          rather than under the new handle. */}
+      <div className="mt-3 grid gap-2 pl-18">
         <div className="grid gap-1.5 sm:grid-cols-3">
           {modeOptions.map((option) => {
             const active = check.modeChosen && mode === option.value
